@@ -138,6 +138,21 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   }
 }
 
+export function requirePermission(permission: string) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireAuth(request, reply);
+    if (reply.sent) return;
+
+    const auth = authFrom(request);
+    if (!auth.permissions.includes(permission) && !auth.permissions.includes("system.master")) {
+      return reply.code(403).send({
+        error: "FORBIDDEN",
+        message: "Permissão insuficiente para esta operação."
+      });
+    }
+  };
+}
+
 export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date) {
   reply.setCookie(COOKIE_NAME, token, {
     httpOnly: true,

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
@@ -17,6 +18,19 @@ type SessionUser = {
   mfaRequired: boolean;
   mfaEnabled: boolean;
 };
+
+const modules = [
+  { name: "Central Operacional", href: "/ocorrencias", description: "Ocorrências abertas e prioridades." },
+  { name: "Nova ocorrência", href: "/ocorrencias/nova", description: "Registro rápido de atendimento." },
+  { name: "Despacho", href: "/ocorrencias", description: "Equipes, viaturas e empenho." },
+  { name: "Monitoramento", href: "#", description: "Integração ambiental prevista." },
+  { name: "Vistorias", href: "#", description: "Próxima fase de campo." },
+  { name: "SCO / Desastres", href: "#", description: "Gestão ampliada de incidentes." },
+  { name: "Assistência Humanitária", href: "#", description: "Famílias, abrigos e entregas." },
+  { name: "Voluntariado", href: "#", description: "Competências e mobilização." },
+  { name: "Documentos", href: "#", description: "Relatórios, laudos e declarações." },
+  { name: "Administração", href: "#", description: "Usuários, perfis e auditoria." }
+];
 
 export default function PainelPage() {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -45,16 +59,14 @@ export default function PainelPage() {
     window.location.href = "/login";
   }
 
-  if (!user) {
-    return <main className="shell"><p>{status}</p></main>;
-  }
+  if (!user) return <main className="shell"><p>{status}</p></main>;
 
   return (
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC</span>
-          <h1>Painel</h1>
+          <span className="eyebrow">SIGDEC · v0.3</span>
+          <h1>Painel Operacional</h1>
           <p>
             {user.displayName} · matrícula {user.matricula}
             {user.jobTitle ? ` · ${user.jobTitle}` : ""}
@@ -74,22 +86,11 @@ export default function PainelPage() {
       )}
 
       <section className="grid">
-        {[
-          "Central Operacional",
-          "Ocorrências",
-          "Despacho",
-          "Monitoramento",
-          "Vistorias",
-          "SCO / Desastres",
-          "Assistência Humanitária",
-          "Voluntariado",
-          "Documentos",
-          "Administração"
-        ].map((module) => (
-          <article className="card" key={module}>
-            <h2>{module}</h2>
-            <p>Estrutura prevista para as próximas fases.</p>
-          </article>
+        {modules.map((module) => (
+          <Link className="card cardLink" href={module.href} key={module.name}>
+            <h2>{module.name}</h2>
+            <p>{module.description}</p>
+          </Link>
         ))}
       </section>
     </main>
