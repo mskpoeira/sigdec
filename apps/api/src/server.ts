@@ -1,0 +1,33 @@
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+
+const app = Fastify({ logger: true });
+
+await app.register(helmet);
+await app.register(cors, {
+  origin: process.env.SIGDEC_PUBLIC_URL ?? "http://localhost:3000",
+  credentials: true
+});
+
+app.get("/health", async () => ({
+  status: "ok",
+  service: "sigdec-api",
+  version: "0.1.0",
+  timestamp: new Date().toISOString()
+}));
+
+app.get("/api/v1", async () => ({
+  name: "SIGDEC API",
+  version: "v1",
+  modules: [
+    "auth", "ocorrencias", "despacho", "riscos", "monitoramento",
+    "vistorias", "documentos", "desastres", "assistencia-humanitaria",
+    "voluntariado", "logistica", "comunicacoes", "auditoria"
+  ]
+}));
+
+await app.listen({
+  port: Number(process.env.PORT ?? 4000),
+  host: process.env.HOST ?? "0.0.0.0"
+});
