@@ -10,22 +10,19 @@ Plataforma municipal modular para prevenção, preparação, monitoramento, aler
 - **Auditoria total:** atos relevantes possuem autor, data/hora e trilha imutável.
 - **LGPD e menor privilégio:** dados pessoais e sensíveis aparecem somente para perfis autorizados.
 - **Multi-município:** sem regras hardcoded para uma única prefeitura.
-- **Integração, não substituição:** sistemas especializados existentes, como monitoramento ambiental, podem ser conectados ao SIGDEC.
+- **Integração, não substituição:** sistemas especializados existentes podem ser conectados ao SIGDEC.
 
-## Módulos previstos
-
-Central 199 e ocorrências, despacho, equipes e viaturas, campo e vistorias, laudos e documentos, riscos, monitoramento, alertas, SCO, assistência humanitária, abrigos, Fundo Social, doações, voluntariado, logística, recursos, comunicações, S2iD/COBRADE, treinamento, simulados, recuperação, biblioteca institucional, BI, auditoria e integrações.
-
-## Stack inicial
+## Stack
 
 - Node.js 22+
 - TypeScript
-- Next.js (web)
-- Fastify (API)
+- Next.js
+- Fastify
 - PostgreSQL + PostGIS
 - Redis
-- MinIO/S3 compatível para anexos
+- MinIO/S3
 - Docker Compose
+- Caddy em homologação
 - pnpm workspaces
 
 ## Desenvolvimento local
@@ -33,11 +30,15 @@ Central 199 e ocorrências, despacho, equipes e viaturas, campo e vistorias, lau
 1. Copie `.env.example` para `.env`.
 2. Suba a infraestrutura: `docker compose up -d`.
 3. Instale dependências: `pnpm install`.
-4. Execute a migração `db/migrations/0001_foundation.sql`.
-5. Configure o bootstrap do primeiro Master somente no ambiente do servidor.
+4. Execute `pnpm --filter @sigdec/api db:migrate`.
+5. Configure o bootstrap do primeiro Master somente no ambiente seguro.
 6. Rode `pnpm dev`.
 
-> Nunca coloque senhas, chaves, CPF, dados de cidadãos ou credenciais de produção no Git.
+## Homologação em servidor
+
+Consulte `infra/homolog/README.md`. O ambiente inclui PostgreSQL/PostGIS, Redis, MinIO, API, Web e Caddy/HTTPS.
+
+> Nunca coloque senhas, chaves, CPF, dados reais de cidadãos ou credenciais de produção no Git.
 
 ## Licença
 

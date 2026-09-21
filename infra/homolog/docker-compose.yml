@@ -1,0 +1,106 @@
+name: sigdec-homolog
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [sigdec]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [sigdec]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks: [sigdec]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_HOURS: ${SESSION_HOURS}
+      SIGDEC_PUBLIC_URL: https://${SIGDEC_DOMAIN}
+      SIGDEC_ORG_NAME: ${SIGDEC_ORG_NAME}
+      SIGDEC_ORG_SLUG: ${SIGDEC_ORG_SLUG}
+      SIGDEC_MASTER_MATRICULA: ${SIGDEC_MASTER_MATRICULA}
+      SIGDEC_MASTER_NAME: ${SIGDEC_MASTER_NAME}
+      SIGDEC_MASTER_EMAIL: ${SIGDEC_MASTER_EMAIL}
+      SIGDEC_MASTER_PHONE: ${SIGDEC_MASTER_PHONE}
+      SIGDEC_MASTER_JOB_TITLE: ${SIGDEC_MASTER_JOB_TITLE}
+      SIGDEC_MASTER_DEPARTMENT: ${SIGDEC_MASTER_DEPARTMENT}
+      SIGDEC_MASTER_PASSWORD: ${SIGDEC_MASTER_PASSWORD}
+      MIGRATIONS_DIR: /app/db/migrations
+    networks: [sigdec]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_SIGDEC_API_URL: https://${SIGDEC_DOMAIN}
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [sigdec]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [web, api]
+    environment:
+      SIGDEC_DOMAIN: ${SIGDEC_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [sigdec]
+
+networks:
+  sigdec:
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
