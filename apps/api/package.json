@@ -1,18 +1,24 @@
 {
   "name": "@sigdec/api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "bootstrap:master": "tsx src/scripts/bootstrap-master.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.0.0",
     "@fastify/cors": "^10.0.0",
     "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "argon2": "^0.41.1",
+    "dotenv": "^16.4.7",
     "fastify": "^5.0.0",
+    "jose": "^6.0.0",
     "pg": "^8.13.0",
     "zod": "^3.23.0"
   },

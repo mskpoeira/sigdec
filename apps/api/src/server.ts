@@ -1,10 +1,22 @@
+import "dotenv/config";
 import Fastify from "fastify";
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import { authRoutes } from "./routes/auth.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  trustProxy: true
+});
 
 await app.register(helmet);
+await app.register(cookie);
+await app.register(rateLimit, {
+  global: false
+});
+
 await app.register(cors, {
   origin: process.env.SIGDEC_PUBLIC_URL ?? "http://localhost:3000",
   credentials: true
@@ -13,13 +25,16 @@ await app.register(cors, {
 app.get("/health", async () => ({
   status: "ok",
   service: "sigdec-api",
-  version: "0.1.0",
+  version: "0.2.0",
   timestamp: new Date().toISOString()
 }));
+
+await app.register(authRoutes);
 
 app.get("/api/v1", async () => ({
   name: "SIGDEC API",
   version: "v1",
+  release: "0.2.0",
   modules: [
     "auth", "ocorrencias", "despacho", "riscos", "monitoramento",
     "vistorias", "documentos", "desastres", "assistencia-humanitaria",
