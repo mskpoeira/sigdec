@@ -7,6 +7,7 @@ import rateLimit from "@fastify/rate-limit";
 import { authRoutes } from "./routes/auth.js";
 import { incidentRoutes } from "./routes/incidents.js";
 import { responseRoutes } from "./routes/response.js";
+import { fieldRoutes } from "./routes/field.js";
 
 const app = Fastify({
   logger: true,
@@ -25,18 +26,19 @@ await app.register(cors, {
 app.get("/health", async () => ({
   status: "ok",
   service: "sigdec-api",
-  version: "0.7.0",
+  version: "0.8.0",
   timestamp: new Date().toISOString()
 }));
 
 await app.register(authRoutes);
 await app.register(incidentRoutes);
 await app.register(responseRoutes);
+await app.register(fieldRoutes);
 
 app.get("/api/v1", async () => ({
   name: "SIGDEC API",
   version: "v1",
-  release: "0.7.0",
+  release: "0.8.0",
   modules: [
     "auth", "ocorrencias", "despacho", "riscos", "monitoramento",
     "vistorias", "documentos", "desastres", "assistencia-humanitaria",
