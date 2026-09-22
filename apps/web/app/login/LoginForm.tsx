@@ -30,7 +30,7 @@ export default function LoginForm() {
         return;
       }
 
-      window.location.href = "/painel";
+      window.location.href = body.user?.mustChangePassword ? "/alterar-senha" : "/painel";
     } catch {
       setMessage("Falha de comunicação com o servidor.");
     } finally {
