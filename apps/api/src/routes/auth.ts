@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import argon2 from "argon2";
 import { z } from "zod";
@@ -11,25 +12,37 @@ import {
   setSessionCookie
 } from "../auth.js";
 import { db } from "../db.js";
+import { isMailConfigured, sendPasswordResetEmail } from "../mail.js";
 
 const loginSchema = z.object({
   matricula: z.string().min(1).max(32),
   password: z.string().min(8).max(256)
 });
 
+const strongPasswordSchema = z.string()
+  .min(12)
+  .max(256)
+  .regex(/[a-z]/, "A nova senha deve conter letra minúscula.")
+  .regex(/[A-Z]/, "A nova senha deve conter letra maiúscula.")
+  .regex(/[0-9]/, "A nova senha deve conter número.")
+  .regex(/[^A-Za-z0-9]/, "A nova senha deve conter caractere especial.");
+
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(8).max(256),
-  newPassword: z.string()
-    .min(12)
-    .max(256)
-    .regex(/[a-z]/, "A nova senha deve conter letra minúscula.")
-    .regex(/[A-Z]/, "A nova senha deve conter letra maiúscula.")
-    .regex(/[0-9]/, "A nova senha deve conter número.")
-    .regex(/[^A-Za-z0-9]/, "A nova senha deve conter caractere especial.")
+  newPassword: strongPasswordSchema
 }).refine(
   (data) => data.currentPassword !== data.newPassword,
   { message: "A nova senha deve ser diferente da senha temporária.", path: ["newPassword"] }
 );
+
+const forgotPasswordSchema = z.object({
+  identifier: z.string().trim().min(1).max(254)
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(40).max(256),
+  newPassword: strongPasswordSchema
+});
 
 async function audit(params: {
   userId?: string | null;
@@ -55,6 +68,222 @@ async function audit(params: {
 }
 
 export async function authRoutes(app: FastifyInstance) {
+  app.post("/auth/forgot-password", {
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } }
+  }, async (request, reply) => {
+    const parsed = forgotPasswordSchema.safeParse(request.body);
+    const genericResponse = {
+      ok: true,
+      message: "Se houver uma conta ativa com e-mail cadastrado, enviaremos as instruções de redefinição."
+    };
+
+    if (!parsed.success) {
+      return reply.code(200).send(genericResponse);
+    }
+
+    const identifier = parsed.data.identifier;
+    const byEmail = identifier.includes("@");
+    const result = byEmail
+      ? await db.query<{
+          id: string;
+          email: string | null;
+          display_name: string;
+        }>(
+          `SELECT id, email, display_name
+             FROM users
+            WHERE lower(email) = lower($1)
+              AND active = true
+            ORDER BY created_at ASC
+            LIMIT 1`,
+          [identifier]
+        )
+      : await db.query<{
+          id: string;
+          email: string | null;
+          display_name: string;
+        }>(
+          `SELECT id, email, display_name
+             FROM users
+            WHERE matricula = $1
+              AND active = true
+            ORDER BY created_at ASC
+            LIMIT 1`,
+          [normalizeMatricula(identifier)]
+        );
+
+    const user = result.rows[0];
+    if (!user?.email || !isMailConfigured()) {
+      await audit({
+        userId: user?.id ?? null,
+        action: "auth.password_reset_requested",
+        entityId: user?.id ?? null,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"],
+        metadata: {
+          delivery: user?.email ? "mail_not_configured" : "account_or_email_unavailable"
+        }
+      });
+      return reply.code(200).send(genericResponse);
+    }
+
+    const token = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const expiresMinutes = Math.max(
+      10,
+      Math.min(120, Number(process.env.PASSWORD_RESET_MINUTES ?? 30))
+    );
+    const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000);
+
+    await db.query(
+      `UPDATE password_reset_tokens
+          SET used_at = now()
+        WHERE user_id = $1
+          AND used_at IS NULL`,
+      [user.id]
+    );
+
+    const inserted = await db.query<{ id: string }>(
+      `INSERT INTO password_reset_tokens
+         (user_id, token_hash, expires_at, requested_ip, user_agent)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [
+        user.id,
+        tokenHash,
+        expiresAt,
+        request.ip,
+        request.headers["user-agent"] ?? null
+      ]
+    );
+
+    const resetUrl = `${process.env.SIGDEC_PUBLIC_URL ?? "http://localhost:3000"}/redefinir-senha?token=${encodeURIComponent(token)}`;
+
+    try {
+      await sendPasswordResetEmail({
+        to: user.email,
+        displayName: user.display_name,
+        resetUrl,
+        expiresMinutes
+      });
+      await audit({
+        userId: user.id,
+        action: "auth.password_reset_requested",
+        entityId: user.id,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"],
+        metadata: { delivery: "email_sent", expiresMinutes }
+      });
+    } catch (error) {
+      await db.query(
+        "DELETE FROM password_reset_tokens WHERE id = $1",
+        [inserted.rows[0]?.id]
+      );
+      request.log.error(
+        { err: error, userId: user.id },
+        "Falha ao enviar e-mail de redefinição de senha"
+      );
+      await audit({
+        userId: user.id,
+        action: "auth.password_reset_delivery_failed",
+        entityId: user.id,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"]
+      });
+    }
+
+    return reply.code(200).send(genericResponse);
+  });
+
+  app.post("/auth/reset-password", {
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } }
+  }, async (request, reply) => {
+    const parsed = resetPasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_INPUT",
+        message: "Token ou nova senha inválidos.",
+        details: parsed.error.flatten()
+      });
+    }
+
+    const tokenHash = createHash("sha256")
+      .update(parsed.data.token)
+      .digest("hex");
+    const client = await db.connect();
+
+    try {
+      await client.query("BEGIN");
+      const tokenResult = await client.query<{
+        id: string;
+        user_id: string;
+      }>(
+        `SELECT prt.id, prt.user_id
+           FROM password_reset_tokens prt
+           JOIN users u ON u.id = prt.user_id
+          WHERE prt.token_hash = $1
+            AND prt.used_at IS NULL
+            AND prt.expires_at > now()
+            AND u.active = true
+          FOR UPDATE OF prt`,
+        [tokenHash]
+      );
+
+      const resetToken = tokenResult.rows[0];
+      if (!resetToken) {
+        await client.query("ROLLBACK");
+        return reply.code(400).send({
+          error: "INVALID_OR_EXPIRED_TOKEN",
+          message: "Este link é inválido, já foi utilizado ou expirou."
+        });
+      }
+
+      const passwordHash = await argon2.hash(parsed.data.newPassword, {
+        type: argon2.argon2id
+      });
+
+      await client.query(
+        `UPDATE users
+            SET password_hash = $2,
+                must_change_password = false,
+                failed_login_attempts = 0,
+                locked_until = NULL,
+                updated_at = now()
+          WHERE id = $1`,
+        [resetToken.user_id, passwordHash]
+      );
+      await client.query(
+        `UPDATE password_reset_tokens
+            SET used_at = now()
+          WHERE user_id = $1
+            AND used_at IS NULL`,
+        [resetToken.user_id]
+      );
+      await client.query(
+        `UPDATE auth_sessions
+            SET revoked_at = now()
+          WHERE user_id = $1
+            AND revoked_at IS NULL`,
+        [resetToken.user_id]
+      );
+      await client.query("COMMIT");
+
+      await audit({
+        userId: resetToken.user_id,
+        action: "auth.password_reset_completed",
+        entityId: resetToken.user_id,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"]
+      });
+
+      return { ok: true, message: "Senha redefinida com sucesso." };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
   app.post("/auth/login", {
     config: { rateLimit: { max: 10, timeWindow: "1 minute" } }
   }, async (request, reply) => {

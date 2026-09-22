@@ -75,6 +75,8 @@ export default function LoginForm() {
         {loading ? "Autenticando..." : "Entrar"}
       </button>
 
+      <a className="loginLink" href="/esqueci-senha">Esqueci minha senha</a>
+
       <small>
         O acesso e as ações realizadas no sistema são registrados para fins de segurança e auditoria.
       </small>

@@ -25,7 +25,7 @@ await app.register(cors, {
 app.get("/health", async () => ({
   status: "ok",
   service: "sigdec-api",
-  version: "0.5.0",
+  version: "0.6.0",
   timestamp: new Date().toISOString()
 }));
 
@@ -36,7 +36,7 @@ await app.register(responseRoutes);
 app.get("/api/v1", async () => ({
   name: "SIGDEC API",
   version: "v1",
-  release: "0.5.0",
+  release: "0.6.0",
   modules: [
     "auth", "ocorrencias", "despacho", "riscos", "monitoramento",
     "vistorias", "documentos", "desastres", "assistencia-humanitaria",
