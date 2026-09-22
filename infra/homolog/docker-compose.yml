@@ -28,7 +28,7 @@ services:
     networks: [sigdec]
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: sigdec-minio-homolog
     restart: unless-stopped
     command: server /data --console-address ":9001"
