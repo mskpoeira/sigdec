@@ -144,6 +144,25 @@ export function requirePermission(permission: string) {
     if (reply.sent) return;
 
     const auth = authFrom(request);
+    const passwordState = await db.query<{ must_change_password: boolean }>(
+      "SELECT must_change_password FROM users WHERE id = $1 AND active = true",
+      [auth.userId]
+    );
+
+    if (!passwordState.rows[0]) {
+      return reply.code(401).send({
+        error: "UNAUTHENTICATED",
+        message: "Usuário inativo ou inexistente."
+      });
+    }
+
+    if (passwordState.rows[0].must_change_password) {
+      return reply.code(403).send({
+        error: "PASSWORD_CHANGE_REQUIRED",
+        message: "Altere a senha temporária antes de continuar."
+      });
+    }
+
     if (!auth.permissions.includes(permission) && !auth.permissions.includes("system.master")) {
       return reply.code(403).send({
         error: "FORBIDDEN",
