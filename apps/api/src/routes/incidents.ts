@@ -556,11 +556,11 @@ export async function incidentRoutes(app: FastifyInstance) {
 
       await client.query(
         `UPDATE dispatches
-            SET status = $2,
-                acknowledged_at = CASE WHEN $2 = 'ACKNOWLEDGED' THEN COALESCE(acknowledged_at, now()) ELSE acknowledged_at END,
-                enroute_at = CASE WHEN $2 = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
-                arrived_at = CASE WHEN $2 = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
-                released_at = CASE WHEN $2 IN ('RELEASED','CANCELLED') THEN COALESCE(released_at, now()) ELSE released_at END
+            SET status = $2::varchar,
+                acknowledged_at = CASE WHEN $2::varchar = 'ACKNOWLEDGED' THEN COALESCE(acknowledged_at, now()) ELSE acknowledged_at END,
+                enroute_at = CASE WHEN $2::varchar = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
+                arrived_at = CASE WHEN $2::varchar = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+                released_at = CASE WHEN $2::varchar IN ('RELEASED','CANCELLED') THEN COALESCE(released_at, now()) ELSE released_at END
           WHERE id = $1`,
         [id, nextStatus]
       );
@@ -593,9 +593,9 @@ export async function incidentRoutes(app: FastifyInstance) {
       ) {
         await client.query(
           `UPDATE incidents
-              SET status = $2,
-                  enroute_at = CASE WHEN $2 = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
-                  arrived_at = CASE WHEN $2 = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+              SET status = $2::varchar,
+                  enroute_at = CASE WHEN $2::varchar = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
+                  arrived_at = CASE WHEN $2::varchar = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
                   updated_at = now()
             WHERE id = $1`,
           [dispatch.incident_id, incidentStatus]
