@@ -27,7 +27,8 @@ try {
   const org = await client.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, type)
      VALUES ($1, $2, 'municipality')
-     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+     ON CONFLICT (slug) WHERE slug IS NOT NULL
+     DO UPDATE SET name = EXCLUDED.name
      RETURNING id`,
     [orgName, orgSlug]
   );
