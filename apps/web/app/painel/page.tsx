@@ -23,11 +23,11 @@ const modules = [
   { name: "Central Operacional", href: "/ocorrencias", description: "Ocorrências abertas e prioridades." },
   { name: "Nova ocorrência", href: "/ocorrencias/nova", description: "Registro rápido de atendimento." },
   { name: "Despacho", href: "/ocorrencias", description: "Equipes, viaturas e empenho." },
-  { name: "Monitoramento", href: "#", description: "Integração ambiental prevista." },
+  { name: "Monitoramento", href: "/monitoramento", description: "Pluviômetros, estações e pontos monitorados." },
   { name: "Vistorias", href: "#", description: "Próxima fase de campo." },
   { name: "SCO / Desastres", href: "#", description: "Gestão ampliada de incidentes." },
-  { name: "Assistência Humanitária", href: "#", description: "Famílias, abrigos e entregas." },
-  { name: "Voluntariado", href: "#", description: "Competências e mobilização." },
+  { name: "Assistência Humanitária", href: "/assistencia", description: "Famílias, abrigos e entregas." },
+  { name: "Voluntariado", href: "/voluntarios", description: "Competências, disponibilidade e equipamentos." },
   { name: "Documentos", href: "#", description: "Relatórios, laudos e declarações." },
   { name: "Administração", href: "#", description: "Usuários, perfis e auditoria." }
 ];
@@ -65,7 +65,7 @@ export default function PainelPage() {
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC · v0.3</span>
+          <span className="eyebrow">SIGDEC · v0.5</span>
           <h1>Painel Operacional</h1>
           <p>
             {user.displayName} · matrícula {user.matricula}
