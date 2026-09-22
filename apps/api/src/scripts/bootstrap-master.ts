@@ -64,6 +64,26 @@ try {
       ]
     );
     userId = created.rows[0]?.id;
+  } else {
+    await client.query(
+      `UPDATE users
+          SET display_name = $2,
+              email = COALESCE(NULLIF($3, ''), email),
+              phone = COALESCE(NULLIF($4, ''), phone),
+              job_title = COALESCE(NULLIF($5, ''), job_title),
+              department = COALESCE(NULLIF($6, ''), department),
+              active = true,
+              updated_at = now()
+        WHERE id = $1`,
+      [
+        userId,
+        name,
+        process.env.SIGDEC_MASTER_EMAIL?.trim() ?? "",
+        process.env.SIGDEC_MASTER_PHONE?.trim() ?? "",
+        process.env.SIGDEC_MASTER_JOB_TITLE?.trim() ?? "",
+        process.env.SIGDEC_MASTER_DEPARTMENT?.trim() ?? ""
+      ]
+    );
   }
 
   if (!userId) throw new Error("Falha ao provisionar usuário Master.");
