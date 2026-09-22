@@ -27,23 +27,27 @@ for key in "${required[@]}"; do
   fi
 done
 
-echo "[1/6] Build dos containers"
+if ! docker network inspect sgr_default >/dev/null 2>&1; then
+  echo "ERRO: rede Docker externa sgr_default não encontrada."
+  echo "O proxy de borda compartilhado deve estar ativo antes do SIGDEC."
+  exit 1
+fi
+
+echo "[1/5] Build dos containers"
 docker compose --env-file .env build
 
-echo "[2/6] Banco e dependências"
+echo "[2/5] Banco e dependências"
 docker compose --env-file .env up -d postgres redis minio
 
-echo "[3/6] Migrações PostgreSQL/PostGIS"
+echo "[3/5] Migrações PostgreSQL/PostGIS"
 docker compose --env-file .env run --rm api node apps/api/dist/scripts/migrate.js
 
-echo "[4/6] Provisionamento idempotente do Master"
+echo "[4/5] Provisionamento idempotente do Master"
 docker compose --env-file .env run --rm api node apps/api/dist/scripts/bootstrap-master.js
 
-echo "[5/6] Aplicação e proxy HTTPS"
-docker compose --env-file .env up -d api web caddy
+echo "[5/5] Aplicação"
+docker compose --env-file .env up -d api web
 
-echo "[6/6] Estado final"
 docker compose --env-file .env ps
-
 echo
-echo "SIGDEC homologação: https://$SIGDEC_DOMAIN"
+echo "SIGDEC homologação preparado para: https://$SIGDEC_DOMAIN"

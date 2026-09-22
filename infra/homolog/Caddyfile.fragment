@@ -1,0 +1,27 @@
+sigdec.mskpoeira.com.br {
+    import security
+
+    header {
+        Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    }
+
+    handle /api/* {
+        reverse_proxy sigdec-api-homolog:4000
+    }
+
+    handle /auth/* {
+        reverse_proxy sigdec-api-homolog:4000
+    }
+
+    handle /health {
+        reverse_proxy sigdec-api-homolog:4000
+    }
+
+    handle {
+        reverse_proxy sigdec-web-homolog:3000
+    }
+
+    log {
+        output file /var/log/caddy/sigdec_access.log
+    }
+}

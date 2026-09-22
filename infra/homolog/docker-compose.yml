@@ -3,6 +3,7 @@ name: sigdec-homolog
 services:
   postgres:
     image: postgis/postgis:16-3.4
+    container_name: sigdec-postgres-homolog
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -19,6 +20,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: sigdec-redis-homolog
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -27,6 +29,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    container_name: sigdec-minio-homolog
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -40,6 +43,7 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/api.Dockerfile
+    container_name: sigdec-api-homolog
     restart: unless-stopped
     depends_on:
       postgres:
@@ -68,7 +72,9 @@ services:
       SIGDEC_MASTER_DEPARTMENT: ${SIGDEC_MASTER_DEPARTMENT}
       SIGDEC_MASTER_PASSWORD: ${SIGDEC_MASTER_PASSWORD}
       MIGRATIONS_DIR: /app/db/migrations
-    networks: [sigdec]
+    networks:
+      - sigdec
+      - edge
 
   web:
     build:
@@ -76,31 +82,20 @@ services:
       dockerfile: infra/docker/web.Dockerfile
       args:
         NEXT_PUBLIC_SIGDEC_API_URL: https://${SIGDEC_DOMAIN}
+    container_name: sigdec-web-homolog
     restart: unless-stopped
     depends_on: [api]
-    networks: [sigdec]
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on: [web, api]
-    environment:
-      SIGDEC_DOMAIN: ${SIGDEC_DOMAIN}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks: [sigdec]
+    networks:
+      - sigdec
+      - edge
 
 networks:
   sigdec:
+  edge:
+    external: true
+    name: sgr_default
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
-  caddy_data:
-  caddy_config:
