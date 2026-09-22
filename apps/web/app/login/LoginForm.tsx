@@ -8,6 +8,7 @@ export default function LoginForm() {
   const [matricula, setMatricula] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -26,12 +27,16 @@ export default function LoginForm() {
       const body = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        setPassword("");
+        setShowPassword(false);
         setMessage(body.message ?? "Não foi possível autenticar.");
         return;
       }
 
       window.location.href = body.user?.mustChangePassword ? "/alterar-senha" : "/painel";
     } catch {
+      setPassword("");
+      setShowPassword(false);
       setMessage("Falha de comunicação com o servidor.");
     } finally {
       setLoading(false);
@@ -57,17 +62,30 @@ export default function LoginForm() {
         />
       </label>
 
-      <label>
-        Senha
-        <input
-          autoComplete="current-password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-          minLength={8}
-        />
-      </label>
+      <div className="passwordBlock">
+        <label>
+          Senha
+          <input
+            autoCapitalize="none"
+            autoComplete="current-password"
+            name="password"
+            spellCheck={false}
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            required
+            minLength={8}
+          />
+        </label>
+        <button
+          className="passwordToggle"
+          type="button"
+          onClick={() => setShowPassword((current) => !current)}
+        >
+          {showPassword ? "Ocultar senha" : "Mostrar senha"}
+        </button>
+      </div>
 
       {message && <p className="errorMessage" role="alert">{message}</p>}
 
