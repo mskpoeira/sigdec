@@ -28,3 +28,7 @@
 .timelineItem p{margin:5px 0;color:#52657a}
 .timelineItem small{color:#718095}
 @media(max-width:800px){.detailGrid,.operationsGrid{grid-template-columns:1fr}.dispatchCard{grid-template-columns:1fr}.detailList{grid-template-columns:1fr}}
+
+.passwordBlock{display:grid;gap:8px}
+.passwordToggle{justify-self:end;background:transparent;border:0;color:#0d5c91;padding:2px 0;font-weight:800;cursor:pointer}
+.passwordToggle:hover{text-decoration:underline}
