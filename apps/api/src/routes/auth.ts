@@ -17,6 +17,20 @@ const loginSchema = z.object({
   password: z.string().min(8).max(256)
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8).max(256),
+  newPassword: z.string()
+    .min(12)
+    .max(256)
+    .regex(/[a-z]/, "A nova senha deve conter letra minúscula.")
+    .regex(/[A-Z]/, "A nova senha deve conter letra maiúscula.")
+    .regex(/[0-9]/, "A nova senha deve conter número.")
+    .regex(/[^A-Za-z0-9]/, "A nova senha deve conter caractere especial.")
+}).refine(
+  (data) => data.currentPassword !== data.newPassword,
+  { message: "A nova senha deve ser diferente da senha temporária.", path: ["newPassword"] }
+);
+
 async function audit(params: {
   userId?: string | null;
   action: string;
@@ -177,6 +191,69 @@ export async function authRoutes(app: FastifyInstance) {
         mfaEnabled: user.mfa_enabled
       }
     };
+  });
+
+  app.post("/auth/change-password", { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = changePasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_INPUT",
+        message: "A nova senha deve ter ao menos 12 caracteres, com maiúscula, minúscula, número e caractere especial.",
+        details: parsed.error.flatten()
+      });
+    }
+
+    const auth = authFrom(request);
+    const result = await db.query<{ password_hash: string }>(
+      "SELECT password_hash FROM users WHERE id = $1 AND active = true",
+      [auth.userId]
+    );
+    const user = result.rows[0];
+
+    if (!user || !(await argon2.verify(user.password_hash, parsed.data.currentPassword))) {
+      await audit({
+        userId: auth.userId,
+        action: "auth.password_change_failed",
+        entityId: auth.userId,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"]
+      });
+      return reply.code(401).send({
+        error: "INVALID_CURRENT_PASSWORD",
+        message: "A senha atual está incorreta."
+      });
+    }
+
+    const passwordHash = await argon2.hash(parsed.data.newPassword, { type: argon2.argon2id });
+    await db.query(
+      `UPDATE users
+          SET password_hash = $2,
+              must_change_password = false,
+              failed_login_attempts = 0,
+              locked_until = NULL,
+              updated_at = now()
+        WHERE id = $1`,
+      [auth.userId, passwordHash]
+    );
+    await db.query(
+      `UPDATE auth_sessions
+          SET revoked_at = now()
+        WHERE user_id = $1
+          AND id <> $2
+          AND revoked_at IS NULL`,
+      [auth.userId, auth.sessionId]
+    );
+
+    await audit({
+      userId: auth.userId,
+      action: "auth.password_changed",
+      entityId: auth.userId,
+      ip: request.ip,
+      userAgent: request.headers["user-agent"],
+      metadata: { forced: true }
+    });
+
+    return { ok: true };
   });
 
   app.get("/auth/me", { preHandler: requireAuth }, async (request, reply) => {
