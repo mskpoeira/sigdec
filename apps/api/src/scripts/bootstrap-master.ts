@@ -70,7 +70,7 @@ try {
 
   await client.query(
     `INSERT INTO user_roles (user_id, role_id)
-     SELECT $1, id FROM roles WHERE code = 'MASTER'
+     SELECT $1::uuid, id FROM roles WHERE code = 'MASTER'
      ON CONFLICT DO NOTHING`,
     [userId]
   );
@@ -78,8 +78,8 @@ try {
   await client.query(
     `INSERT INTO audit_logs
      (actor_user_id, action, entity_type, entity_id, metadata)
-     VALUES ($1, 'system.master_bootstrap', 'user', $1, $2::jsonb)`,
-    [userId, JSON.stringify({ organizationId })]
+     VALUES ($1::uuid, 'system.master_bootstrap', 'user', $2::text, $3::jsonb)`,
+    [userId, userId, JSON.stringify({ organizationId })]
   );
 
   await client.query("COMMIT");
