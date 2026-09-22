@@ -48,6 +48,20 @@ const dispatchSchema = z.object({
   notes: z.string().trim().max(2000).optional()
 });
 
+const dispatchStatusSchema = z.object({
+  status: z.enum(["ACKNOWLEDGED", "EN_ROUTE", "ON_SCENE", "RELEASED", "CANCELLED"]),
+  note: z.string().trim().max(2000).optional()
+});
+
+const dispatchTransitions: Record<string, string[]> = {
+  DISPATCHED: ["ACKNOWLEDGED", "CANCELLED"],
+  ACKNOWLEDGED: ["EN_ROUTE", "CANCELLED"],
+  EN_ROUTE: ["ON_SCENE", "CANCELLED"],
+  ON_SCENE: ["RELEASED"],
+  RELEASED: [],
+  CANCELLED: []
+};
+
 const transitions: Record<string, string[]> = {
   RECEIVED: ["TRIAGE","WAITING_DISPATCH","DISPATCHED","CANCELLED","DUPLICATE"],
   TRIAGE: ["WAITING_DISPATCH","DISPATCHED","CANCELLED","DUPLICATE"],
@@ -267,7 +281,8 @@ export async function incidentRoutes(app: FastifyInstance) {
       [id, organizationId]
     );
 
-    if (!incident.rows[0]) {
+    const incidentRow = incident.rows[0] as { status: string } | undefined;
+    if (!incidentRow) {
       return reply.code(404).send({ error: "NOT_FOUND" });
     }
 
@@ -297,9 +312,10 @@ export async function incidentRoutes(app: FastifyInstance) {
     );
 
     return {
-      incident: incident.rows[0],
+      incident: incidentRow,
       timeline: timeline.rows,
-      dispatches: dispatches.rows
+      dispatches: dispatches.rows,
+      allowedTransitions: transitions[incidentRow.status] ?? []
     };
   });
 
@@ -482,6 +498,142 @@ export async function incidentRoutes(app: FastifyInstance) {
 
       await client.query("COMMIT");
       return reply.code(201).send({ dispatchId: dispatch.rows[0]?.id });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/api/v1/dispatches/:id/status", {
+    preHandler: requirePermission("dispatch.update")
+  }, async (request, reply) => {
+    const auth = authFrom(request);
+    const organizationId = requireOrganization(auth.organizationId);
+    const { id } = request.params as { id: string };
+    const parsed = dispatchStatusSchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_INPUT", details: parsed.error.flatten() });
+    }
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{
+        id: string;
+        status: string;
+        incident_id: string;
+        incident_status: string;
+        team_id: string;
+        vehicle_id: string | null;
+      }>(
+        `SELECT d.id, d.status, d.incident_id, d.team_id, d.vehicle_id,
+                i.status AS incident_status
+           FROM dispatches d
+           JOIN incidents i ON i.id = d.incident_id
+          WHERE d.id = $1
+            AND i.organization_id = $2
+          FOR UPDATE OF d, i`,
+        [id, organizationId]
+      );
+
+      const dispatch = result.rows[0];
+      if (!dispatch) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ error: "NOT_FOUND" });
+      }
+
+      const nextStatus = parsed.data.status;
+      if (!(dispatchTransitions[dispatch.status] ?? []).includes(nextStatus)) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          error: "INVALID_TRANSITION",
+          message: `Transição ${dispatch.status} → ${nextStatus} não permitida.`
+        });
+      }
+
+      await client.query(
+        `UPDATE dispatches
+            SET status = $2,
+                acknowledged_at = CASE WHEN $2 = 'ACKNOWLEDGED' THEN COALESCE(acknowledged_at, now()) ELSE acknowledged_at END,
+                enroute_at = CASE WHEN $2 = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
+                arrived_at = CASE WHEN $2 = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+                released_at = CASE WHEN $2 IN ('RELEASED','CANCELLED') THEN COALESCE(released_at, now()) ELSE released_at END
+          WHERE id = $1`,
+        [id, nextStatus]
+      );
+
+      const resourceStatus =
+        nextStatus === "EN_ROUTE" ? "EN_ROUTE" :
+        nextStatus === "ON_SCENE" ? "ON_SCENE" :
+        nextStatus === "RELEASED" || nextStatus === "CANCELLED" ? "AVAILABLE" :
+        "DISPATCHED";
+
+      await client.query("UPDATE teams SET status = $2 WHERE id = $1", [
+        dispatch.team_id,
+        resourceStatus
+      ]);
+      if (dispatch.vehicle_id) {
+        await client.query("UPDATE vehicles SET status = $2 WHERE id = $1", [
+          dispatch.vehicle_id,
+          resourceStatus
+        ]);
+      }
+
+      const incidentStatus =
+        nextStatus === "EN_ROUTE" ? "EN_ROUTE" :
+        nextStatus === "ON_SCENE" ? "ON_SCENE" :
+        null;
+
+      if (
+        incidentStatus &&
+        (transitions[dispatch.incident_status] ?? []).includes(incidentStatus)
+      ) {
+        await client.query(
+          `UPDATE incidents
+              SET status = $2,
+                  enroute_at = CASE WHEN $2 = 'EN_ROUTE' THEN COALESCE(enroute_at, now()) ELSE enroute_at END,
+                  arrived_at = CASE WHEN $2 = 'ON_SCENE' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+                  updated_at = now()
+            WHERE id = $1`,
+          [dispatch.incident_id, incidentStatus]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO incident_timeline
+           (incident_id, event_type, actor_user_id, note, metadata)
+         VALUES ($1, 'dispatch.status_changed', $2, $3, $4::jsonb)`,
+        [
+          dispatch.incident_id,
+          auth.userId,
+          parsed.data.note ?? null,
+          JSON.stringify({
+            dispatchId: dispatch.id,
+            from: dispatch.status,
+            to: nextStatus
+          })
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs
+           (actor_user_id, action, entity_type, entity_id, ip, user_agent, before_data, after_data)
+         VALUES ($1, 'dispatch.status_change', 'dispatch', $2, $3, $4, $5::jsonb, $6::jsonb)`,
+        [
+          auth.userId,
+          dispatch.id,
+          request.ip,
+          request.headers["user-agent"] ?? null,
+          JSON.stringify({ status: dispatch.status }),
+          JSON.stringify({ status: nextStatus })
+        ]
+      );
+
+      await client.query("COMMIT");
+      return { ok: true, status: nextStatus };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

@@ -71,7 +71,7 @@ export default function OcorrenciasPage() {
 
       <section className="incidentList">
         {items.map((item) => (
-          <article className="incidentRow" key={item.id}>
+          <Link className="incidentRow" href={`/ocorrencias/${item.id}`} key={item.id}>
             <div className={`priorityBadge priority-${item.priority}`}>
               {item.priority}
             </div>
@@ -93,7 +93,7 @@ export default function OcorrenciasPage() {
               <span className="statusTag">{item.status}</span>
               <time>{new Date(item.createdAt).toLocaleString("pt-BR")}</time>
             </div>
-          </article>
+          </Link>
         ))}
       </section>
     </main>

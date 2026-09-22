@@ -2,3 +2,29 @@
 
 .loginLink{color:#0d5c91;font-weight:800;text-align:center;text-decoration:none}
 .loginLink:hover{text-decoration:underline}
+
+.incidentRow{color:inherit;text-decoration:none}
+.detailGrid,.operationsGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.detailCard{display:grid;gap:14px}
+.detailCard h2,.detailSection h2,.compactForm h2{margin:0}
+.detailList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:0}
+.detailList div{display:grid;gap:4px}
+.detailList dt{font-size:.76rem;font-weight:900;color:#607388;text-transform:uppercase;letter-spacing:.06em}
+.detailList dd{margin:0;font-weight:700}
+.detailWide{grid-column:1/-1}
+.detailSection{display:grid;gap:15px}
+.compactForm{align-content:start}
+.compactForm textarea{min-height:88px}
+.dispatchList{display:grid;gap:12px}
+.dispatchCard{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start}
+.dispatchCard p{margin:6px 0;color:#607388}
+.dispatchCard time{display:block;margin-top:8px;color:#607388;font-size:.8rem}
+.dispatchActions{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.timeline{display:grid;gap:0}
+.timelineItem{display:grid;grid-template-columns:22px 1fr;gap:12px;position:relative;padding-bottom:20px}
+.timelineItem:before{content:"";position:absolute;left:6px;top:15px;bottom:0;width:2px;background:#dce4ec}
+.timelineItem:last-child:before{display:none}
+.timelineDot{width:14px;height:14px;border-radius:50%;background:#0d5c91;margin-top:3px;z-index:1}
+.timelineItem p{margin:5px 0;color:#52657a}
+.timelineItem small{color:#718095}
+@media(max-width:800px){.detailGrid,.operationsGrid{grid-template-columns:1fr}.dispatchCard{grid-template-columns:1fr}.detailList{grid-template-columns:1fr}}
