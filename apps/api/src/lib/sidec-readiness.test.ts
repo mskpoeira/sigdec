@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildMappedFields,diffSidecValues,evaluateSidecReadiness,isSidecReady,type SidecMapping } from "./sidec-readiness.js";
+import { buildMappedFields,diffSidecValues,evaluateCobradeRequirements,evaluateSidecReadiness,isSidecReady,type SidecMapping } from "./sidec-readiness.js";
 
 const mappings:SidecMapping[]=[
  {sourcePath:"incident.protocol",targetField:"ocorrencia.protocolo",required:true,enabled:true,sortOrder:10},
@@ -29,4 +29,13 @@ test("gera campos mapeados",()=>{
 test("diff retorna somente campos alterados",()=>{
  const diff=diffSidecValues({a:1,b:{c:2}},{a:1,b:{c:3}});
  assert.deepEqual(diff,[{path:"b.c",before:2,after:3}]);
+});
+
+
+test("requisito adicional por COBRADE integra o checklist",()=>{
+ const root={incident:{protocol:"DC-1",cobradeCode:"123",addressLine:"Rua A",neighborhood:"Centro",description:""}};
+ const extra=evaluateCobradeRequirements(root,[{sourcePath:"incident.description",label:"Descrição técnica",required:true,enabled:true,sortOrder:10}]);
+ assert.equal(extra.length,1);
+ assert.equal(extra[0]?.ok,false);
+ assert.equal(isSidecReady([...evaluateSidecReadiness(root,mappings),...extra]),false);
 });
