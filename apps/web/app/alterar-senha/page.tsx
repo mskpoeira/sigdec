@@ -50,10 +50,10 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <main>
+    <main className="authUnified">
       <form className="loginCard" onSubmit={submit}>
         <div>
-          <span className="eyebrow">PRIMEIRO ACESSO</span>
+          <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
           <h2>Defina uma nova senha</h2>
         </div>
 
