@@ -24,3 +24,17 @@ test("csv resumo contem protocolo e COBRADE",()=>{
  assert.match(csv,/DC-2026-000001/);
  assert.match(csv,/TEST/);
 });
+
+
+test("csv usa campos de destino configurados quando mappedFields existe",()=>{
+ const pkg=buildSidecPackage({
+  generatedAt:"2026-09-23T18:00:00-03:00",
+  municipality:{name:"Ubatuba",state:"SP"},
+  incident:{protocol:"DC-1"},
+  mappedFields:{"ocorrencia.protocolo_sigdec":"DC-1","ocorrencia.cobrade":"123"}
+ });
+ const csv=sidecPackageSummaryCsv(pkg);
+ assert.match(csv,/ocorrencia.protocolo_sigdec/);
+ assert.match(csv,/ocorrencia.cobrade/);
+ assert.match(csv,/DC-1/);
+});
