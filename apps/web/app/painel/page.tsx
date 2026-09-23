@@ -68,10 +68,10 @@ export default function PainelPage() {
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC · v1.0</span>
-          <h1>Painel Operacional</h1>
+          <span className="eyebrow">SIGDEC · v1.2</span>
+          <h1>Olá, {user.displayName.split(" ")[0]} 👋</h1>
           <p>
-            {user.displayName} · matrícula {user.matricula}
+            Painel operacional · matrícula {user.matricula}
             {user.jobTitle ? ` · ${user.jobTitle}` : ""}
           </p>
         </div>
