@@ -4,7 +4,7 @@ import archiver from "archiver";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
-import { buildSidecPackage, canonicalJson, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
+import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, diffSidecValues, evaluateCobradeRequirements, evaluateSidecReadiness, isSidecReady, type CobradeRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
