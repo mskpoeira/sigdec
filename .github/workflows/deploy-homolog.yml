@@ -77,7 +77,7 @@ jobs:
       - name: Verificar aplicacao
         shell: bash
         env:
-          SIGDEC_URL: ${{ secrets.HOMOLOG_PUBLIC_URL }}
+          SIGDEC_URL: ${{ vars.HOMOLOG_PUBLIC_URL }}
         run: |
           set -euo pipefail
           test -n "$SIGDEC_URL" || { echo "HOMOLOG_PUBLIC_URL ausente"; exit 1; }
