@@ -26,10 +26,11 @@ const modules = [
   { name: "Campo / Mapa", href: "/campo", description: "Ocorrências georreferenciadas e posição das equipes." },
   { name: "Monitoramento", href: "/monitoramento", description: "Pluviômetros, estações e pontos monitorados." },
   { name: "Vistorias", href: "/vistorias", description: "Programação, execução e conclusão técnica." },
-  { name: "SCO / Desastres", href: "#", description: "Gestão ampliada de incidentes." },
+  { name: "SCO / Desastres", href: "/sco", description: "Gestão ampliada de incidentes e sala de emergência." },
   { name: "Assistência Humanitária", href: "/assistencia", description: "Famílias, abrigos e entregas." },
   { name: "Voluntariado", href: "/voluntarios", description: "Competências, disponibilidade e equipamentos." },
-  { name: "Documentos", href: "#", description: "Relatórios, laudos e declarações." },
+  { name: "Documentos", href: "/documentos", description: "Relatórios, laudos, pareceres e declarações." },
+  { name: "Comunicações / Rádio", href: "/comunicacoes", description: "Estação base, canais e log operacional." },
   { name: "Administração", href: "#", description: "Usuários, perfis e auditoria." }
 ];
 
@@ -66,7 +67,7 @@ export default function PainelPage() {
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC · v0.9</span>
+          <span className="eyebrow">SIGDEC · v0.10</span>
           <h1>Painel Operacional</h1>
           <p>
             {user.displayName} · matrícula {user.matricula}
