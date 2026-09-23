@@ -33,9 +33,9 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="loginShell">
+    <main className="loginShell authUnified">
       <section className="loginBrand">
-        <span className="eyebrow">SIGDEC</span>
+        <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
         <h1>Recuperação de acesso</h1>
         <p>O link de redefinição é individual, temporário e enviado ao e-mail cadastrado.</p>
       </section>
