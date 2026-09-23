@@ -31,7 +31,8 @@ const modules = [
   { name: "Voluntariado", href: "/voluntarios", description: "Competências, disponibilidade e equipamentos." },
   { name: "Documentos", href: "/documentos", description: "Relatórios, laudos, pareceres e declarações." },
   { name: "Comunicações / Rádio", href: "/comunicacoes", description: "Estação base, canais e log operacional." },
-  { name: "Administração", href: "#", description: "Usuários, perfis e auditoria." }
+  { name: "Gestão Integrada", href: "/gestao", description: "Riscos, alertas, S2iD, BI, recuperação, integrações e treinamentos." },
+  { name: "Administração", href: "/gestao", description: "Usuários, perfis, feature flags e auditoria." }
 ];
 
 export default function PainelPage() {
@@ -67,7 +68,7 @@ export default function PainelPage() {
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC · v0.12</span>
+          <span className="eyebrow">SIGDEC · v1.0</span>
           <h1>Painel Operacional</h1>
           <p>
             {user.displayName} · matrícula {user.matricula}
