@@ -67,7 +67,7 @@ export default function PainelPage() {
     <main className="shell">
       <header className="panelHeader">
         <div>
-          <span className="eyebrow">SIGDEC · v0.10</span>
+          <span className="eyebrow">SIGDEC · v0.11</span>
           <h1>Painel Operacional</h1>
           <p>
             {user.displayName} · matrícula {user.matricula}
