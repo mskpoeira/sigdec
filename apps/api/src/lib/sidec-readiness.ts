@@ -6,6 +6,8 @@ export type SidecMapping={
  sortOrder:number;
 };
 
+export type CobradeRequirement={sourcePath:string;label:string;required:boolean;enabled:boolean;sortOrder:number};
+
 export type ReadinessCheck={
  code:string;
  label:string;
@@ -62,6 +64,19 @@ export function evaluateSidecReadiness(root:Record<string,unknown>,mappings:Side
   detail:hasAddress||hasCoordinates?undefined:"Informe endereço + bairro ou latitude + longitude."
  });
  return checks;
+}
+
+export function evaluateCobradeRequirements(root:Record<string,unknown>,requirements:CobradeRequirement[]):ReadinessCheck[]{
+ return requirements.filter(x=>x.enabled).sort((a,b)=>a.sortOrder-b.sortOrder).map(rule=>{
+  const value=getPath(root,rule.sourcePath);
+  return {
+   code:"cobrade:"+rule.sourcePath,
+   label:rule.label,
+   required:rule.required,
+   ok:hasValue(value),
+   detail:hasValue(value)?undefined:`Requisito COBRADE pendente: ${rule.sourcePath}`
+  };
+ });
 }
 
 export function isSidecReady(checks:ReadinessCheck[]){
