@@ -50,7 +50,7 @@ export default function OcorrenciasPage() {
   }, []);
 
   return (
-    <main className="shell">
+    <main className="shell moduleShell">
       <header className="listHeader">
         <div>
           <span className="eyebrow">CENTRAL OPERACIONAL</span>
