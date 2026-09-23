@@ -137,6 +137,9 @@ export async function sidecRoutes(app:FastifyInstance){
 
  app.post("/api/v1/incidents/:id/sidec-exports",{preHandler:requirePermission("sidec_exports.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=exportCreateSchema.safeParse(request.body??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const documentIds=[...new Set(parsed.data.documentIds)];
   const [organization,incident]=await Promise.all([
    db.query(`SELECT name,document_number AS "documentNumber" FROM organizations WHERE id=$1`,[org]),
    db.query(`SELECT i.id,i.protocol,i.status,i.priority,i.risk_to_life AS "riskToLife",i.summary,i.description,i.source,
@@ -146,7 +149,21 @@ export async function sidecRoutes(app:FastifyInstance){
       FROM incidents i JOIN incident_types t ON t.id=i.incident_type_id
       WHERE i.id=$1 AND i.organization_id=$2`,[id,org])
   ]);
-  if(!incident.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const incidentRow=incident.rows[0] as Record<string,unknown>|undefined;
+  if(!incidentRow)return reply.code(404).send({error:"NOT_FOUND"});
+
+  const mappings=await effectiveMappings(org);
+  const root=incidentRoot(incidentRow);
+  const checks=evaluateSidecReadiness(root,mappings);
+  if(!isSidecReady(checks))return reply.code(409).send({error:"NOT_READY",checks});
+
+  const selectedDocuments=documentIds.length
+   ? await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
+       FROM technical_documents
+       WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED' AND id=ANY($3::uuid[])
+       ORDER BY issued_at ASC,created_at ASC`,[org,id,documentIds])
+   : {rows:[] as Record<string,unknown>[]};
+  if(selectedDocuments.rows.length!==documentIds.length)return reply.code(400).send({error:"INVALID_DOCUMENT_SELECTION"});
 
   const [actions,inspections,supportRequests,deliveries,timeline]=await Promise.all([
    db.query(`SELECT action_type AS "actionType",title,description,started_at AS "startedAt",ended_at AS "endedAt",
@@ -171,14 +188,17 @@ export async function sidecRoutes(app:FastifyInstance){
 
   const pkg=buildSidecPackage({
    municipality:{name:String(organization.rows[0]?.name??"Ubatuba"),state:"SP"},
-   incident:incident.rows[0],
+   incident:incidentRow,
    actions:actions.rows,
    inspections:inspections.rows,
    supportRequests:supportRequests.rows,
    humanitarianDeliveries:deliveries.rows,
-   timeline:timeline.rows
+   timeline:timeline.rows,
+   documents:selectedDocuments.rows,
+   mappedFields:buildMappedFields(root,mappings)
   });
   const snapshotHash=hashSidecPackage(pkg);
+  const readinessSnapshot={ready:true,checks,mappings};
 
   const client=await db.connect();
   try{
@@ -187,16 +207,22 @@ export async function sidecRoutes(app:FastifyInstance){
    const revisionResult=await client.query<{revision:number}>(`SELECT COALESCE(MAX(revision),0)+1 AS revision FROM sidec_exports WHERE incident_id=$1`,[id]);
    const revision=Number(revisionResult.rows[0]?.revision??1);
    const created=await client.query<{id:string}>(`INSERT INTO sidec_exports(
-      organization_id,incident_id,revision,schema_version,status,snapshot,snapshot_hash,created_by
-    ) VALUES($1,$2,$3,'1.0','READY',$4::jsonb,$5,$6) RETURNING id`,[org,id,revision,JSON.stringify(pkg),snapshotHash,auth.userId]);
+      organization_id,incident_id,revision,schema_version,status,snapshot,snapshot_hash,readiness_snapshot,created_by
+    ) VALUES($1,$2,$3,'1.1','READY',$4::jsonb,$5,$6::jsonb,$7) RETURNING id`,
+    [org,id,revision,JSON.stringify(pkg),snapshotHash,JSON.stringify(readinessSnapshot),auth.userId]);
    const exportId=created.rows[0]?.id;
    if(!exportId)throw new Error("Falha ao criar pacote SIDEC.");
+   for(const document of selectedDocuments.rows as Array<Record<string,any>>){
+    await client.query(`INSERT INTO sidec_export_documents(
+      export_id,document_id,document_number,document_title,document_type,document_revision,content_hash
+    ) VALUES($1,$2,$3,$4,$5,$6,$7)`,[exportId,document.id,document.number??null,document.title,document.documentType,document.revision,document.contentHash??null]);
+   }
    await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
-      VALUES($1,'sidec_export.created',$2,$3,$4::jsonb)`,[id,auth.userId,`Pacote SIDEC revisão ${revision} gerado.`,JSON.stringify({exportId,revision,snapshotHash})]);
+      VALUES($1,'sidec_export.created',$2,$3,$4::jsonb)`,[id,auth.userId,`Pacote SIDEC revisão ${revision} gerado.`,JSON.stringify({exportId,revision,snapshotHash,documents:documentIds.length})]);
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
-      VALUES($1,'sidec_export.create','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,exportId,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,revision,status:"READY",snapshotHash}),JSON.stringify({schemaVersion:"1.0"})]);
+      VALUES($1,'sidec_export.create','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,exportId,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,revision,status:"READY",snapshotHash}),JSON.stringify({schemaVersion:"1.1",documents:documentIds.length})]);
    await client.query("COMMIT");
-   return reply.code(201).send({id:exportId,revision,status:"READY",snapshotHash});
+   return reply.code(201).send({id:exportId,revision,status:"READY",schemaVersion:"1.1",snapshotHash,readiness:readinessSnapshot,documents:selectedDocuments.rows});
   }catch(error){
    await client.query("ROLLBACK");throw error;
   }finally{client.release();}
