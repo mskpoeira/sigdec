@@ -119,7 +119,7 @@ export default function CampoPage() {
   }
 
   return (
-    <main className="shell">
+    <main className="shell moduleShell">
       <header className="listHeader">
         <div>
           <span className="eyebrow">OPERAÇÃO DE CAMPO · v0.8</span>
