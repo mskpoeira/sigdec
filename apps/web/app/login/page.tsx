@@ -1,17 +1,2 @@
 import LoginForm from "./LoginForm";
-
-export default function LoginPage() {
-  return (
-    <main className="loginShell">
-      <section className="loginBrand">
-        <span className="eyebrow">SIGDEC</span>
-        <h1>Sistema Integrado de Gestão da Defesa Civil</h1>
-        <p>
-          Acesso institucional para operadores, agentes, técnicos,
-          administrativos e gestores.
-        </p>
-      </section>
-      <LoginForm />
-    </main>
-  );
-}
+export default function LoginPage(){return <main className="friendlyLogin"><section className="loginHero"><div className="brandMark"><div className="civilHex">▲</div><div><strong>SIGDEC</strong><span>Defesa Civil · Ubatuba/SP</span></div></div><div className="heroCopy"><span className="eyebrow">PREVENÇÃO · PREPARAÇÃO · RESPOSTA · RECUPERAÇÃO</span><h1>Proteção começa com informação.</h1><p>Sistema Integrado de Gestão da Defesa Civil de Ubatuba. Um ambiente único para operação, monitoramento e proteção da comunidade.</p></div><div className="loginMotto">Prevenir é preservar vidas.</div></section><section className="loginAccess"><div className="mobileBrand"><strong>SIGDEC</strong><span>Ubatuba · SP</span></div><LoginForm/><p className="institutionalNote">Prefeitura Municipal de Ubatuba · Coordenadoria Municipal de Defesa Civil</p></section></main>}
