@@ -24,7 +24,8 @@ const monitoringEventStatusSchema=z.object({status:z.enum(["ACKNOWLEDGED","CLOSE
 const ingestKeySchema=z.object({name:z.string().trim().min(3).max(120)});
 const externalReadingSchema=z.object({measuredAt:z.coerce.date(),metric:z.string().trim().min(1).max(50),value:z.number(),unit:z.string().trim().min(1).max(30)});
 const rotateKeySchema=z.object({name:z.string().trim().min(3).max(120).optional()});
-const protocolSchema=z.object({code:z.string().trim().min(2).max(60),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING")});
+const protocolSchema=z.object({code:z.string().trim().min(2).max(60),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING"),cobradeCode:z.string().trim().max(30).optional()});
+const protocolTemplateSchema=z.object({code:z.string().trim().min(2).max(60),cobradeCode:z.string().trim().min(3).max(30),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING"),severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]).optional(),triggerSummary:z.string().trim().max(3000).optional(),guidance:z.string().trim().max(5000).optional(),steps:z.array(z.string().trim().min(2).max(500)).max(50).default([])});
 const protocolVersionSchema=z.object({severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]).optional(),triggerSummary:z.string().trim().max(3000).optional(),guidance:z.string().trim().max(5000).optional(),steps:z.array(z.string().trim().min(2).max(500)).max(50).default([]),changeSummary:z.string().trim().max(1000).optional()});
 
 
@@ -132,15 +133,46 @@ export async function responseRoutes(app:FastifyInstance){
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"ALERT_DRAFT_FROM_MONITORING_EVENT","alert",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify({status:"DRAFT",severity:x.severity,title:x.title}),JSON.stringify({monitoringEventId:id})]);
   return reply.code(201).send({id:r.rows[0]?.id,status:r.rows[0]?.status});
  });
+ app.get("/api/v1/monitoring/protocol-templates",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT id,code,cobrade_code AS "cobradeCode",title,category,severity,trigger_summary AS "triggerSummary",guidance,steps,active,organization_id AS "organizationId"
+    FROM operational_protocol_templates
+    WHERE active=true AND (organization_id IS NULL OR organization_id=$1)
+    ORDER BY cobrade_code,code`,[o]);
+  return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/protocol-templates",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=protocolTemplateSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const r=await db.query(`INSERT INTO operational_protocol_templates(organization_id,code,cobrade_code,title,category,severity,trigger_summary,guidance,steps,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+    RETURNING id,code,cobrade_code AS "cobradeCode",title`,[o,v.code,v.cobradeCode,v.title,v.category,v.severity??null,v.triggerSummary??null,v.guidance??null,JSON.stringify(v.steps),a.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,$2,$3,$4,$5,$6,$7)`,[a.userId,"OPERATIONAL_PROTOCOL_TEMPLATE_CREATED","operational_protocol_template",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify(r.rows[0])]);
+  return reply.code(201).send(r.rows[0]);
+ });
+ app.post("/api/v1/monitoring/protocol-templates/:id/instantiate",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const tpl=await db.query(`SELECT id,code,cobrade_code AS "cobradeCode",title,category,severity,trigger_summary AS "triggerSummary",guidance,steps
+    FROM operational_protocol_templates WHERE id=$1 AND active=true AND (organization_id IS NULL OR organization_id=$2)`,[id,o]);
+  const t=tpl.rows[0];if(!t)return reply.code(404).send({error:"NOT_FOUND"});
+  const client=await db.connect();try{await client.query("BEGIN");
+   const p=await client.query(`INSERT INTO operational_protocols(organization_id,code,title,category,cobrade_code,created_by)
+     VALUES($1,$2,$3,$4,$5,$6) RETURNING id,code,title,cobrade_code AS "cobradeCode"`,[o,t.code,t.title,t.category,t.cobradeCode,a.userId]);
+   const protocolId=p.rows[0]?.id;
+   const v=await client.query(`INSERT INTO operational_protocol_versions(protocol_id,version_no,severity,trigger_summary,guidance,steps,change_summary,created_by)
+     VALUES($1,1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING id,version_no AS "versionNo",status`,[protocolId,t.severity??null,t.triggerSummary??null,t.guidance??null,JSON.stringify(t.steps??[]),"Criado a partir de modelo COBRADE "+t.cobradeCode,a.userId]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"OPERATIONAL_PROTOCOL_INSTANTIATED","operational_protocol",protocolId,req.ip,req.headers["user-agent"]??null,JSON.stringify(p.rows[0]),JSON.stringify({templateId:id,versionId:v.rows[0]?.id})]);
+   await client.query("COMMIT");return reply.code(201).send({protocol:p.rows[0],version:v.rows[0]});
+  }catch(e){await client.query("ROLLBACK");throw e}finally{client.release();}
+ });
  app.get("/api/v1/monitoring/protocols",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
-  const r=await db.query(`SELECT p.id,p.code,p.title,p.category,p.active,p.created_at AS "createdAt",v.id AS "activeVersionId",v.version_no AS "activeVersionNo",v.severity,v.trigger_summary AS "triggerSummary",v.guidance,v.steps
+  const r=await db.query(`SELECT p.id,p.code,p.title,p.category,p.cobrade_code AS "cobradeCode",p.active,p.created_at AS "createdAt",v.id AS "activeVersionId",v.version_no AS "activeVersionNo",v.severity,v.trigger_summary AS "triggerSummary",v.guidance,v.steps
    FROM operational_protocols p LEFT JOIN operational_protocol_versions v ON v.protocol_id=p.id AND v.status='ACTIVE'
    WHERE p.organization_id=$1 ORDER BY p.code`,[o]);return {items:r.rows};
  });
  app.post("/api/v1/monitoring/protocols",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
   const a=authFrom(req),o=org(a.organizationId),p=protocolSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
-  const r=await db.query(`INSERT INTO operational_protocols(organization_id,code,title,category,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,code,title,category`,[o,v.code,v.title,v.category,a.userId]);
+  const r=await db.query(`INSERT INTO operational_protocols(organization_id,code,title,category,cobrade_code,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,code,title,category,cobrade_code AS "cobradeCode"`,[o,v.code,v.title,v.category,v.cobradeCode??null,a.userId]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,$2,$3,$4,$5,$6,$7)`,[a.userId,"OPERATIONAL_PROTOCOL_CREATED","operational_protocol",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify(r.rows[0])]);
   return reply.code(201).send(r.rows[0]);
  });
