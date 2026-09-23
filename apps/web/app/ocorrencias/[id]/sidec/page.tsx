@@ -2,67 +2,121 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent,useCallback,useEffect,useState } from "react";
+import { FormEvent,useCallback,useEffect,useMemo,useState } from "react";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
+type ExportDocument={id:string;number?:string|null;title:string;documentType:string;revision:number;contentHash?:string|null};
 type SidecExport={
- id:string;
- revision:number;
- schemaVersion:string;
- status:string;
- snapshotHash:string;
- externalProtocol?:string|null;
- externalNotes?:string|null;
- exportedAt?:string|null;
- submittedAt?:string|null;
- acknowledgedAt?:string|null;
- rejectedAt?:string|null;
- createdAt:string;
- updatedAt:string;
+ id:string;revision:number;schemaVersion:string;status:string;snapshotHash:string;
+ externalProtocol?:string|null;externalNotes?:string|null;exportedAt?:string|null;submittedAt?:string|null;
+ acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];
 };
+type Mapping={sourcePath:string;targetField:string;required:boolean;enabled:boolean;sortOrder:number};
+type Check={code:string;label:string;required:boolean;ok:boolean;detail?:string};
+type AvailableDocument={id:string;number?:string|null;title:string;documentType:string;revision:number;contentHash?:string|null;issuedAt:string};
+type Readiness={ready:boolean;checks:Check[];mappings:Mapping[];availableDocuments:AvailableDocument[];mappedFields:Record<string,unknown>};
+type Diff={path:string;before:unknown;after:unknown};
+type CompareResult={current:{id:string;revision:number};against:{id:string;revision:number}|null;count?:number;differences:Diff[]};
 
 const statusLabels:Record<string,string>={
- READY:"Pronto para exportação",
- EXPORTED:"Exportado",
- SUBMITTED:"Protocolado no SIDEC",
- ACKNOWLEDGED:"Recebimento confirmado",
- REJECTED:"Rejeitado / devolvido",
- CANCELLED:"Cancelado"
+ READY:"Pronto para exportação",EXPORTED:"Exportado",SUBMITTED:"Protocolado no SIDEC",
+ ACKNOWLEDGED:"Recebimento confirmado",REJECTED:"Rejeitado / devolvido",CANCELLED:"Cancelado"
 };
+
+function show(value:unknown){
+ if(value===null||value===undefined)return "—";
+ if(typeof value==="string")return value||"—";
+ return JSON.stringify(value);
+}
 
 export default function SidecExportsPage(){
  const params=useParams<{id:string}>(),incidentId=params.id;
  const [items,setItems]=useState<SidecExport[]>([]);
+ const [readiness,setReadiness]=useState<Readiness|null>(null);
+ const [mappingRows,setMappingRows]=useState<Mapping[]>([]);
+ const [sourceOptions,setSourceOptions]=useState<string[]>([]);
+ const [selectedDocuments,setSelectedDocuments]=useState<string[]>([]);
+ const [comparisons,setComparisons]=useState<Record<string,CompareResult>>({});
  const [protocols,setProtocols]=useState<Record<string,string>>({});
  const [notes,setNotes]=useState<Record<string,string>>({});
- const [message,setMessage]=useState("Carregando pacotes...");
+ const [message,setMessage]=useState("Carregando interoperabilidade...");
  const [busy,setBusy]=useState(false);
 
  const request=useCallback(async(path:string,init?:RequestInit)=>{
   const response=await fetch(`${API}${path}`,{credentials:"include",...init,headers:{"Content-Type":"application/json",...(init?.headers??{})}});
   if(response.status===401){location.href="/login";return null}
   const body=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(body.message??body.error??"Não foi possível concluir a operação.");
+  if(!response.ok){
+   const error=new Error(body.message??body.error??"Não foi possível concluir a operação.") as Error&{body?:any};
+   error.body=body;throw error;
+  }
   return body;
  },[]);
 
  const load=useCallback(async()=>{
   try{
-   const body=await request(`/api/v1/incidents/${incidentId}/sidec-exports`);
-   setItems(body?.items??[]);setMessage("");
-  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar pacotes SIDEC.");}
+   const [exportsBody,readinessBody,mappingBody]=await Promise.all([
+    request(`/api/v1/incidents/${incidentId}/sidec-exports`),
+    request(`/api/v1/incidents/${incidentId}/sidec-readiness`),
+    request("/api/v1/sidec/mappings")
+   ]);
+   setItems(exportsBody?.items??[]);
+   setReadiness(readinessBody??null);
+   setMappingRows((mappingBody?.items??readinessBody?.mappings??[]).map((x:Mapping)=>({...x})));
+   setSourceOptions(mappingBody?.sourceOptions??[]);
+   setSelectedDocuments(current=>current.filter(id=>(readinessBody?.availableDocuments??[]).some((d:AvailableDocument)=>d.id===id)));
+   setMessage("");
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar interoperabilidade SIDEC.");}
  },[incidentId,request]);
 
  useEffect(()=>{void load()},[load]);
 
+ const failedRequired=useMemo(()=>readiness?.checks.filter(x=>x.required&&!x.ok)??[],[readiness]);
+
  async function generate(){
   setBusy(true);setMessage("");
   try{
-   const body=await request(`/api/v1/incidents/${incidentId}/sidec-exports`,{method:"POST",body:"{}"});
-   setMessage(`Pacote SIDEC revisão ${body?.revision??""} gerado com sucesso.`);
+   const body=await request(`/api/v1/incidents/${incidentId}/sidec-exports`,{
+    method:"POST",body:JSON.stringify({documentIds:selectedDocuments})
+   });
+   setMessage(`Pacote SIDEC revisão ${body?.revision??""} gerado com schema ${body?.schemaVersion??"1.1"}.`);
    await load();
-  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao gerar pacote SIDEC.");}
+  }catch(error){
+   const typed=error as Error&{body?:any};
+   if(typed.body?.error==="NOT_READY")setMessage("Pacote não gerado: complete os campos obrigatórios indicados no checklist.");
+   else setMessage(error instanceof Error?error.message:"Falha ao gerar pacote SIDEC.");
+   await load();
+  }finally{setBusy(false)}
+ }
+
+ async function saveMappings(){
+  setBusy(true);setMessage("");
+  try{
+   await request("/api/v1/sidec/mappings",{method:"PUT",body:JSON.stringify({items:mappingRows})});
+   setMessage("Mapeamento SIGDEC → SIDEC salvo. O checklist foi recalculado.");
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao salvar mapeamento.");}
+  finally{setBusy(false)}
+ }
+
+ function updateMapping(index:number,patch:Partial<Mapping>){
+  setMappingRows(rows=>rows.map((row,i)=>i===index?{...row,...patch}:row));
+ }
+ function removeMapping(index:number){setMappingRows(rows=>rows.filter((_,i)=>i!==index))}
+ function addMapping(){
+  const used=new Set(mappingRows.map(x=>x.sourcePath));
+  const source=sourceOptions.find(x=>!used.has(x))??sourceOptions[0]??"incident.summary";
+  setMappingRows(rows=>[...rows,{sourcePath:source,targetField:`campo.${rows.length+1}`,required:false,enabled:true,sortOrder:(rows.length+1)*10}]);
+ }
+
+ async function compare(item:SidecExport){
+  setBusy(true);setMessage("");
+  try{
+   const body=await request(`/api/v1/sidec-exports/${item.id}/compare`);
+   setComparisons(current=>({...current,[item.id]:body}));
+   if(!body?.against)setMessage("Esta é a primeira revisão; não há revisão anterior para comparar.");
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao comparar revisões.");}
   finally{setBusy(false)}
  }
 
@@ -70,37 +124,67 @@ export default function SidecExportsPage(){
   setBusy(true);setMessage("");
   try{
    await request(`/api/v1/sidec-exports/${id}/status`,{
-    method:"PATCH",
-    body:JSON.stringify({
-     status,
-     externalProtocol:protocols[id]?.trim()||undefined,
-     externalNotes:notes[id]?.trim()||undefined
+    method:"PATCH",body:JSON.stringify({
+     status,externalProtocol:protocols[id]?.trim()||undefined,externalNotes:notes[id]?.trim()||undefined
     })
    });
-   setMessage("Situação do pacote SIDEC atualizada.");
-   await load();
+   setMessage("Situação do pacote SIDEC atualizada.");await load();
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao atualizar pacote SIDEC.");}
   finally{setBusy(false)}
  }
 
- function downloadUrl(id:string,format:"json"|"csv"){
-  return `${API}/api/v1/sidec-exports/${id}/download?format=${format}`;
- }
+ function downloadUrl(id:string,format:"json"|"csv"){return `${API}/api/v1/sidec-exports/${id}/download?format=${format}`}
+ function documentPdfUrl(id:string){return `${API}/api/v1/technical-documents/${id}/pdf`}
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP</span><h1>Pacotes da ocorrência</h1><p>Snapshots versionados para lançamento controlado no sistema estadual.</p></div>
-   <div className="headerActions"><button className="primaryButton" disabled={busy} type="button" onClick={()=>void generate()}>Gerar nova revisão</button><Link className="secondaryLink" href={`/ocorrencias/${incidentId}`}>Voltar à ocorrência</Link></div>
+   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP · v1.14</span><h1>Pacotes da ocorrência</h1><p>Checklist, documentos oficiais, mapeamento e revisões para lançamento controlado no sistema estadual.</p></div>
+   <div className="headerActions"><button className="primaryButton" disabled={busy||!readiness?.ready} type="button" onClick={()=>void generate()}>Gerar nova revisão</button><Link className="secondaryLink" href={`/ocorrencias/${incidentId}`}>Voltar à ocorrência</Link></div>
   </header>
 
   {message&&<section className="infoCard">{message}</section>}
 
-  <section className="infoCard">
-   <strong>Como funciona</strong>
-   <p>O SIGDEC prepara os dados e registra cada revisão. O lançamento no SIDEC permanece manual/controlado até existir integração oficial autorizada. Depois do envio, registre aqui o protocolo externo e o retorno recebido.</p>
+  <section className={readiness?.ready?"infoCard":"warningCard"}>
+   <strong>{readiness?.ready?"✓ Ocorrência pronta para gerar pacote":"⚠ Checklist de completude"}</strong>
+   <div className="dataGrid" style={{marginTop:12}}>
+    {(readiness?.checks??[]).map(check=><article className="card" key={check.code}><h2>{check.ok?"✓":"⚠"} {check.label}</h2><p>{check.required?"Obrigatório":"Recomendado"} · {check.ok?"Completo":"Pendente"}</p>{check.detail&&<small>{check.detail}</small>}</article>)}
+   </div>
+   {failedRequired.length>0&&<p><strong>Geração bloqueada:</strong> {failedRequired.length} requisito(s) obrigatório(s) pendente(s).</p>}
   </section>
 
-  <section className="dataGrid" style={{marginTop:18}}>
+  <section className="detailSection">
+   <div><span className="eyebrow">DOCUMENTOS</span><h2>Documentos emitidos que acompanharão a revisão</h2></div>
+   {(readiness?.availableDocuments??[]).length===0?<div className="infoCard">Nenhum documento técnico emitido está vinculado à ocorrência. Documentos são opcionais.</div>:
+   <div className="dataGrid">{readiness?.availableDocuments.map(doc=><label className="card" key={doc.id} style={{cursor:"pointer"}}>
+    <span><input type="checkbox" checked={selectedDocuments.includes(doc.id)} onChange={e=>setSelectedDocuments(ids=>e.target.checked?[...ids,doc.id]:ids.filter(id=>id!==doc.id))}/> Selecionar</span>
+    <h2>{doc.number??"Sem número"} · {doc.title}</h2><p>{doc.documentType} · revisão {doc.revision} · emitido em {new Date(doc.issuedAt).toLocaleString("pt-BR")}</p>
+    <a className="secondaryLink" href={documentPdfUrl(doc.id)} target="_blank" rel="noreferrer">Abrir PDF oficial</a>
+   </label>)}</div>}
+  </section>
+
+  <section className="detailSection">
+   <div><span className="eyebrow">MAPEAMENTO</span><h2>SIGDEC → SIDEC</h2><p>Somente caminhos permitidos pelo sistema podem ser mapeados; não há execução de scripts.</p></div>
+   <div className="dataGrid">
+    {mappingRows.sort((a,b)=>a.sortOrder-b.sortOrder).map((row,index)=><article className="card" key={`${row.targetField}-${index}`}>
+     <label>Origem<select value={row.sourcePath} onChange={e=>updateMapping(index,{sourcePath:e.target.value})}>{sourceOptions.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
+     <label>Campo de destino<input value={row.targetField} onChange={e=>updateMapping(index,{targetField:e.target.value})}/></label>
+     <label>Ordem<input type="number" min="0" value={row.sortOrder} onChange={e=>updateMapping(index,{sortOrder:Number(e.target.value)})}/></label>
+     <label><input type="checkbox" checked={row.enabled} onChange={e=>updateMapping(index,{enabled:e.target.checked})}/> Ativo</label>
+     <label><input type="checkbox" checked={row.required} onChange={e=>updateMapping(index,{required:e.target.checked})}/> Obrigatório no checklist</label>
+     <button className="secondaryLink" type="button" disabled={busy} onClick={()=>removeMapping(index)}>Remover</button>
+    </article>)}
+   </div>
+   <div className="headerActions" style={{marginTop:12}}><button className="secondaryLink" type="button" disabled={busy} onClick={addMapping}>Adicionar campo</button><button className="primaryButton" type="button" disabled={busy||mappingRows.length===0} onClick={()=>void saveMappings()}>Salvar mapeamento</button></div>
+  </section>
+
+  <section className="detailSection">
+   <div><span className="eyebrow">CAMPOS MATERIALIZADOS</span><h2>Prévia do pacote</h2></div>
+   <div className="dataGrid">{Object.entries(readiness?.mappedFields??{}).map(([key,value])=><article className="card" key={key}><h2>{key}</h2><p>{show(value)}</p></article>)}</div>
+  </section>
+
+  <section className="detailSection">
+   <div><span className="eyebrow">HISTÓRICO</span><h2>Revisões geradas</h2></div>
+   <div className="dataGrid">
    {items.length===0?<div className="infoCard">Nenhum pacote gerado para esta ocorrência.</div>:items.map(item=>
     <article className="card" key={item.id}>
      <h2>Revisão {item.revision}</h2>
@@ -110,10 +194,18 @@ export default function SidecExportsPage(){
      {item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
      {item.externalNotes&&<p>{item.externalNotes}</p>}
 
+     {item.documents?.length>0&&<div><strong>Documentos do pacote</strong><ul>{item.documents.map(doc=><li key={doc.id}><a href={documentPdfUrl(doc.id)} target="_blank" rel="noreferrer">{doc.number??"Documento"} · {doc.title} · R{doc.revision}</a></li>)}</ul></div>}
+
      <div className="headerActions">
       <a className="secondaryLink" href={downloadUrl(item.id,"json")}>Baixar JSON</a>
       <a className="secondaryLink" href={downloadUrl(item.id,"csv")}>Baixar CSV</a>
+      <button className="secondaryLink" disabled={busy||item.revision===1} type="button" onClick={()=>void compare(item)}>Comparar com anterior</button>
      </div>
+
+     {comparisons[item.id]&&<div className="infoCard" style={{marginTop:10}}>
+      <strong>{comparisons[item.id].against?`R${comparisons[item.id].against?.revision} → R${item.revision}: ${comparisons[item.id].count??0} alteração(ões)`:"Primeira revisão"}</strong>
+      {(comparisons[item.id].differences??[]).slice(0,40).map((diff,index)=><div key={`${diff.path}-${index}`} style={{marginTop:8}}><code>{diff.path}</code><div><small>Antes: {show(diff.before)}</small></div><div><small>Depois: {show(diff.after)}</small></div></div>)}
+     </div>}
 
      {item.status==="READY"&&<div className="headerActions" style={{marginTop:10}}><button className="primaryButton" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"EXPORTED")}>Marcar como exportado</button><button className="secondaryLink" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"CANCELLED")}>Cancelar</button></div>}
 
@@ -129,6 +221,7 @@ export default function SidecExportsPage(){
      </div>}
     </article>
    )}
+   </div>
   </section>
  </main>;
 }
