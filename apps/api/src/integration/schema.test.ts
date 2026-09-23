@@ -12,6 +12,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0019_cobrade_catalog.sql"));
  assert.ok(files.includes("0020_sidec_reference_operations.sql"));
  assert.ok(files.includes("0021_sidec_interoperability.sql"));
+ assert.ok(files.includes("0022_sidec_readiness_mapping_documents.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -61,6 +62,17 @@ test("pacotes SIDEC possuem revisao unica e estados controlados",async()=>{
  assert.match(defs,/SUBMITTED/);
  assert.match(defs,/ACKNOWLEDGED/);
  assert.match(defs,/incident_id, revision/);
+});
+
+test("SIDEC v1.14 possui mapeamentos, checklist e manifesto documental",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_field_mappings','sidec_export_documents') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_export_documents","sidec_field_mappings"]);
+ const columns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_exports' AND column_name='readiness_snapshot'`);
+ assert.equal(columns.rowCount,1);
+ const defaults=await db.query(`SELECT count(*)::int AS count FROM sidec_field_mappings WHERE organization_id IS NULL AND enabled=true`);
+ assert.ok(Number(defaults.rows[0]?.count??0)>=5);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
