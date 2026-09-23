@@ -3,6 +3,27 @@ import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
+import { buildMappedFields, diffSidecValues, evaluateSidecReadiness, isSidecReady, type SidecMapping } from "../lib/sidec-readiness.js";
+
+const exportCreateSchema=z.object({
+ documentIds:z.array(z.string().uuid()).max(50).default([])
+});
+
+const mappingSchema=z.object({
+ sourcePath:z.string().trim().min(3).max(120),
+ targetField:z.string().trim().regex(/^[A-Za-z0-9_.-]+$/).max(160),
+ required:z.boolean().default(false),
+ enabled:z.boolean().default(true),
+ sortOrder:z.number().int().min(0).max(10000).default(100)
+});
+const mappingsUpdateSchema=z.object({items:z.array(mappingSchema).min(1).max(100)});
+
+const allowedSourcePaths=[
+ "incident.protocol","incident.cobradeCode","incident.summary","incident.status","incident.priority",
+ "incident.description","incident.addressLine","incident.neighborhood","incident.referencePoint",
+ "incident.latitude","incident.longitude","incident.typeCode","incident.typeName","incident.typeGroup",
+ "incident.riskToLife","incident.source","incident.createdAt","incident.updatedAt"
+] as const;
 
 const statusSchema=z.object({
  status:z.enum(["EXPORTED","SUBMITTED","ACKNOWLEDGED","REJECTED","CANCELLED"]),
@@ -18,6 +39,19 @@ const transitions:Record<string,string[]>={
  REJECTED:[],
  CANCELLED:[]
 };
+
+async function effectiveMappings(org:string):Promise<SidecMapping[]>{
+ const r=await db.query(`SELECT DISTINCT ON (target_field)
+   source_path AS "sourcePath",target_field AS "targetField",required,enabled,sort_order AS "sortOrder"
+   FROM sidec_field_mappings
+   WHERE organization_id IS NULL OR organization_id=$1
+   ORDER BY target_field,(organization_id IS NOT NULL) DESC`,[org]);
+ return r.rows as SidecMapping[];
+}
+
+function incidentRoot(incident:Record<string,unknown>){
+ return {incident};
+}
 
 function organizationId(value:string|null){
  if(!value){const error=new Error("Usuário sem organização vinculada.");(error as Error&{statusCode?:number}).statusCode=409;throw error;}
