@@ -57,9 +57,9 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main className="loginShell">
+    <main className="loginShell authUnified">
       <section className="loginBrand">
-        <span className="eyebrow">SIGDEC</span>
+        <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
         <h1>Nova senha</h1>
         <p>Escolha uma credencial forte e exclusiva para o sistema.</p>
       </section>
