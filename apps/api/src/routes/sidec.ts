@@ -143,6 +143,47 @@ export async function sidecRoutes(app:FastifyInstance){
   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
  });
 
+ app.get("/api/v1/sidec/cobrade-requirements",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const cobradeCode=String((request.query as {cobradeCode?:string})?.cobradeCode??"").trim();
+  if(!cobradeCode)return reply.code(400).send({error:"COBRADE_REQUIRED"});
+  return {cobradeCode,items:await effectiveCobradeRequirements(org,cobradeCode),sourceOptions:[...allowedSourcePaths]};
+ });
+
+ app.put("/api/v1/sidec/cobrade-requirements",{preHandler:requirePermission("sidec_cobrade_requirements.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=cobradeRequirementsUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const {cobradeCode,items}=parsed.data;
+  const catalogCount=await db.query(`SELECT count(*)::int AS count FROM cobrade_catalog WHERE organization_id=$1 AND active=true`,[org]);
+  if(Number(catalogCount.rows[0]?.count??0)>0){
+   const valid=await db.query(`SELECT 1 FROM cobrade_catalog WHERE organization_id=$1 AND code=$2 AND active=true`,[org,cobradeCode]);
+   if(!valid.rows[0])return reply.code(400).send({error:"COBRADE_NOT_IN_CATALOG"});
+  }
+  const paths=new Set<string>();
+  for(const item of items){
+   if(!(allowedSourcePaths as readonly string[]).includes(item.sourcePath))return reply.code(400).send({error:"INVALID_SOURCE_PATH",sourcePath:item.sourcePath});
+   if(paths.has(item.sourcePath))return reply.code(400).send({error:"DUPLICATE_SOURCE_PATH",sourcePath:item.sourcePath});
+   paths.add(item.sourcePath);
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const before=await client.query(`SELECT source_path AS "sourcePath",label,required,enabled,sort_order AS "sortOrder"
+     FROM sidec_cobrade_requirements WHERE organization_id=$1 AND cobrade_code=$2 ORDER BY sort_order,source_path`,[org,cobradeCode]);
+   await client.query(`DELETE FROM sidec_cobrade_requirements WHERE organization_id=$1 AND cobrade_code=$2`,[org,cobradeCode]);
+   for(const item of items){
+    await client.query(`INSERT INTO sidec_cobrade_requirements(organization_id,cobrade_code,source_path,label,required,enabled,sort_order,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[org,cobradeCode,item.sourcePath,item.label,item.required,item.enabled,item.sortOrder,auth.userId]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,ip,user_agent,before_data,after_data,metadata)
+     VALUES($1,'sidec_cobrade_requirements.replace','sidec_cobrade_requirements',$2,$3,$4::jsonb,$5::jsonb,$6::jsonb)`,
+     [auth.userId,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows),JSON.stringify(items),JSON.stringify({cobradeCode})]);
+   await client.query("COMMIT");
+   return {cobradeCode,items:await effectiveCobradeRequirements(org,cobradeCode)};
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
+
  app.get("/api/v1/incidents/:id/sidec-readiness",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
   const incident=await db.query(`SELECT i.id,i.protocol,i.status,i.priority,i.risk_to_life AS "riskToLife",i.summary,i.description,i.source,
@@ -154,12 +195,15 @@ export async function sidecRoutes(app:FastifyInstance){
   const row=incident.rows[0] as Record<string,unknown>|undefined;
   if(!row)return reply.code(404).send({error:"NOT_FOUND"});
   const mappings=await effectiveMappings(org);
-  const checks=evaluateSidecReadiness(incidentRoot(row),mappings);
+  const root=incidentRoot(row);
+  const cobradeCode=String(row.cobradeCode??"").trim()||null;
+  const cobradeRequirements=await effectiveCobradeRequirements(org,cobradeCode);
+  const checks=[...evaluateSidecReadiness(root,mappings),...evaluateCobradeRequirements(root,cobradeRequirements)];
   const documents=await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
     FROM technical_documents
     WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED'
     ORDER BY issued_at DESC,created_at DESC`,[org,id]);
-  return {ready:isSidecReady(checks),checks,mappings,availableDocuments:documents.rows,mappedFields:buildMappedFields(incidentRoot(row),mappings)};
+  return {ready:isSidecReady(checks),checks,mappings,cobradeCode,cobradeRequirements,availableDocuments:documents.rows,mappedFields:buildMappedFields(root,mappings)};
  });
 
  app.get("/api/v1/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
