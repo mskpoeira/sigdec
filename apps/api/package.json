@@ -10,7 +10,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/scripts/migrate.ts",
     "bootstrap:master": "tsx src/scripts/bootstrap-master.ts",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/lib/*.test.ts",
+    "test:integration": "tsx --test src/integration/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
