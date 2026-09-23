@@ -36,6 +36,12 @@ function csvCell(value:unknown){
 }
 
 export function sidecPackageSummaryCsv(pkg:SidecPackage){
+ const mappedEntries=Object.entries(pkg.mappedFields??{});
+ if(mappedEntries.length){
+  const headers=mappedEntries.map(([key])=>key);
+  const values=mappedEntries.map(([,value])=>value);
+  return [headers,values].map(row=>row.map(csvCell).join(";")).join("\n");
+ }
  const incident=pkg.incident;
  const rows=[
   ["schema_version","generated_at","municipality","state","protocol","status","priority","cobrade","summary","address","neighborhood","latitude","longitude"],
