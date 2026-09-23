@@ -203,6 +203,23 @@ export default function SidecExportsPage(){
   </section>
 
   <section className="detailSection">
+   <div><span className="eyebrow">COBRADE</span><h2>Requisitos adicionais{readiness?.cobradeCode&&<> · {readiness.cobradeCode}</>}</h2><p>Regras municipais adicionais para este código. O SIGDEC não presume exigências oficiais estaduais.</p></div>
+   {!readiness?.cobradeCode?<div className="infoCard">A ocorrência precisa ter um código COBRADE para configurar regras específicas.</div>:<>
+    <div className="dataGrid">
+     {cobradeRows.length===0?<div className="infoCard">Nenhum requisito adicional configurado para este COBRADE.</div>:cobradeRows.map((row,index)=><article className="card" key={row.sourcePath+"-"+index}>
+      <label>Campo<select value={row.sourcePath} onChange={e=>updateCobradeRequirement(index,{sourcePath:e.target.value})}>{sourceOptions.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
+      <label>Rótulo<input value={row.label} onChange={e=>updateCobradeRequirement(index,{label:e.target.value})}/></label>
+      <label>Ordem<input type="number" min="0" value={row.sortOrder} onChange={e=>updateCobradeRequirement(index,{sortOrder:Number(e.target.value)})}/></label>
+      <label><input type="checkbox" checked={row.enabled} onChange={e=>updateCobradeRequirement(index,{enabled:e.target.checked})}/> Ativo</label>
+      <label><input type="checkbox" checked={row.required} onChange={e=>updateCobradeRequirement(index,{required:e.target.checked})}/> Obrigatório</label>
+      <button className="secondaryLink" type="button" disabled={busy} onClick={()=>removeCobradeRequirement(index)}>Remover</button>
+     </article>)}
+    </div>
+    <div className="headerActions" style={{marginTop:12}}><button className="secondaryLink" type="button" disabled={busy} onClick={addCobradeRequirement}>Adicionar requisito</button><button className="primaryButton" type="button" disabled={busy} onClick={()=>void saveCobradeRequirements()}>Salvar requisitos COBRADE</button></div>
+   </>}
+  </section>
+
+  <section className="detailSection">
    <div><span className="eyebrow">DOCUMENTOS</span><h2>Documentos emitidos que acompanharão a revisão</h2></div>
    {(readiness?.availableDocuments??[]).length===0?<div className="infoCard">Nenhum documento técnico emitido está vinculado à ocorrência. Documentos são opcionais.</div>:
    <div className="dataGrid">{readiness?.availableDocuments.map(doc=><label className="card" key={doc.id} style={{cursor:"pointer"}}>
