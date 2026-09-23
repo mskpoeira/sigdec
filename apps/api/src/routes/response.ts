@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
@@ -20,7 +21,26 @@ const stationSchema=z.object({
 const readingSchema=z.object({ measuredAt:z.coerce.date(), metric:z.string().trim().min(1).max(50), value:z.number(), unit:z.string().trim().min(1).max(30), source:z.string().trim().max(40).default("manual") });
 const thresholdSchema=z.object({stationId:z.string().uuid(),metric:z.string().trim().min(1).max(50),severity:z.enum(["WATCH","WARNING","EMERGENCY"]),comparison:z.enum(["GTE","LTE"]),thresholdValue:z.number(),unit:z.string().trim().min(1).max(30),title:z.string().trim().min(3).max(240),guidance:z.string().trim().max(3000).optional()});
 const monitoringEventStatusSchema=z.object({status:z.enum(["ACKNOWLEDGED","CLOSED"])});
+const ingestKeySchema=z.object({name:z.string().trim().min(3).max(120)});
+const externalReadingSchema=z.object({measuredAt:z.coerce.date(),metric:z.string().trim().min(1).max(50),value:z.number(),unit:z.string().trim().min(1).max(30)});
 
+
+function tokenHash(token:string){return createHash("sha256").update(token).digest("hex");}
+async function persistMonitoringReading(organizationId:string,stationId:string,v:z.infer<typeof readingSchema>){
+ const reading=await db.query(`INSERT INTO monitoring_readings(station_id,measured_at,metric,value,unit,source) VALUES($1,$2,$3,$4,$5,$6)
+  ON CONFLICT(station_id,measured_at,metric) DO UPDATE SET value=EXCLUDED.value,unit=EXCLUDED.unit,source=EXCLUDED.source
+  RETURNING id`,[stationId,v.measuredAt,v.metric,v.value,v.unit,v.source]);
+ const readingId=reading.rows[0]?.id;
+ if(readingId){
+  await db.query(`INSERT INTO monitoring_events(organization_id,station_id,reading_id,threshold_id,severity,metric,observed_value,threshold_value,unit,title,guidance)
+   SELECT t.organization_id,t.station_id,$1,t.id,t.severity,t.metric,$2,t.threshold_value,t.unit,t.title,t.guidance
+     FROM monitoring_thresholds t
+    WHERE t.organization_id=$3 AND t.station_id=$4 AND t.metric=$5 AND t.unit=$6 AND t.active=true
+      AND ((t.comparison='GTE' AND $2>=t.threshold_value) OR (t.comparison='LTE' AND $2<=t.threshold_value))
+   ON CONFLICT(reading_id,threshold_id) DO NOTHING`,[readingId,v.value,organizationId,stationId,v.metric,v.unit]);
+ }
+ return readingId;
+}
 
 const shelterSchema=z.object({name:z.string().trim().min(2).max(200),addressLine:z.string().trim().max(300).optional(),neighborhood:z.string().trim().max(120).optional(),capacityPeople:z.number().int().min(0),status:z.enum(["STANDBY","OPEN","FULL","CLOSED"]).default("STANDBY"),notes:z.string().trim().max(3000).optional()});
 const householdSchema=z.object({incidentId:z.string().uuid().optional(),shelterId:z.string().uuid().optional(),responsibleName:z.string().trim().min(3).max(200),phone:z.string().trim().max(50).optional(),addressOrigin:z.string().trim().max(300).optional(),neighborhoodOrigin:z.string().trim().max(120).optional(),adults:z.number().int().min(0).default(0),children:z.number().int().min(0).default(0),elderly:z.number().int().min(0).default(0),personsWithDisability:z.number().int().min(0).default(0),condition:z.enum(["DISPLACED","HOMELESS"]),notes:z.string().trim().max(3000).optional()});
@@ -49,20 +69,47 @@ export async function responseRoutes(app:FastifyInstance){
  app.post("/api/v1/monitoring/stations/:id/readings",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
   const o=org(authFrom(req).organizationId),{id}=req.params as {id:string},p=readingSchema.safeParse(req.body); if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
   const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[id,o]); if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const v=p.data;
-  const reading=await db.query(`INSERT INTO monitoring_readings(station_id,measured_at,metric,value,unit,source) VALUES($1,$2,$3,$4,$5,$6)
-    ON CONFLICT(station_id,measured_at,metric) DO UPDATE SET value=EXCLUDED.value,unit=EXCLUDED.unit,source=EXCLUDED.source
-    RETURNING id`,[id,v.measuredAt,v.metric,v.value,v.unit,v.source]);
-  const readingId=reading.rows[0]?.id;
-  if(readingId){
-   await db.query(`INSERT INTO monitoring_events(organization_id,station_id,reading_id,threshold_id,severity,metric,observed_value,threshold_value,unit,title,guidance)
-    SELECT t.organization_id,t.station_id,$1,t.id,t.severity,t.metric,$2,t.threshold_value,t.unit,t.title,t.guidance
-      FROM monitoring_thresholds t
-     WHERE t.organization_id=$3 AND t.station_id=$4 AND t.metric=$5 AND t.unit=$6 AND t.active=true
-       AND ((t.comparison='GTE' AND $2>=t.threshold_value) OR (t.comparison='LTE' AND $2<=t.threshold_value))
-    ON CONFLICT(reading_id,threshold_id) DO NOTHING`,[readingId,v.value,o,id,v.metric,v.unit]);
-  }
+  const readingId=await persistMonitoringReading(o,id,p.data);
   return reply.code(201).send({ok:true,readingId});
+ });
+ app.post("/api/v1/monitoring/stations/:id/ingest-keys",{preHandler:requirePermission("integrations.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=ingestKeySchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const station=await db.query("SELECT id FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[id,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const token="sigdec_"+randomBytes(32).toString("base64url");
+  const r=await db.query(`INSERT INTO monitoring_ingest_keys(organization_id,station_id,name,token_hash,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,name,created_at AS "createdAt"`,[o,id,p.data.name,tokenHash(token),a.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,$2,$3,$4,$5,$6,$7)`,[a.userId,"MONITORING_INGEST_KEY_CREATED","monitoring_station",id,req.ip,req.headers["user-agent"]??null,JSON.stringify({keyId:r.rows[0]?.id,name:p.data.name})]);
+  return reply.code(201).send({...r.rows[0],token});
+ });
+ app.get("/api/v1/monitoring/stations/:id/ingest-keys",{preHandler:requirePermission("integrations.manage")},async(req,reply)=>{
+  const o=org(authFrom(req).organizationId),{id}=req.params as {id:string};
+  const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[id,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`SELECT id,name,active,created_at AS "createdAt",last_used_at AS "lastUsedAt" FROM monitoring_ingest_keys WHERE station_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,[id,o]);
+  return {items:r.rows};
+ });
+ app.post("/api/v1/integrations/monitoring/readings",async(req,reply)=>{
+  const header=req.headers.authorization??"";if(!header.startsWith("Bearer "))return reply.code(401).send({error:"UNAUTHENTICATED"});
+  const token=header.slice(7).trim();if(!token)return reply.code(401).send({error:"UNAUTHENTICATED"});
+  const p=externalReadingSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const key=await db.query(`SELECT k.id AS "keyId",k.organization_id AS "organizationId",k.station_id AS "stationId"
+   FROM monitoring_ingest_keys k JOIN monitoring_stations s ON s.id=k.station_id
+   WHERE k.token_hash=$1 AND k.active=true AND s.active=true`,[tokenHash(token)]);
+  const k=key.rows[0] as {keyId:string;organizationId:string;stationId:string}|undefined;if(!k)return reply.code(401).send({error:"INVALID_INGEST_KEY"});
+  const v={...p.data,source:"external"} as z.infer<typeof readingSchema>;
+  const readingId=await persistMonitoringReading(k.organizationId,k.stationId,v);
+  await db.query("UPDATE monitoring_ingest_keys SET last_used_at=now() WHERE id=$1",[k.keyId]);
+  await db.query(`INSERT INTO audit_logs(action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7)`,["MONITORING_EXTERNAL_READING","monitoring_reading",String(readingId??""),req.ip,req.headers["user-agent"]??null,JSON.stringify({stationId:k.stationId,metric:v.metric,value:v.value,unit:v.unit}),JSON.stringify({ingestKeyId:k.keyId})]);
+  return reply.code(201).send({ok:true,readingId});
+ });
+ app.post("/api/v1/monitoring/events/:id/alert-draft",{preHandler:requirePermission("alerts.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const ev=await db.query(`SELECT e.id,e.severity,e.title,e.guidance,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,s.code AS "stationCode",s.name AS "stationName",al.id AS "alertId"
+   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id LEFT JOIN alerts al ON al.monitoring_event_id=e.id
+   WHERE e.id=$1 AND e.organization_id=$2`,[id,o]);
+  const x=ev.rows[0];if(!x)return reply.code(404).send({error:"NOT_FOUND"});if(x.alertId)return reply.code(409).send({error:"ALERT_ALREADY_EXISTS",alertId:x.alertId});
+  const message=`${x.stationCode} · ${x.stationName}. ${x.metric}: ${x.observedValue} ${x.unit}; limiar: ${x.thresholdValue} ${x.unit}.${x.guidance?" "+x.guidance:""}`;
+  const r=await db.query(`INSERT INTO alerts(organization_id,severity,title,message,created_by,monitoring_event_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,status`,[o,x.severity,x.title,message,a.userId,id]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"ALERT_DRAFT_FROM_MONITORING_EVENT","alert",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify({status:"DRAFT",severity:x.severity,title:x.title}),JSON.stringify({monitoringEventId:id})]);
+  return reply.code(201).send({id:r.rows[0]?.id,status:r.rows[0]?.status});
  });
  app.get("/api/v1/monitoring/readings/latest",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
@@ -86,8 +133,8 @@ export async function responseRoutes(app:FastifyInstance){
  });
  app.get("/api/v1/monitoring/events",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
-  const r=await db.query(`SELECT e.id,e.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",e.severity,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.title,e.guidance,e.status,e.created_at AS "createdAt"
-   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 200`,[o]);
+  const r=await db.query(`SELECT e.id,e.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",e.severity,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.title,e.guidance,e.status,e.created_at AS "createdAt",a.id AS "alertId",a.status AS "alertStatus"
+   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id LEFT JOIN alerts a ON a.monitoring_event_id=e.id WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 200`,[o]);
   return {items:r.rows};
  });
  app.patch("/api/v1/monitoring/events/:id/status",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
