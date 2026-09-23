@@ -72,14 +72,14 @@ export async function sidecRoutes(app:FastifyInstance){
    db.query(`SELECT request_type AS "requestType",status,destination,justification,requested_items AS "requestedItems",
       external_protocol AS "externalProtocol",submitted_at AS "submittedAt",resolved_at AS "resolvedAt",resolution_notes AS "resolutionNotes"
       FROM operational_support_requests WHERE incident_id=$1 AND organization_id=$2 ORDER BY created_at ASC`,[id,org]),
-   db.query(`SELECT d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",d.notes,
+   db.query(`SELECT d.delivered_at AS "deliveredAt",
       COALESCE(json_agg(json_build_object('item',hi.name,'quantity',di.quantity,'unit',hi.unit)) FILTER (WHERE hi.id IS NOT NULL),'[]'::json) AS items
       FROM humanitarian_deliveries d
       LEFT JOIN humanitarian_delivery_items di ON di.delivery_id=d.id
       LEFT JOIN humanitarian_items hi ON hi.id=di.item_id
       WHERE d.incident_id=$1 AND d.organization_id=$2
       GROUP BY d.id ORDER BY d.delivered_at ASC`,[id,org]),
-   db.query(`SELECT occurred_at AS "occurredAt",event_type AS "eventType",note,metadata
+   db.query(`SELECT occurred_at AS "occurredAt",event_type AS "eventType"
       FROM incident_timeline WHERE incident_id=$1 ORDER BY occurred_at ASC,id ASC`,[id])
   ]);
 
