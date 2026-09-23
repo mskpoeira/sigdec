@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export type SidecPackage={
- schemaVersion:"1.0";
+ schemaVersion:"1.0"|"1.1";
  generatedAt:string;
  municipality:{name:string;state:string;ibgeCode?:string|null};
  incident:Record<string,unknown>;
@@ -10,6 +10,8 @@ export type SidecPackage={
  supportRequests:Array<Record<string,unknown>>;
  humanitarianDeliveries:Array<Record<string,unknown>>;
  timeline:Array<Record<string,unknown>>;
+ documents:Array<Record<string,unknown>>;
+ mappedFields:Record<string,unknown>;
 };
 
 function canonical(value:unknown):unknown{
@@ -55,9 +57,11 @@ export function buildSidecPackage(input:{
  supportRequests?:Array<Record<string,unknown>>;
  humanitarianDeliveries?:Array<Record<string,unknown>>;
  timeline?:Array<Record<string,unknown>>;
+ documents?:Array<Record<string,unknown>>;
+ mappedFields?:Record<string,unknown>;
 }):SidecPackage{
  return {
-  schemaVersion:"1.0",
+  schemaVersion:"1.1",
   generatedAt:input.generatedAt??new Date().toISOString(),
   municipality:input.municipality,
   incident:input.incident,
@@ -65,6 +69,8 @@ export function buildSidecPackage(input:{
   inspections:input.inspections??[],
   supportRequests:input.supportRequests??[],
   humanitarianDeliveries:input.humanitarianDeliveries??[],
-  timeline:input.timeline??[]
+  timeline:input.timeline??[],
+  documents:input.documents??[],
+  mappedFields:input.mappedFields??{}
  };
 }
