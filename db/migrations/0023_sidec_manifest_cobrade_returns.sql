@@ -32,7 +32,8 @@ CREATE TABLE sidec_return_records (
   payload jsonb NOT NULL,
   payload_hash char(64) NOT NULL,
   imported_by uuid NOT NULL REFERENCES users(id),
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(export_id,payload_hash)
 );
 
 CREATE INDEX sidec_return_records_export_idx
