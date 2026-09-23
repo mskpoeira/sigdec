@@ -7,6 +7,7 @@ const inspectionType = z.enum([
   "PREVENTIVE", "STRUCTURAL", "TREE", "SLOPE", "FLOOD", "POST_EVENT", "OTHER"
 ]);
 const riskLevel = z.enum(["UNASSESSED", "LOW", "MODERATE", "HIGH", "CRITICAL"]);
+const historyQuerySchema=z.object({hours:z.coerce.number().int().min(1).max(168).default(24)});
 
 function organization(id: string | null) {
   if (!id) {
@@ -120,6 +121,49 @@ export async function fieldRoutes(app: FastifyInstance) {
     );
 
     return { incidents: incidents.rows, positions: positions.rows, monitoringEvents: monitoringEvents.rows };
+  });
+
+  app.get("/api/v1/field/history", {
+    preHandler: requirePermission("field.read")
+  }, async (request, reply) => {
+    const orgId = organization(authFrom(request).organizationId);
+    const parsed=historyQuerySchema.safeParse(request.query??{});
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const hours=parsed.data.hours;
+
+    const [positions, monitoring] = await Promise.all([
+      db.query(
+        `SELECT p.user_id AS "userId",u.display_name AS "displayName",tm.code AS "teamCode",
+                p.latitude,p.longitude,p.accuracy_meters AS "accuracyMeters",p.recorded_at AS "recordedAt"
+           FROM field_positions p
+           JOIN users u ON u.id=p.user_id
+           LEFT JOIN teams tm ON tm.id=p.team_id
+          WHERE p.organization_id=$1
+            AND p.recorded_at >= now() - ($2::int * interval '1 hour')
+          ORDER BY p.recorded_at DESC
+          LIMIT 1000`,
+        [orgId,hours]
+      ),
+      db.query(
+        `SELECT e.id,e.severity,e.title,e.status,e.metric,
+                e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,
+                e.created_at AS "createdAt",e.closed_at AS "closedAt",
+                s.code AS "stationCode",s.name AS "stationName",s.latitude,s.longitude,
+                p.code AS "protocolCode",pv.version_no AS "protocolVersionNo"
+           FROM monitoring_events e
+           JOIN monitoring_stations s ON s.id=e.station_id
+           LEFT JOIN operational_protocol_versions pv ON pv.id=e.protocol_version_id
+           LEFT JOIN operational_protocols p ON p.id=pv.protocol_id
+          WHERE e.organization_id=$1
+            AND e.created_at >= now() - ($2::int * interval '1 hour')
+            AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+          ORDER BY e.created_at DESC
+          LIMIT 500`,
+        [orgId,hours]
+      )
+    ]);
+
+    return {hours,positions:positions.rows,monitoringEvents:monitoring.rows};
   });
 
   app.post("/api/v1/field/location", {
