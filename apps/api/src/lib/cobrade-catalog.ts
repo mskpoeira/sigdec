@@ -27,8 +27,10 @@ function splitLine(line:string,delimiter:string){
 export function parseCobradeCatalogCsv(csv:string):CobradeCatalogItem[]{
  const lines=csv.replace(/^\uFEFF/,"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
  if(lines.length<2)throw new Error("COBRADE_CSV_EMPTY");
- const delimiter=lines[0].includes(";")?";":",";
- const headers=splitLine(lines[0],delimiter).map(normalizeHeader);
+ const header=lines[0];
+ if(!header)throw new Error("COBRADE_CSV_EMPTY");
+ const delimiter=header.includes(";")?";":",";
+ const headers=splitLine(header,delimiter).map(normalizeHeader);
  const index=(...names:string[])=>headers.findIndex(h=>names.includes(h));
  const codeIndex=index("codigo","codigocobrade","cobrade","code");
  const nameIndex=index("nome","descricao","denominacao","name");
