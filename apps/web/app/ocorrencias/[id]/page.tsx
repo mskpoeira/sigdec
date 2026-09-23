@@ -94,7 +94,10 @@ const eventLabels: Record<string, string> = {
   "incident.created": "Ocorrência registrada",
   "incident.status_changed": "Situação atualizada",
   "dispatch.created": "Equipe despachada",
-  "dispatch.status_changed": "Despacho atualizado"
+  "dispatch.status_changed": "Despacho atualizado",
+  "civil_action.created": "Ação da Defesa Civil registrada",
+  "support_request.created": "Solicitação operacional criada",
+  "support_request.status_changed": "Solicitação operacional atualizada"
 };
 
 const dispatchNext: Record<string, string[]> = {
@@ -117,6 +120,14 @@ export default function OcorrenciaDetalhePage() {
   const [teamId, setTeamId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [dispatchNote, setDispatchNote] = useState("");
+  const [actionType, setActionType] = useState("RESPONSE");
+  const [actionTitle, setActionTitle] = useState("");
+  const [actionDescription, setActionDescription] = useState("");
+  const [actionParticipants, setActionParticipants] = useState("0");
+  const [supportType, setSupportType] = useState("HUMANITARIAN_AID");
+  const [supportDestination, setSupportDestination] = useState("");
+  const [supportJustification, setSupportJustification] = useState("");
+  const [supportItems, setSupportItems] = useState("");
 
   const handleAuth = useCallback((response: Response) => {
     if (response.status === 401) {
@@ -219,6 +230,59 @@ export default function OcorrenciaDetalhePage() {
     }
   }
 
+  async function createCivilAction(event: FormEvent) {
+    event.preventDefault();
+    if (!actionTitle.trim()) return;
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(`${API_URL}/api/v1/civil-defense/actions`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          incidentId: id,
+          actionType,
+          title: actionTitle,
+          description: actionDescription || undefined,
+          participantsCount: Number(actionParticipants || 0),
+          addressLine: detail?.incident.address_line || undefined,
+          neighborhood: detail?.incident.neighborhood || undefined,
+          latitude: detail?.incident.latitude ?? undefined,
+          longitude: detail?.incident.longitude ?? undefined
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message ?? body.error ?? "Não foi possível registrar a ação.");
+      setActionTitle(""); setActionDescription(""); setActionParticipants("0");
+      setMessage("Ação da Defesa Civil registrada e vinculada à ocorrência.");
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao registrar ação."); }
+    finally { setBusy(false); }
+  }
+
+  async function createSupportRequest(event: FormEvent) {
+    event.preventDefault();
+    if (!supportJustification.trim()) return;
+    setBusy(true); setMessage("");
+    try {
+      const requestedItems = supportItems.split("\n").map((name) => name.trim()).filter(Boolean).map((name) => ({ name }));
+      const response = await fetch(`${API_URL}/api/v1/support-requests`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          incidentId: id,
+          requestType: supportType,
+          destination: supportDestination || undefined,
+          justification: supportJustification,
+          requestedItems
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message ?? body.error ?? "Não foi possível criar a solicitação.");
+      setSupportDestination(""); setSupportJustification(""); setSupportItems("");
+      setMessage("Solicitação operacional criada como rascunho e vinculada à ocorrência.");
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao criar solicitação."); }
+    finally { setBusy(false); }
+  }
+
   async function updateDispatch(dispatchId: string, status: string) {
     setBusy(true);
     setMessage("");
@@ -256,6 +320,7 @@ export default function OcorrenciaDetalhePage() {
           <p>{incident.type_group} · {incident.type_name}</p>
         </div>
         <div className="headerActions">
+          <Link className="secondaryLink" href={`/ocorrencias/${id}/extrato`}>Extrato operacional</Link>
           <Link className="secondaryLink" href="/ocorrencias">Voltar</Link>
           <span className={`statusTag priority-${incident.priority}`}>
             {incident.priority} · {statusLabels[incident.status] ?? incident.status}
@@ -347,6 +412,41 @@ export default function OcorrenciaDetalhePage() {
             <textarea value={dispatchNote} onChange={(event) => setDispatchNote(event.target.value)} />
           </label>
           <button disabled={busy || !teamId} type="submit">Despachar</button>
+        </form>
+
+        <form className="incidentForm compactForm" onSubmit={createCivilAction}>
+          <div><span className="eyebrow">AÇÕES MUNICIPAIS</span><h2>Registrar ação da Defesa Civil</h2></div>
+          <label>Tipo
+            <select value={actionType} onChange={(event) => setActionType(event.target.value)}>
+              <option value="PREVENTION">Prevenção</option><option value="PREPAREDNESS">Preparação</option>
+              <option value="MONITORING">Monitoramento</option><option value="INSPECTION">Vistoria</option>
+              <option value="RESPONSE">Resposta</option><option value="HUMANITARIAN">Assistência humanitária</option>
+              <option value="TRAINING">Capacitação</option><option value="RECOVERY">Recuperação</option>
+              <option value="COMMUNICATION">Comunicação de risco</option><option value="OTHER">Outra</option>
+            </select>
+          </label>
+          <label>Título<input required value={actionTitle} onChange={(event)=>setActionTitle(event.target.value)} /></label>
+          <label>Descrição<textarea value={actionDescription} onChange={(event)=>setActionDescription(event.target.value)} /></label>
+          <label>Participantes<input type="number" min="0" value={actionParticipants} onChange={(event)=>setActionParticipants(event.target.value)} /></label>
+          <button disabled={busy} type="submit">Registrar ação</button>
+        </form>
+
+        <form className="incidentForm compactForm" onSubmit={createSupportRequest}>
+          <div><span className="eyebrow">SOLICITAÇÕES</span><h2>Nova solicitação operacional</h2></div>
+          <label>Tipo
+            <select value={supportType} onChange={(event)=>setSupportType(event.target.value)}>
+              <option value="HUMANITARIAN_AID">Ajuda humanitária</option>
+              <option value="EMERGENCY_INSPECTION">Vistoria emergencial</option>
+              <option value="STATE_SUPPORT">Apoio estadual</option>
+              <option value="LOGISTICS">Logística</option>
+              <option value="EQUIPMENT">Equipamentos</option>
+              <option value="OTHER">Outra</option>
+            </select>
+          </label>
+          <label>Destino/órgão<input value={supportDestination} onChange={(event)=>setSupportDestination(event.target.value)} placeholder="Ex.: Defesa Civil Estadual" /></label>
+          <label>Justificativa<textarea required value={supportJustification} onChange={(event)=>setSupportJustification(event.target.value)} /></label>
+          <label>Itens/necessidades — um por linha<textarea value={supportItems} onChange={(event)=>setSupportItems(event.target.value)} /></label>
+          <button disabled={busy} type="submit">Criar solicitação</button>
         </form>
       </section>
 
