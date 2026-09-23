@@ -257,7 +257,7 @@ export default function SidecExportsPage(){
      <h2>Revisão {item.revision}</h2>
      <p><strong>{statusLabels[item.status]??item.status}</strong> · schema {item.schemaVersion}</p>
      <p>Gerado em {new Date(item.createdAt).toLocaleString("pt-BR")}</p>
-     <p style={{overflowWrap:"anywhere"}}><strong>SHA-256:</strong> {item.snapshotHash}</p>
+     <p style={{overflowWrap:"anywhere"}}><strong>Snapshot SHA-256:</strong> {item.snapshotHash}</p>{item.manifestHash&&<p style={{overflowWrap:"anywhere"}}><strong>Manifesto SHA-256:</strong> {item.manifestHash}</p>}
      {item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
      {item.externalNotes&&<p>{item.externalNotes}</p>}
 
@@ -266,6 +266,10 @@ export default function SidecExportsPage(){
      <div className="headerActions">
       <a className="secondaryLink" href={downloadUrl(item.id,"json")}>Baixar JSON</a>
       <a className="secondaryLink" href={downloadUrl(item.id,"csv")}>Baixar CSV</a>
+      <a className="primaryButton" href={downloadUrl(item.id,"zip")}>Baixar ZIP completo</a>
+      <select aria-label="Categoria da comparação" value={compareCategories[item.id]??"all"} onChange={e=>setCompareCategories(values=>({...values,[item.id]:e.target.value}))}>
+       <option value="all">Todas as diferenças</option><option value="incident">Ocorrência</option><option value="mappedFields">Campos mapeados</option><option value="documents">Documentos</option><option value="actions">Ações</option><option value="inspections">Vistorias</option><option value="supportRequests">Solicitações</option><option value="humanitarianDeliveries">Assistência</option><option value="timeline">Timeline</option><option value="municipality">Município</option><option value="other">Outros</option>
+      </select>
       <button className="secondaryLink" disabled={busy||item.revision===1} type="button" onClick={()=>void compare(item)}>Comparar com anterior</button>
      </div>
 
@@ -285,6 +289,11 @@ export default function SidecExportsPage(){
      {item.status==="SUBMITTED"&&<div className="incidentForm compactForm" style={{marginTop:12}}>
       <label>Observação do retorno<textarea value={notes[item.id]??item.externalNotes??""} onChange={e=>setNotes(p=>({...p,[item.id]:e.target.value}))}/></label>
       <div className="headerActions"><button className="primaryButton" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"ACKNOWLEDGED")}>Confirmar recebimento</button><button className="secondaryLink" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"REJECTED")}>Registrar rejeição/devolução</button></div>
+      <hr/>
+      <strong>Retorno estruturado SIGDEC</strong>
+      <p><small>Envelope controlado pelo SIGDEC; não é apresentado como formato oficial do SIDEC/SP.</small></p>
+      <textarea rows={10} value={returnPayloads[item.id]??""} onChange={e=>setReturnPayloads(values=>({...values,[item.id]:e.target.value}))} placeholder='{"schemaVersion":"sigdec-sidec-return/1.0",...}'/>
+      <div className="headerActions"><button className="secondaryLink" disabled={busy} type="button" onClick={()=>fillReturnTemplate(item)}>Inserir modelo</button><button className="primaryButton" disabled={busy} type="button" onClick={()=>void importStructuredReturn(item)}>Importar retorno</button></div>
      </div>}
     </article>
    )}
