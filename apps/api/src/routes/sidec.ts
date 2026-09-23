@@ -59,6 +59,58 @@ function organizationId(value:string|null){
 }
 
 export async function sidecRoutes(app:FastifyInstance){
+ app.get("/api/v1/sidec/mappings",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  return {items:await effectiveMappings(org),sourceOptions:[...allowedSourcePaths]};
+ });
+
+ app.put("/api/v1/sidec/mappings",{preHandler:requirePermission("sidec_mappings.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=mappingsUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const items=parsed.data.items;
+  const targets=new Set<string>();
+  for(const item of items){
+   if(!(allowedSourcePaths as readonly string[]).includes(item.sourcePath))return reply.code(400).send({error:"INVALID_SOURCE_PATH",sourcePath:item.sourcePath});
+   if(targets.has(item.targetField))return reply.code(400).send({error:"DUPLICATE_TARGET_FIELD",targetField:item.targetField});
+   targets.add(item.targetField);
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const before=await client.query(`SELECT source_path AS "sourcePath",target_field AS "targetField",required,enabled,sort_order AS "sortOrder"
+     FROM sidec_field_mappings WHERE organization_id=$1 ORDER BY sort_order,target_field`,[org]);
+   await client.query("DELETE FROM sidec_field_mappings WHERE organization_id=$1",[org]);
+   for(const item of items){
+    await client.query(`INSERT INTO sidec_field_mappings(organization_id,source_path,target_field,required,enabled,sort_order,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,[org,item.sourcePath,item.targetField,item.required,item.enabled,item.sortOrder,auth.userId]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,ip,user_agent,before_data,after_data)
+     VALUES($1,'sidec_mappings.replace','sidec_field_mappings',$2,$3,$4::jsonb,$5::jsonb)`,[auth.userId,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows),JSON.stringify(items)]);
+   await client.query("COMMIT");
+   return {items:await effectiveMappings(org)};
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
+
+ app.get("/api/v1/incidents/:id/sidec-readiness",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const incident=await db.query(`SELECT i.id,i.protocol,i.status,i.priority,i.risk_to_life AS "riskToLife",i.summary,i.description,i.source,
+    i.address_line AS "addressLine",i.neighborhood,i.reference_point AS "referencePoint",i.latitude,i.longitude,
+    i.created_at AS "createdAt",i.updated_at AS "updatedAt",t.code AS "typeCode",t.name AS "typeName",
+    t.group_name AS "typeGroup",t.cobrade_code AS "cobradeCode"
+    FROM incidents i JOIN incident_types t ON t.id=i.incident_type_id
+    WHERE i.id=$1 AND i.organization_id=$2`,[id,org]);
+  const row=incident.rows[0] as Record<string,unknown>|undefined;
+  if(!row)return reply.code(404).send({error:"NOT_FOUND"});
+  const mappings=await effectiveMappings(org);
+  const checks=evaluateSidecReadiness(incidentRoot(row),mappings);
+  const documents=await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
+    FROM technical_documents
+    WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED'
+    ORDER BY issued_at DESC,created_at DESC`,[org,id]);
+  return {ready:isSidecReady(checks),checks,mappings,availableDocuments:documents.rows,mappedFields:buildMappedFields(incidentRoot(row),mappings)};
+ });
+
  app.get("/api/v1/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId);
   const r=await db.query(`SELECT e.id,e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,e.schema_version AS "schemaVersion",e.status,
