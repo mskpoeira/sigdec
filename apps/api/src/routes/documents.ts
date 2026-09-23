@@ -81,7 +81,7 @@ function clientMeta(request: FastifyRequest) {
   };
 }
 
-async function buildPdf(record: Record<string, any>, signatures: Array<Record<string, any>>) {
+export async function buildPdf(record: Record<string, any>, signatures: Array<Record<string, any>>) {
   return new Promise<Buffer>((resolve, reject) => {
     const pdf = new PDFDocument({
       size: "A4",
