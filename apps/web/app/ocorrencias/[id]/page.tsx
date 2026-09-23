@@ -240,7 +240,7 @@ export default function OcorrenciaDetalhePage() {
   }
 
   if (!detail) {
-    return <main className="shell"><section className="infoCard">{message}</section></main>;
+    return <main className="shell moduleShell"><section className="infoCard">{message}</section></main>;
   }
 
   const incident = detail.incident;
@@ -248,7 +248,7 @@ export default function OcorrenciaDetalhePage() {
   const availableVehicles = vehicles.filter((item) => item.status === "AVAILABLE");
 
   return (
-    <main className="shell">
+    <main className="shell moduleShell">
       <header className="listHeader">
         <div>
           <span className="eyebrow">OCORRÊNCIA {incident.protocol}</span>
