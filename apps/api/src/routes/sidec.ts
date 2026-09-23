@@ -1,9 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import { PassThrough } from "node:stream";
+import archiver from "archiver";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
-import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
-import { buildMappedFields, diffSidecValues, evaluateSidecReadiness, isSidecReady, type SidecMapping } from "../lib/sidec-readiness.js";
+import { buildSidecPackage, canonicalJson, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
+import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
+import { buildPdf } from "./documents.js";
+import { buildMappedFields, diffSidecValues, evaluateCobradeRequirements, evaluateSidecReadiness, isSidecReady, type CobradeRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
 const exportCreateSchema=z.object({
  documentIds:z.array(z.string().uuid()).max(50).default([])
@@ -25,6 +29,27 @@ const allowedSourcePaths=[
  "incident.riskToLife","incident.source","incident.createdAt","incident.updatedAt"
 ] as const;
 
+const cobradeRequirementSchema=z.object({
+ sourcePath:z.string().trim().min(3).max(120),
+ label:z.string().trim().min(3).max(200),
+ required:z.boolean().default(true),
+ enabled:z.boolean().default(true),
+ sortOrder:z.number().int().min(0).max(10000).default(100)
+});
+const cobradeRequirementsUpdateSchema=z.object({
+ cobradeCode:z.string().trim().min(1).max(30),
+ items:z.array(cobradeRequirementSchema).max(100)
+});
+
+const returnEnvelopeSchema=z.object({
+ schemaVersion:z.literal("sigdec-sidec-return/1.0"),
+ externalProtocol:z.string().trim().min(1).max(200),
+ outcome:z.enum(["ACKNOWLEDGED","REJECTED"]),
+ receivedAt:z.coerce.date(),
+ sourceName:z.string().trim().max(200).optional(),
+ notes:z.string().trim().max(8000).optional()
+});
+
 const statusSchema=z.object({
  status:z.enum(["EXPORTED","SUBMITTED","ACKNOWLEDGED","REJECTED","CANCELLED"]),
  externalProtocol:z.string().trim().max(200).optional(),
@@ -39,6 +64,32 @@ const transitions:Record<string,string[]>={
  REJECTED:[],
  CANCELLED:[]
 };
+
+async function effectiveCobradeRequirements(org:string,cobradeCode:string|null|undefined):Promise<CobradeRequirement[]>{
+ if(!cobradeCode)return [];
+ const r=await db.query(`SELECT source_path AS "sourcePath",label,required,enabled,sort_order AS "sortOrder"
+   FROM sidec_cobrade_requirements
+   WHERE organization_id=$1 AND cobrade_code=$2
+   ORDER BY sort_order,source_path`,[org,cobradeCode]);
+ return r.rows as CobradeRequirement[];
+}
+
+async function zipBuffer(entries:Array<{name:string;data:Buffer|string}>){
+ const archive=archiver("zip",{zlib:{level:9}});
+ const stream=new PassThrough();
+ const chunks:Buffer[]=[];
+ const completed=new Promise<Buffer>((resolve,reject)=>{
+  stream.on("data",(chunk:Buffer)=>chunks.push(Buffer.from(chunk)));
+  stream.on("end",()=>resolve(Buffer.concat(chunks)));
+  stream.on("error",reject);
+  archive.on("warning",(error)=>{if((error as NodeJS.ErrnoException).code!=="ENOENT")reject(error)});
+  archive.on("error",reject);
+ });
+ archive.pipe(stream);
+ for(const entry of entries)archive.append(entry.data,{name:entry.name});
+ await archive.finalize();
+ return completed;
+}
 
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
  const r=await db.query(`SELECT DISTINCT ON (target_field)
