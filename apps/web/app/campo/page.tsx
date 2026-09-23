@@ -191,6 +191,28 @@ export default function CampoPage() {
               </button>
             ))}
           </div>
+          <div style={{marginTop:18}}>
+            <span className="eyebrow">MONITORAMENTO</span>
+            <h2>{monitoringEvents.length} sinal(is)</h2>
+            <div className="fieldIncidentList">
+              {monitoringEvents.map((signal) => (
+                <a
+                  className="fieldIncident"
+                  key={signal.id}
+                  href={`https://www.openstreetmap.org/?mlat=${signal.latitude}&mlon=${signal.longitude}#map=17/${signal.latitude}/${signal.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className={`priorityBadge priority-${signal.severity==="EMERGENCY"?"P1":signal.severity==="WARNING"?"P2":"P3"}`}>{signal.severity}</span>
+                  <span>
+                    <strong>{signal.stationCode} · {signal.stationName}</strong>
+                    <small>{signal.title}</small>
+                    <small>{signal.metric}: {signal.observedValue} {signal.unit}{signal.protocolCode?` · ${signal.protocolCode} v${signal.protocolVersionNo}`:""}</small>
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
         </aside>
       </section>
 
