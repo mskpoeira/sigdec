@@ -53,7 +53,7 @@ export default function OcorrenciasPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">CENTRAL OPERACIONAL</span>
+          <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
           <h1>Ocorrências</h1>
           <p>Fila operacional ordenada por prioridade e horário.</p>
         </div>
