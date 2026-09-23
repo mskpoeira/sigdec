@@ -103,7 +103,7 @@ export default function SidecExportsPage(){
  function updateMapping(index:number,patch:Partial<Mapping>){
   setMappingRows(rows=>rows.map((row,i)=>i===index?{...row,...patch}:row));
  }
- function removeMapping(index:number){setMappingRows(rows=>rows.filter((_,i)=>i!==index))}
+ function disableMapping(index:number){setMappingRows(rows=>rows.map((row,i)=>i===index?{...row,enabled:false,required:false}:row))}
  function addMapping(){
   const used=new Set(mappingRows.map(x=>x.sourcePath));
   const source=sourceOptions.find(x=>!used.has(x))??sourceOptions[0]??"incident.summary";
@@ -171,7 +171,7 @@ export default function SidecExportsPage(){
      <label>Ordem<input type="number" min="0" value={row.sortOrder} onChange={e=>updateMapping(index,{sortOrder:Number(e.target.value)})}/></label>
      <label><input type="checkbox" checked={row.enabled} onChange={e=>updateMapping(index,{enabled:e.target.checked})}/> Ativo</label>
      <label><input type="checkbox" checked={row.required} onChange={e=>updateMapping(index,{required:e.target.checked})}/> Obrigatório no checklist</label>
-     <button className="secondaryLink" type="button" disabled={busy} onClick={()=>removeMapping(index)}>Remover</button>
+     <button className="secondaryLink" type="button" disabled={busy} onClick={()=>disableMapping(index)}>Desativar</button>
     </article>)}
    </div>
    <div className="headerActions" style={{marginTop:12}}><button className="secondaryLink" type="button" disabled={busy} onClick={addMapping}>Adicionar campo</button><button className="primaryButton" type="button" disabled={busy||mappingRows.length===0} onClick={()=>void saveMappings()}>Salvar mapeamento</button></div>
