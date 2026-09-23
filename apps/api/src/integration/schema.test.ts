@@ -10,6 +10,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0017_cobrade_sitrep_documents.sql"));
  assert.ok(files.includes("0018_monitoring_connectors.sql"));
  assert.ok(files.includes("0019_cobrade_catalog.sql"));
+ assert.ok(files.includes("0020_sidec_reference_operations.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -34,6 +35,21 @@ test("catalogo COBRADE impede codigo duplicado na mesma organizacao",async()=>{
   await client.query("ROLLBACK");
   client.release();
  }
+});
+
+test("estruturas inspiradas no SIDEC possuem constraints de fluxo",async()=>{
+ const actions=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='civil_defense_actions'::regclass AND contype='c'`);
+ const requests=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='operational_support_requests'::regclass AND contype='c'`);
+ const actionDefs=actions.rows.map(x=>String(x.definition)).join(" ");
+ const requestDefs=requests.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(actionDefs,/PREVENTION/);
+ assert.match(actionDefs,/HUMANITARIAN/);
+ assert.match(requestDefs,/HUMANITARIAN_AID/);
+ assert.match(requestDefs,/EMERGENCY_INSPECTION/);
+ assert.match(requestDefs,/SUBMITTED/);
+ assert.match(requestDefs,/COMPLETED/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
