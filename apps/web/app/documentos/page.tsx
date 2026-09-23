@@ -35,6 +35,7 @@ type TechnicalDocument = {
   protocol: string | null;
   createdByName: string;
   approvedByName: string | null;
+  sourceType: string | null;
 };
 
 type Incident = {
@@ -136,6 +137,18 @@ export default function DocumentosPage() {
       setMessage(`SITREP ${body.document?.number??""} criado como rascunho oficial.`);
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Falha ao gerar SITREP.");}
+    finally{setBusy(false)}
+  }
+
+  async function generatePublicBulletin(item: TechnicalDocument){
+    setBusy(true);setMessage("");
+    try{
+      const response=await fetch(`${API}/api/v1/technical-documents/${item.id}/public-bulletin-draft`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:"{}"});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(body.message??body.error??"Não foi possível gerar o boletim público.");
+      setMessage(`Boletim ${body.document?.number??""} criado como rascunho para revisão.`);
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha ao gerar boletim público.");}
     finally{setBusy(false)}
   }
 
@@ -270,7 +283,7 @@ export default function DocumentosPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.11</span>
+          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.12</span>
           <h1>Documentos técnicos</h1>
           <p>Elaboração, revisão, aprovação, emissão, integridade e PDF.</p>
         </div>
@@ -391,6 +404,11 @@ export default function DocumentosPage() {
                 >
                   Abrir PDF
                 </a>
+                {item.sourceType==="SITREP" && (item.status==="APPROVED" || item.status==="ISSUED") && (
+                  <button disabled={busy} onClick={() => void generatePublicBulletin(item)} type="button">
+                    Gerar boletim público
+                  </button>
+                )}
                 {item.status === "DRAFT" && (
                   <>
                     <button disabled={busy} onClick={() => void editDocument(item)} type="button">
