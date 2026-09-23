@@ -6,15 +6,15 @@ import { useEffect, useState } from "react";
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
 
-const nav=[
+const nav: Array<[string,string,string]> =[
 ["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias"],["◉","Riscos e Mapas","/campo"],["▲","Alertas","/monitoramento"],
 ["♥","Assistência Humanitária","/assistencia"],["⌂","Abrigos","/assistencia"],["♟","Famílias","/assistencia"],["◇","Doações e Estoque","/assistencia"],
 ["♥","Voluntariado","/voluntarios"],["♟","Treinamentos e Simulados","/gestao"],["♻","Recuperação","/gestao"],["▥","Relatórios e BI","/gestao"],
 ["↻","Integrações (S2iD)","/gestao"],["▤","Documentos","/documentos"],["⚙","Administração","/gestao"]
 ];
-const stats=[["2","Ocorrências Ativas","+1 nas últimas 24h","red"],["12","Famílias em Abrigos","-3 desde ontem","blue"],["1.245","Itens em Estoque","+320 esta semana","green"],["18","Voluntários Ativos","+5 esta semana","orange"],["3","Treinamentos","Próximo em 5 dias","purple"]];
-const quick=[["🚨","Registrar Ocorrência","/ocorrencias/nova","red"],["♟","Cadastrar Família","/assistencia","blue"],["⌂","Gerenciar Abrigos","/assistencia","green"],["◇","Registrar Entrega","/assistencia","orange"],["▤","Planejar Treinamento","/gestao","navy"],["▥","Relatórios e Indicadores","/gestao","gray"]];
-const incidents=[["Deslizamento de terra","Perequê-Mirim","Em atendimento"],["Alagamento","Itaguá","Monitoramento"],["Queda de árvore","Centro","Resolvida"],["Assistência humanitária","Maranduba","Concluída"],["Vistoria preventiva","Praia Grande","Concluída"]];
+const stats: Array<[string,string,string,string]> =[["2","Ocorrências Ativas","+1 nas últimas 24h","red"],["12","Famílias em Abrigos","-3 desde ontem","blue"],["1.245","Itens em Estoque","+320 esta semana","green"],["18","Voluntários Ativos","+5 esta semana","orange"],["3","Treinamentos","Próximo em 5 dias","purple"]];
+const quick: Array<[string,string,string,string]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red"],["♟","Cadastrar Família","/assistencia","blue"],["⌂","Gerenciar Abrigos","/assistencia","green"],["◇","Registrar Entrega","/assistencia","orange"],["▤","Planejar Treinamento","/gestao","navy"],["▥","Relatórios e Indicadores","/gestao","gray"]];
+const incidents: Array<[string,string,string]> =[["Deslizamento de terra","Perequê-Mirim","Em atendimento"],["Alagamento","Itaguá","Monitoramento"],["Queda de árvore","Centro","Resolvida"],["Assistência humanitária","Maranduba","Concluída"],["Vistoria preventiva","Praia Grande","Concluída"]];
 
 export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);
@@ -30,7 +30,7 @@ export default function PainelPage(){
   </aside>
   <section className="opsMain">
    <header className="opsHero">
-    <div className="opsMunicipal"><div className="crest">UB</div><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
+    <div className="opsMunicipal"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
     <div className="opsTitle"><b>SIGDEC</b><strong>Sistema Integrado de Gestão<br/>de Desastres e Emergências</strong><span>UBATUBA - SP</span></div>
     <div className="opsScenery"><span>Ubatuba</span><small>Nossa gente. Nossa natureza.<br/>Mais segura sempre.</small></div>
     <div className="dcBadge"><b>COORDENAÇÃO MUNICIPAL - SP</b><span>▲</span><strong>DEFESA CIVIL</strong></div>
