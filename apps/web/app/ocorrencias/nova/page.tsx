@@ -96,10 +96,10 @@ export default function NovaOcorrenciaPage() {
   }
 
   return (
-    <main className="shell">
+    <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">CENTRAL OPERACIONAL</span>
+          <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
           <h1>Nova ocorrência</h1>
           <p>Registro inicial rápido; o atendimento pode ser complementado durante a operação.</p>
         </div>
