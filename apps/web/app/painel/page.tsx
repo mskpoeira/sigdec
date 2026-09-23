@@ -15,11 +15,11 @@ const nav: Array<[string, string, Route]> =[
 ];
 const stats: Array<[string,string,string,string]> =[["2","Ocorrências Ativas","+1 nas últimas 24h","red"],["12","Famílias em Abrigos","-3 desde ontem","blue"],["1.245","Itens em Estoque","+320 esta semana","green"],["18","Voluntários Ativos","+5 esta semana","orange"],["3","Treinamentos","Próximo em 5 dias","purple"]];
 const quick: Array<[string, string, Route, string]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red"],["♟","Cadastrar Família","/assistencia","blue"],["⌂","Gerenciar Abrigos","/assistencia","green"],["◇","Registrar Entrega","/assistencia","orange"],["▤","Planejar Treinamento","/gestao","navy"],["▥","Relatórios e Indicadores","/gestao","gray"]];
-const incidents: Array<[string,string,string]> =[["Deslizamento de terra","Perequê-Mirim","Em atendimento"],["Alagamento","Itaguá","Monitoramento"],["Queda de árvore","Centro","Resolvida"],["Assistência humanitária","Maranduba","Concluída"],["Vistoria preventiva","Praia Grande","Concluída"]];
+type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
 
 export default function PainelPage(){
- const [user,setUser]=useState<SessionUser|null>(null);
- useEffect(()=>{fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login")},[]);
+ const [user,setUser]=useState<SessionUser|null>(null); const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
+ useEffect(()=>{fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{})},[]);
  async function logout(){await fetch(`${API_URL}/auth/logout`,{method:"POST",credentials:"include"});location.href="/login"}
  if(!user)return <main className="shell"><p>Carregando sessão...</p></main>;
  return <main className="opsDashboard">
@@ -37,15 +37,15 @@ export default function PainelPage(){
     <div className="dcBadge"><b>COORDENAÇÃO MUNICIPAL - SP</b><span>▲</span><strong>DEFESA CIVIL</strong></div>
    </header>
    <div className="opsContent">
-    <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">23 de setembro de 2026<br/><small>Ubatuba - SP</small></div></div>
+    <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}<br/><small>Ubatuba - SP</small></div></div>
     <div className="opsStats">{stats.map(([v,l,d,c])=><article className={"stat "+c} key={l}><b>{v}</b><span>{l}</span><small>{d}</small></article>)}</div>
     <div className="opsQuick">{quick.map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
-     <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.map(([n,b,s],i)=><Link href="/ocorrencias" className="incidentMini" key={n}><i className={"dot d"+i}/><div><b>{n}</b><small>⌖ {b}</small></div><span>{s}</span></Link>)}</section>
+     <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {x.priority}</small></div><span>{x.status}</span></Link>)}</section>
      <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap"><div className="coast">UBATUBA</div><i className="pin p1">!</i><i className="pin p2">▲</i><i className="pin p3">⌂</i><i className="pin p4">⌂</i><div className="legend">🔴 Ocorrência ativa<br/>🟡 Em monitoramento<br/>🟢 Resolvida<br/>🔵 Abrigo</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.3.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC v1.4.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }
