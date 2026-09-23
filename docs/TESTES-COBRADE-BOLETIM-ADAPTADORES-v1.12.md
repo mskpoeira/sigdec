@@ -137,3 +137,38 @@ ao SIGDEC.
 - página pública somente para documentos explicitamente emitidos como boletim;
 - adaptadores adicionais após confirmação dos contratos de dados;
 - alertas internos de falha/atraso de conectores.
+
+
+## Elementos incorporados a partir do SIDEC/SP
+
+A Defesa Civil do Estado de São Paulo descreve o SIDEC como ferramenta online para
+registro das ações municipais de Defesa Civil, cadastro de ocorrências com obtenção
+de extratos, mapeamento dos atendimentos e uso desses registros como base para
+solicitações de ajuda humanitária, vistorias emergenciais e planejamento operacional.
+
+A v1.12 incorporou esses princípios sem duplicar os módulos já existentes:
+
+- registro de ações municipais em `civil_defense_actions`;
+- ações classificadas por prevenção, preparação, monitoramento, vistoria, resposta,
+  assistência humanitária, capacitação, recuperação, comunicação e outras;
+- georreferenciamento opcional das ações;
+- vínculo da ação à ocorrência e à linha do tempo;
+- solicitações operacionais em `operational_support_requests`;
+- tipos de solicitação para ajuda humanitária, vistoria emergencial, apoio estadual,
+  logística, equipamentos e outros;
+- fluxo de tramitação DRAFT → SUBMITTED → IN_ANALYSIS → APPROVED/REJECTED →
+  COMPLETED/CANCELLED;
+- protocolo externo opcional para acompanhar pedidos encaminhados a outros órgãos;
+- extrato operacional consolidado por ocorrência;
+- extrato inclui atendimento, timeline, despachos, vistorias, ações municipais,
+  assistência humanitária e solicitações;
+- Centro de Gestão com indicadores de ações e solicitações em aberto;
+- interface para registrar ações e solicitações diretamente dentro da ocorrência.
+
+O SIGDEC permanece um sistema municipal independente. A referência ao SIDEC é
+funcional e de interoperabilidade conceitual; não implica integração automática com
+o sistema estadual sem contrato técnico/API autorizada.
+
+## Banco de dados adicional
+
+- `0020_sidec_reference_operations.sql`
