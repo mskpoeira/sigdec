@@ -115,10 +115,55 @@ export default function SidecExportsPage(){
   setMappingRows(rows=>[...rows,{sourcePath:source,targetField:`campo.${rows.length+1}`,required:false,enabled:true,sortOrder:(rows.length+1)*10}]);
  }
 
+ async function saveCobradeRequirements(){
+  if(!readiness?.cobradeCode){setMessage("A ocorrência ainda não possui código COBRADE.");return}
+  setBusy(true);setMessage("");
+  try{
+   await request("/api/v1/sidec/cobrade-requirements",{method:"PUT",body:JSON.stringify({cobradeCode:readiness.cobradeCode,items:cobradeRows})});
+   setMessage("Requisitos adicionais do COBRADE salvos. O checklist foi recalculado.");
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao salvar requisitos COBRADE.");}
+  finally{setBusy(false)}
+ }
+ function updateCobradeRequirement(index:number,patch:Partial<CobradeRequirement>){
+  setCobradeRows(rows=>rows.map((row,i)=>i===index?{...row,...patch}:row));
+ }
+ function addCobradeRequirement(){
+  const used=new Set(cobradeRows.map(x=>x.sourcePath));
+  const source=sourceOptions.find(x=>!used.has(x))??sourceOptions[0]??"incident.description";
+  setCobradeRows(rows=>[...rows,{sourcePath:source,label:"Novo requisito",required:true,enabled:true,sortOrder:(rows.length+1)*10}]);
+ }
+ function removeCobradeRequirement(index:number){setCobradeRows(rows=>rows.filter((_,i)=>i!==index))}
+
+ async function importStructuredReturn(item:SidecExport){
+  const raw=returnPayloads[item.id]?.trim();
+  if(!raw){setMessage("Cole ou gere o envelope de retorno estruturado.");return}
+  let payload:unknown;
+  try{payload=JSON.parse(raw)}catch{setMessage("O retorno estruturado não contém JSON válido.");return}
+  setBusy(true);setMessage("");
+  try{
+   const body=await request(`/api/v1/sidec-exports/${item.id}/returns/import`,{method:"POST",body:JSON.stringify(payload)});
+   setMessage(body?.imported===false?"Este retorno já havia sido importado.":"Retorno estruturado importado e situação do pacote atualizada.");
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao importar retorno estruturado.");}
+  finally{setBusy(false)}
+ }
+ function fillReturnTemplate(item:SidecExport){
+  setReturnPayloads(values=>({...values,[item.id]:JSON.stringify({
+   schemaVersion:"sigdec-sidec-return/1.0",
+   externalProtocol:item.externalProtocol??"",
+   outcome:"ACKNOWLEDGED",
+   receivedAt:new Date().toISOString(),
+   sourceName:"SIDEC/SP",
+   notes:""
+  },null,2)}));
+ }
+
  async function compare(item:SidecExport){
   setBusy(true);setMessage("");
   try{
-   const body=await request(`/api/v1/sidec-exports/${item.id}/compare`);
+   const category=compareCategories[item.id]??"all";
+   const body=await request(`/api/v1/sidec-exports/${item.id}/compare?category=${encodeURIComponent(category)}`);
    setComparisons(current=>({...current,[item.id]:body}));
    if(!body?.against)setMessage("Esta é a primeira revisão; não há revisão anterior para comparar.");
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao comparar revisões.");}
