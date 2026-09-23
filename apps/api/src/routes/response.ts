@@ -18,6 +18,8 @@ const stationSchema=z.object({
  latitude:z.number().min(-90).max(90).optional(), longitude:z.number().min(-180).max(180).optional()
 }).refine(v=>(v.latitude===undefined)===(v.longitude===undefined),{message:"Latitude e longitude devem ser informadas em conjunto."});
 const readingSchema=z.object({ measuredAt:z.coerce.date(), metric:z.string().trim().min(1).max(50), value:z.number(), unit:z.string().trim().min(1).max(30), source:z.string().trim().max(40).default("manual") });
+const thresholdSchema=z.object({stationId:z.string().uuid(),metric:z.string().trim().min(1).max(50),severity:z.enum(["WATCH","WARNING","EMERGENCY"]),comparison:z.enum(["GTE","LTE"]),thresholdValue:z.number(),unit:z.string().trim().min(1).max(30),title:z.string().trim().min(3).max(240),guidance:z.string().trim().max(3000).optional()});
+const monitoringEventStatusSchema=z.object({status:z.enum(["ACKNOWLEDGED","CLOSED"])});
 
 
 const shelterSchema=z.object({name:z.string().trim().min(2).max(200),addressLine:z.string().trim().max(300).optional(),neighborhood:z.string().trim().max(120).optional(),capacityPeople:z.number().int().min(0),status:z.enum(["STANDBY","OPEN","FULL","CLOSED"]).default("STANDBY"),notes:z.string().trim().max(3000).optional()});
@@ -47,7 +49,53 @@ export async function responseRoutes(app:FastifyInstance){
  app.post("/api/v1/monitoring/stations/:id/readings",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
   const o=org(authFrom(req).organizationId),{id}=req.params as {id:string},p=readingSchema.safeParse(req.body); if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
   const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[id,o]); if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const v=p.data; await db.query(`INSERT INTO monitoring_readings(station_id,measured_at,metric,value,unit,source) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(station_id,measured_at,metric) DO UPDATE SET value=EXCLUDED.value,unit=EXCLUDED.unit,source=EXCLUDED.source`,[id,v.measuredAt,v.metric,v.value,v.unit,v.source]); return reply.code(201).send({ok:true});
+  const v=p.data;
+  const reading=await db.query(`INSERT INTO monitoring_readings(station_id,measured_at,metric,value,unit,source) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(station_id,measured_at,metric) DO UPDATE SET value=EXCLUDED.value,unit=EXCLUDED.unit,source=EXCLUDED.source
+    RETURNING id`,[id,v.measuredAt,v.metric,v.value,v.unit,v.source]);
+  const readingId=reading.rows[0]?.id;
+  if(readingId){
+   await db.query(`INSERT INTO monitoring_events(organization_id,station_id,reading_id,threshold_id,severity,metric,observed_value,threshold_value,unit,title,guidance)
+    SELECT t.organization_id,t.station_id,$1,t.id,t.severity,t.metric,$2,t.threshold_value,t.unit,t.title,t.guidance
+      FROM monitoring_thresholds t
+     WHERE t.organization_id=$3 AND t.station_id=$4 AND t.metric=$5 AND t.unit=$6 AND t.active=true
+       AND ((t.comparison='GTE' AND $2>=t.threshold_value) OR (t.comparison='LTE' AND $2<=t.threshold_value))
+    ON CONFLICT(reading_id,threshold_id) DO NOTHING`,[readingId,v.value,o,id,v.metric,v.unit]);
+  }
+  return reply.code(201).send({ok:true,readingId});
+ });
+ app.get("/api/v1/monitoring/readings/latest",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT DISTINCT ON (r.station_id,r.metric) r.id,r.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",r.metric,r.value,r.unit,r.source,r.measured_at AS "measuredAt"
+   FROM monitoring_readings r JOIN monitoring_stations s ON s.id=r.station_id
+   WHERE s.organization_id=$1 ORDER BY r.station_id,r.metric,r.measured_at DESC`,[o]);
+  return {items:r.rows};
+ });
+ app.get("/api/v1/monitoring/thresholds",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT t.id,t.station_id AS "stationId",s.name AS "stationName",t.metric,t.severity,t.comparison,t.threshold_value AS "thresholdValue",t.unit,t.title,t.guidance,t.active
+   FROM monitoring_thresholds t JOIN monitoring_stations s ON s.id=t.station_id WHERE t.organization_id=$1 ORDER BY s.name,t.metric,t.threshold_value`,[o]);
+  return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/thresholds",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=thresholdSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[v.stationId,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`INSERT INTO monitoring_thresholds(organization_id,station_id,metric,severity,comparison,threshold_value,unit,title,guidance,created_by)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[o,v.stationId,v.metric,v.severity,v.comparison,v.thresholdValue,v.unit,v.title,v.guidance??null,a.userId]);
+  return reply.code(201).send(r.rows[0]);
+ });
+ app.get("/api/v1/monitoring/events",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT e.id,e.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",e.severity,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.title,e.guidance,e.status,e.created_at AS "createdAt"
+   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 200`,[o]);
+  return {items:r.rows};
+ });
+ app.patch("/api/v1/monitoring/events/:id/status",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=monitoringEventStatusSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const before=await db.query(`SELECT id,status FROM monitoring_events WHERE id=$1 AND organization_id=$2`,[id,o]);if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`UPDATE monitoring_events SET status=$1,acknowledged_by=CASE WHEN $1='ACKNOWLEDGED' THEN $2 ELSE acknowledged_by END,acknowledged_at=CASE WHEN $1='ACKNOWLEDGED' THEN now() ELSE acknowledged_at END,closed_by=CASE WHEN $1='CLOSED' THEN $2 ELSE closed_by END,closed_at=CASE WHEN $1='CLOSED' THEN now() ELSE closed_at END WHERE id=$3 AND organization_id=$4 RETURNING id,status`,[p.data.status,a.userId,id,o]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"MONITORING_EVENT_STATUS_CHANGED","monitoring_event",id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
+  return r.rows[0];
  });
  app.get("/api/v1/humanitarian/households",{preHandler:requirePermission("humanitarian.read")},async req=>{
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT h.id,h.responsible_name AS "responsibleName",h.condition,h.adults,h.children,h.elderly,h.persons_with_disability AS "personsWithDisability",h.admitted_at AS "admittedAt",s.name AS "shelterName",i.protocol FROM assisted_households h LEFT JOIN shelters s ON s.id=h.shelter_id LEFT JOIN incidents i ON i.id=h.incident_id WHERE h.organization_id=$1 ORDER BY h.admitted_at DESC`,[o]); return {items:r.rows};
