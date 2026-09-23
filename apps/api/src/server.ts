@@ -9,46 +9,11 @@ import { incidentRoutes } from "./routes/incidents.js";
 import { responseRoutes } from "./routes/response.js";
 import { fieldRoutes } from "./routes/field.js";
 import { commandRoutes } from "./routes/command.js";
-
-const app = Fastify({
-  logger: true,
-  trustProxy: true
-});
-
-await app.register(helmet);
-await app.register(cookie);
-await app.register(rateLimit, { global: false });
-
-await app.register(cors, {
-  origin: process.env.SIGDEC_PUBLIC_URL ?? "http://localhost:3000",
-  credentials: true
-});
-
-app.get("/health", async () => ({
-  status: "ok",
-  service: "sigdec-api",
-  version: "0.12.0",
-  timestamp: new Date().toISOString()
-}));
-
-await app.register(authRoutes);
-await app.register(incidentRoutes);
-await app.register(responseRoutes);
-await app.register(fieldRoutes);
-await app.register(commandRoutes);
-
-app.get("/api/v1", async () => ({
-  name: "SIGDEC API",
-  version: "v1",
-  release: "0.12.0",
-  modules: [
-    "auth", "ocorrencias", "despacho", "riscos", "monitoramento",
-    "vistorias", "documentos", "desastres", "assistencia-humanitaria",
-    "voluntariado", "logistica", "comunicacoes", "auditoria"
-  ]
-}));
-
-await app.listen({
-  port: Number(process.env.PORT ?? 4000),
-  host: process.env.HOST ?? "0.0.0.0"
-});
+import { planningRoutes } from "./routes/planning.js";
+const app=Fastify({logger:true,trustProxy:true});
+await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
+await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
+app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:"1.0.0",timestamp:new Date().toISOString()}));
+await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);
+app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release:"1.0.0",modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","inteligencia-assistiva","auditoria"]}));
+await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
