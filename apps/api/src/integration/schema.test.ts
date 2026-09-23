@@ -13,6 +13,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0020_sidec_reference_operations.sql"));
  assert.ok(files.includes("0021_sidec_interoperability.sql"));
  assert.ok(files.includes("0022_sidec_readiness_mapping_documents.sql"));
+ assert.ok(files.includes("0023_sidec_manifest_cobrade_returns.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -73,6 +74,21 @@ test("SIDEC v1.14 possui mapeamentos, checklist e manifesto documental",async()=
  assert.equal(columns.rowCount,1);
  const defaults=await db.query(`SELECT count(*)::int AS count FROM sidec_field_mappings WHERE organization_id IS NULL AND enabled=true`);
  assert.ok(Number(defaults.rows[0]?.count??0)>=5);
+});
+
+test("SIDEC v1.15 possui manifesto requisitos COBRADE e retorno idempotente",async()=>{
+ const column=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_exports' AND column_name='manifest_hash'`);
+ assert.equal(column.rowCount,1);
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_cobrade_requirements','sidec_return_records') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_cobrade_requirements","sidec_return_records"]);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_return_records'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/ACKNOWLEDGED/);
+ assert.match(defs,/REJECTED/);
+ assert.match(defs,/export_id, payload_hash/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
