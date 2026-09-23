@@ -27,11 +27,13 @@ jobs:
           SSH_HOST: ${{ secrets.HOMOLOG_SSH_HOST }}
           SSH_USER: ${{ secrets.HOMOLOG_SSH_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.HOMOLOG_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.HOMOLOG_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           test -n "$SSH_HOST" || { echo "HOMOLOG_SSH_HOST ausente"; exit 1; }
           test -n "$SSH_USER" || { echo "HOMOLOG_SSH_USER ausente"; exit 1; }
           test -n "$SSH_PRIVATE_KEY" || { echo "HOMOLOG_SSH_PRIVATE_KEY ausente"; exit 1; }
+          test -n "$SSH_KNOWN_HOSTS" || { echo "HOMOLOG_SSH_KNOWN_HOSTS ausente"; exit 1; }
 
       - name: Configurar SSH
         shell: bash
@@ -40,15 +42,12 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.HOMOLOG_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "HOMOLOG_SSH_KNOWN_HOSTS ausente; recusando conexao insegura."
-            exit 1
-          fi
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" >/dev/null
 
       - name: Atualizar e implantar SIGDEC
         shell: bash
@@ -59,15 +58,21 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${SSH_PORT:-22}"
-          ssh -p "$PORT" -o BatchMode=yes "$SSH_USER@$SSH_HOST" '
-            set -euo pipefail
-            cd /opt/sigdec
-            git fetch --prune origin
-            git checkout main
-            git reset --hard origin/main
-            chmod +x infra/homolog/deploy.sh
-            infra/homolog/deploy.sh
-          '
+          ssh -p "$PORT" \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$SSH_USER@$SSH_HOST" '
+              set -euo pipefail
+              cd /opt/sigdec
+              git fetch --prune origin
+              git checkout main
+              git reset --hard origin/main
+              chmod +x infra/homolog/deploy.sh
+              infra/homolog/deploy.sh
+            '
 
       - name: Verificar aplicacao
         shell: bash
