@@ -26,6 +26,8 @@ const externalReadingSchema=z.object({measuredAt:z.coerce.date(),metric:z.string
 const rotateKeySchema=z.object({name:z.string().trim().min(3).max(120).optional()});
 const protocolSchema=z.object({code:z.string().trim().min(2).max(60),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING"),cobradeCode:z.string().trim().max(30).optional()});
 const protocolTemplateSchema=z.object({code:z.string().trim().min(2).max(60),cobradeCode:z.string().trim().min(3).max(30),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING"),severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]).optional(),triggerSummary:z.string().trim().max(3000).optional(),guidance:z.string().trim().max(5000).optional(),steps:z.array(z.string().trim().min(2).max(500)).max(50).default([])});
+const connectorSchema=z.object({stationId:z.string().uuid(),providerCode:z.string().trim().min(2).max(80),displayName:z.string().trim().min(3).max(200),mode:z.enum(["WEBHOOK","POLLING","MANUAL"]),externalReference:z.string().trim().max(300).optional()});
+const connectorStatusSchema=z.object({status:z.enum(["CONFIGURED","ACTIVE","PAUSED","DISABLED"])});
 const protocolVersionSchema=z.object({severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]).optional(),triggerSummary:z.string().trim().max(3000).optional(),guidance:z.string().trim().max(5000).optional(),steps:z.array(z.string().trim().min(2).max(500)).max(50).default([]),changeSummary:z.string().trim().max(1000).optional()});
 
 
@@ -132,6 +134,29 @@ export async function responseRoutes(app:FastifyInstance){
   const r=await db.query(`INSERT INTO alerts(organization_id,severity,title,message,created_by,monitoring_event_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,status`,[o,x.severity,x.title,message,a.userId,id]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"ALERT_DRAFT_FROM_MONITORING_EVENT","alert",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify({status:"DRAFT",severity:x.severity,title:x.title}),JSON.stringify({monitoringEventId:id})]);
   return reply.code(201).send({id:r.rows[0]?.id,status:r.rows[0]?.status});
+ });
+ app.get("/api/v1/monitoring/connectors",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT c.id,c.station_id AS "stationId",s.code AS "stationCode",s.name AS "stationName",c.provider_code AS "providerCode",c.display_name AS "displayName",c.mode,c.status,c.external_reference AS "externalReference",c.created_at AS "createdAt",c.updated_at AS "updatedAt",c.last_success_at AS "lastSuccessAt",c.last_error_at AS "lastErrorAt",c.last_error AS "lastError"
+    FROM monitoring_connectors c JOIN monitoring_stations s ON s.id=c.station_id
+    WHERE c.organization_id=$1 ORDER BY c.updated_at DESC`,[o]);
+  return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/connectors",{preHandler:requirePermission("connectors.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=connectorSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[v.stationId,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`INSERT INTO monitoring_connectors(organization_id,station_id,provider_code,display_name,mode,external_reference,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7)
+    RETURNING id,provider_code AS "providerCode",display_name AS "displayName",mode,status`,[o,v.stationId,v.providerCode,v.displayName,v.mode,v.externalReference??null,a.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,$2,$3,$4,$5,$6,$7)`,[a.userId,"MONITORING_CONNECTOR_CREATED","monitoring_connector",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify(r.rows[0])]);
+  return reply.code(201).send(r.rows[0]);
+ });
+ app.patch("/api/v1/monitoring/connectors/:id/status",{preHandler:requirePermission("connectors.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=connectorStatusSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const before=await db.query(`SELECT id,status FROM monitoring_connectors WHERE id=$1 AND organization_id=$2`,[id,o]);if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`UPDATE monitoring_connectors SET status=$1,updated_at=now() WHERE id=$2 AND organization_id=$3 RETURNING id,status,updated_at AS "updatedAt"`,[p.data.status,id,o]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"MONITORING_CONNECTOR_STATUS_CHANGED","monitoring_connector",id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
+  return r.rows[0];
  });
  app.get("/api/v1/monitoring/protocol-templates",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
