@@ -11,6 +11,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0018_monitoring_connectors.sql"));
  assert.ok(files.includes("0019_cobrade_catalog.sql"));
  assert.ok(files.includes("0020_sidec_reference_operations.sql"));
+ assert.ok(files.includes("0021_sidec_interoperability.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -50,6 +51,16 @@ test("estruturas inspiradas no SIDEC possuem constraints de fluxo",async()=>{
  assert.match(requestDefs,/EMERGENCY_INSPECTION/);
  assert.match(requestDefs,/SUBMITTED/);
  assert.match(requestDefs,/COMPLETED/);
+});
+
+test("pacotes SIDEC possuem revisao unica e estados controlados",async()=>{
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_exports'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/READY/);
+ assert.match(defs,/SUBMITTED/);
+ assert.match(defs,/ACKNOWLEDGED/);
+ assert.match(defs,/incident_id, revision/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
