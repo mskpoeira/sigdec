@@ -100,7 +100,26 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
-    return { incidents: incidents.rows, positions: positions.rows };
+    const monitoringEvents = await db.query(
+      `SELECT e.id,e.severity,e.title,e.status,e.metric,
+              e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,
+              e.created_at AS "createdAt",s.code AS "stationCode",s.name AS "stationName",
+              s.latitude,s.longitude,p.code AS "protocolCode",pv.version_no AS "protocolVersionNo"
+         FROM monitoring_events e
+         JOIN monitoring_stations s ON s.id=e.station_id
+         LEFT JOIN operational_protocol_versions pv ON pv.id=e.protocol_version_id
+         LEFT JOIN operational_protocols p ON p.id=pv.protocol_id
+        WHERE e.organization_id=$1
+          AND e.status<>'CLOSED'
+          AND s.latitude IS NOT NULL
+          AND s.longitude IS NOT NULL
+        ORDER BY CASE e.severity WHEN 'EMERGENCY' THEN 1 WHEN 'WARNING' THEN 2 WHEN 'WATCH' THEN 3 ELSE 4 END,
+                 e.created_at DESC
+        LIMIT 100`,
+      [orgId]
+    );
+
+    return { incidents: incidents.rows, positions: positions.rows, monitoringEvents: monitoringEvents.rows };
   });
 
   app.post("/api/v1/field/location", {
