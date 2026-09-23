@@ -127,11 +127,15 @@ export async function sidecRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const incident=await db.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[id,org]);
   if(!incident.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const r=await db.query(`SELECT id,revision,schema_version AS "schemaVersion",status,snapshot_hash AS "snapshotHash",
-    external_protocol AS "externalProtocol",external_notes AS "externalNotes",exported_at AS "exportedAt",
-    submitted_at AS "submittedAt",acknowledged_at AS "acknowledgedAt",rejected_at AS "rejectedAt",
-    created_at AS "createdAt",updated_at AS "updatedAt"
-    FROM sidec_exports WHERE incident_id=$1 AND organization_id=$2 ORDER BY revision DESC`,[id,org]);
+  const r=await db.query(`SELECT e.id,e.revision,e.schema_version AS "schemaVersion",e.status,e.snapshot_hash AS "snapshotHash",
+    e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",e.exported_at AS "exportedAt",
+    e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",e.rejected_at AS "rejectedAt",
+    e.created_at AS "createdAt",e.updated_at AS "updatedAt",
+    COALESCE((SELECT json_agg(json_build_object(
+      'id',d.document_id,'number',d.document_number,'title',d.document_title,'documentType',d.document_type,
+      'revision',d.document_revision,'contentHash',d.content_hash
+    ) ORDER BY d.document_title) FROM sidec_export_documents d WHERE d.export_id=e.id),'[]'::json) AS documents
+    FROM sidec_exports e WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
   return {items:r.rows};
  });
 
@@ -226,6 +230,23 @@ export async function sidecRoutes(app:FastifyInstance){
   }catch(error){
    await client.query("ROLLBACK");throw error;
   }finally{client.release();}
+ });
+
+ app.get("/api/v1/sidec-exports/:id/compare",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const against=String((request.query as {against?:string})?.against??"").trim();
+  const currentResult=await db.query(`SELECT id,incident_id AS "incidentId",revision,snapshot FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const current=currentResult.rows[0] as {id:string;incidentId:string;revision:number;snapshot:SidecPackage}|undefined;
+  if(!current)return reply.code(404).send({error:"NOT_FOUND"});
+  const previousResult=against
+    ? await db.query(`SELECT id,incident_id AS "incidentId",revision,snapshot FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[against,org])
+    : await db.query(`SELECT id,incident_id AS "incidentId",revision,snapshot FROM sidec_exports
+        WHERE incident_id=$1 AND organization_id=$2 AND revision<$3 ORDER BY revision DESC LIMIT 1`,[current.incidentId,org,current.revision]);
+  const previous=previousResult.rows[0] as {id:string;incidentId:string;revision:number;snapshot:SidecPackage}|undefined;
+  if(!previous)return {current:{id:current.id,revision:current.revision},against:null,differences:[]};
+  if(previous.incidentId!==current.incidentId)return reply.code(409).send({error:"DIFFERENT_INCIDENTS"});
+  const differences=diffSidecValues(previous.snapshot,current.snapshot);
+  return {current:{id:current.id,revision:current.revision},against:{id:previous.id,revision:previous.revision},count:differences.length,differences:differences.slice(0,500)};
  });
 
  app.get("/api/v1/sidec-exports/:id/download",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
