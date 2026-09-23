@@ -45,7 +45,7 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap"><div className="coast">UBATUBA</div><i className="pin p1">!</i><i className="pin p2">▲</i><i className="pin p3">⌂</i><i className="pin p4">⌂</i><div className="legend">🔴 Ocorrência ativa<br/>🟡 Em monitoramento<br/>🟢 Resolvida<br/>🔵 Abrigo</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.9.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC v1.10.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }
