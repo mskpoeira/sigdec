@@ -432,6 +432,76 @@ export async function sidecRoutes(app:FastifyInstance){
   return JSON.stringify({snapshotHash:item.snapshotHash,manifestHash:item.manifestHash??null,...item.snapshot},null,2);
  });
 
+ app.get("/api/v1/sidec-exports/:id/returns",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const exists=await db.query(`SELECT 1 FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
+  if(!exists.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`SELECT id,schema_version AS "schemaVersion",outcome,external_protocol AS "externalProtocol",
+    received_at AS "receivedAt",source_name AS "sourceName",notes,payload_hash AS "payloadHash",created_at AS "createdAt"
+    FROM sidec_return_records WHERE export_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,[id,org]);
+  return {items:r.rows};
+ });
+
+ app.post("/api/v1/sidec-exports/:id/returns/import",{preHandler:requirePermission("sidec_returns.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=returnEnvelopeSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_RETURN_ENVELOPE",details:parsed.error.flatten()});
+  const currentResult=await db.query(`SELECT id,incident_id AS "incidentId",revision,status,external_protocol AS "externalProtocol"
+    FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const current=currentResult.rows[0] as {incidentId:string;revision:number;status:string;externalProtocol?:string|null}|undefined;
+  if(!current)return reply.code(404).send({error:"NOT_FOUND"});
+  if(current.status!=="SUBMITTED")return reply.code(409).send({error:"RETURN_NOT_ALLOWED",status:current.status});
+  if(current.externalProtocol&&parsed.data.externalProtocol!==current.externalProtocol){
+   return reply.code(409).send({error:"EXTERNAL_PROTOCOL_MISMATCH",expected:current.externalProtocol,received:parsed.data.externalProtocol});
+  }
+
+  const normalizedPayload={
+   schemaVersion:parsed.data.schemaVersion,
+   externalProtocol:parsed.data.externalProtocol,
+   outcome:parsed.data.outcome,
+   receivedAt:parsed.data.receivedAt.toISOString(),
+   sourceName:parsed.data.sourceName??null,
+   notes:parsed.data.notes??null
+  };
+  const payloadHash=hashSidecPackage(normalizedPayload);
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const inserted=await client.query<{id:string}>(`INSERT INTO sidec_return_records(
+     export_id,organization_id,schema_version,outcome,external_protocol,received_at,source_name,notes,payload,payload_hash,imported_by
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
+    ON CONFLICT(export_id,payload_hash) DO NOTHING RETURNING id`,
+    [id,org,parsed.data.schemaVersion,parsed.data.outcome,parsed.data.externalProtocol,parsed.data.receivedAt,
+     parsed.data.sourceName??null,parsed.data.notes??null,JSON.stringify(normalizedPayload),payloadHash,auth.userId]);
+   if(!inserted.rows[0]){
+    const existing=await client.query(`SELECT id FROM sidec_return_records WHERE export_id=$1 AND payload_hash=$2`,[id,payloadHash]);
+    await client.query("ROLLBACK");
+    return reply.send({imported:false,id:existing.rows[0]?.id??null,payloadHash});
+   }
+   const outcome=parsed.data.outcome;
+   const updated=await client.query(`UPDATE sidec_exports SET status=$1,
+     external_notes=COALESCE($2,external_notes),
+     acknowledged_at=CASE WHEN $1='ACKNOWLEDGED' THEN $3 ELSE acknowledged_at END,
+     rejected_at=CASE WHEN $1='REJECTED' THEN $3 ELSE rejected_at END,
+     updated_at=now()
+     WHERE id=$4 AND organization_id=$5
+     RETURNING id,status,external_protocol AS "externalProtocol",updated_at AS "updatedAt"`,
+    [outcome,parsed.data.notes??null,parsed.data.receivedAt,id,org]);
+   await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+     VALUES($1,'sidec_return.imported',$2,$3,$4::jsonb)`,
+    [current.incidentId,auth.userId,`Retorno estruturado SIDEC importado para a revisão ${current.revision}: ${outcome}.`,
+     JSON.stringify({exportId:id,payloadHash,sourceName:parsed.data.sourceName??null,externalProtocol:parsed.data.externalProtocol})]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+     VALUES($1,'sidec_return.import','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,
+    [auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(currentResult.rows[0]),JSON.stringify(updated.rows[0]),
+     JSON.stringify({returnId:inserted.rows[0].id,payloadHash,schemaVersion:parsed.data.schemaVersion})]);
+   await client.query("COMMIT");
+   return reply.code(201).send({imported:true,id:inserted.rows[0].id,payloadHash,export:updated.rows[0]});
+  }catch(error){
+   await client.query("ROLLBACK");throw error;
+  }finally{client.release();}
+ });
+
  app.patch("/api/v1/sidec-exports/:id/status",{preHandler:requirePermission("sidec_exports.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=statusSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
