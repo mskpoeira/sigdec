@@ -1,1 +1,16 @@
-{"name":"sigdec","version": "1.4.0","private":true,"description":"Sistema Integrado de Gestão da Defesa Civil","packageManager":"pnpm@10.15.1","engines":{"node":">=22"},"scripts":{"dev":"pnpm -r --parallel dev","build":"pnpm -r build","typecheck":"pnpm -r typecheck","lint":"pnpm -r lint"}}
+{
+  "name": "sigdec",
+  "version": "1.5.0",
+  "private": true,
+  "description": "Sistema Integrado de Gestão da Defesa Civil",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  }
+}
