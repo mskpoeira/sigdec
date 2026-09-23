@@ -25,6 +25,18 @@ function organizationId(value:string|null){
 }
 
 export async function sidecRoutes(app:FastifyInstance){
+ app.get("/api/v1/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const r=await db.query(`SELECT e.id,e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,e.schema_version AS "schemaVersion",e.status,
+    e.snapshot_hash AS "snapshotHash",e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",
+    e.exported_at AS "exportedAt",e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",
+    e.rejected_at AS "rejectedAt",e.created_at AS "createdAt",e.updated_at AS "updatedAt"
+    FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
+    WHERE e.organization_id=$1 ORDER BY
+      CASE e.status WHEN 'SUBMITTED' THEN 1 WHEN 'READY' THEN 2 WHEN 'EXPORTED' THEN 3 WHEN 'REJECTED' THEN 4 ELSE 5 END,
+      e.updated_at DESC LIMIT 300`,[org]);
+  return {items:r.rows};
+ });
  app.get("/api/v1/incidents/:id/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const incident=await db.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[id,org]);
