@@ -12,6 +12,22 @@ const asset=z.object({assetType:z.enum(["BASE_RADIO","HANDHELD_RADIO","MOBILE_RA
 const assignment=z.object({assignedToUserId:z.string().uuid().optional(),assignedToName:z.string().trim().min(2).max(200).optional(),notes:z.string().trim().max(2000).optional()}).refine(v=>!!v.assignedToUserId||!!v.assignedToName,{message:"Informe o responsável pela cautela."});
 
 export async function commandRoutes(app:FastifyInstance){
+ app.get("/api/v1/sco/sitrep",{preHandler:requirePermission("sco.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT
+   (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE'))::int AS "activeIncidents",
+   (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE') AND priority='P1')::int AS "p1Incidents",
+   (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE') AND priority='P2')::int AS "p2Incidents",
+   (SELECT count(*) FROM monitoring_events WHERE organization_id=$1 AND status<>'CLOSED')::int AS "openMonitoringEvents",
+   (SELECT count(*) FROM monitoring_events WHERE organization_id=$1 AND status<>'CLOSED' AND severity='EMERGENCY')::int AS "emergencyMonitoringEvents",
+   (SELECT count(*) FROM alerts WHERE organization_id=$1 AND status='PUBLISHED')::int AS "publishedAlerts",
+   (SELECT count(*) FROM shelters WHERE organization_id=$1 AND status IN ('OPEN','FULL'))::int AS "openShelters",
+   (SELECT count(*) FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL AND condition='DISPLACED')::int AS "displacedHouseholds",
+   (SELECT count(*) FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL AND condition='HOMELESS')::int AS "homelessHouseholds",
+   (SELECT count(*) FROM emergency_operations WHERE organization_id=$1 AND ended_at IS NULL)::int AS "activeOperations",
+   (SELECT count(*) FROM operational_periods p JOIN emergency_operations e ON e.id=p.operation_id WHERE e.organization_id=$1 AND p.status='ACTIVE')::int AS "activeOperationalPeriods"`,[o]);
+  return {generatedAt:new Date().toISOString(),...r.rows[0]};
+ });
  app.get("/api/v1/communications",{preHandler:requirePermission("communications.read")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query(`SELECT c.id,c.occurred_at AS "occurredAt",c.channel,c.sender,c.recipient,c.message,c.priority,i.protocol FROM operational_communications c LEFT JOIN incidents i ON i.id=c.incident_id WHERE c.organization_id=$1 ORDER BY c.occurred_at DESC LIMIT 300`,[o]);return {items:r.rows};});
  app.post("/api/v1/communications",{preHandler:requirePermission("communications.manage")},async(req,reply)=>{const a=authFrom(req),o=org(a.organizationId),p=communication.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query(`INSERT INTO operational_communications(organization_id,incident_id,recorded_by,channel,sender,recipient,message,priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[o,v.incidentId??null,a.userId,v.channel??null,v.sender??null,v.recipient??null,v.message,v.priority]);return reply.code(201).send({id:r.rows[0]?.id});});
  app.get("/api/v1/sco/operations",{preHandler:requirePermission("sco.read")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query(`SELECT e.id,e.name,e.status,e.command_post AS "commandPost",e.objectives,e.started_at AS "startedAt",e.ended_at AS "endedAt",i.protocol FROM emergency_operations e LEFT JOIN incidents i ON i.id=e.incident_id WHERE e.organization_id=$1 ORDER BY e.started_at DESC`,[o]);return {items:r.rows};});
