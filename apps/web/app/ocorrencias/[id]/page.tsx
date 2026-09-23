@@ -99,7 +99,8 @@ const eventLabels: Record<string, string> = {
   "support_request.created": "Solicitação operacional criada",
   "support_request.status_changed": "Solicitação operacional atualizada",
   "sidec_export.created": "Pacote SIDEC gerado",
-  "sidec_export.status_changed": "Pacote SIDEC atualizado"
+  "sidec_export.status_changed": "Pacote SIDEC atualizado",
+  "sidec_return.imported": "Retorno SIDEC importado"
 };
 
 const dispatchNext: Record<string, string[]> = {
