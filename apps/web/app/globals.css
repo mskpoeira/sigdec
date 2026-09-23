@@ -81,3 +81,23 @@
 
 /* v1.4 — design system global SIGDEC / Defesa Civil */
 .moduleShell{min-height:100vh;background:linear-gradient(180deg,#edf6fd 0,#f7fafc 220px);padding:0 30px 36px}.moduleShell .listHeader{margin:0 -30px 26px;padding:24px 30px;background:linear-gradient(105deg,#0b3159,#004e94);color:#fff;border-bottom:5px solid rgb(227,94,47);box-shadow:0 4px 18px rgba(7,42,77,.14)}.moduleShell .listHeader h1{color:#fff}.moduleShell .listHeader p,.moduleShell .listHeader .eyebrow{color:#dcefff}.moduleShell .listHeader .secondaryLink{background:#fff;color:#0b4e94;border-color:#fff}.moduleShell .card,.moduleShell .infoCard,.moduleShell .incidentForm{border-top:3px solid #0b5ea8;box-shadow:0 5px 18px rgba(9,49,89,.07)}.moduleShell .primaryButton,.moduleShell button[type=submit]{background:#0b5ea8}.moduleShell input:focus,.moduleShell select:focus,.moduleShell textarea:focus{outline:2px solid rgba(227,94,47,.35);border-color:rgb(227,94,47)}.authUnified{min-height:100vh;background:linear-gradient(145deg,#082c56 0,#004e94 46%,#eef6fc 46%,#f8fafc 100%);display:flex;align-items:center;justify-content:center;padding:30px}.authUnified.loginShell{display:grid;grid-template-columns:minmax(280px,520px) minmax(340px,520px);gap:44px}.authUnified .loginBrand{color:#fff}.authUnified .loginBrand h1{color:#fff}.authUnified .loginBrand p{color:#dcefff}.authUnified .loginCard{width:min(100%,520px);background:#fff;border-top:5px solid rgb(227,94,47);border-radius:18px;box-shadow:0 24px 70px rgba(4,29,55,.22)}@media(max-width:760px){.moduleShell{padding:0 18px 24px}.moduleShell .listHeader{margin:0 -18px 20px;padding:22px 18px}.authUnified.loginShell{grid-template-columns:1fr}.authUnified{background:linear-gradient(180deg,#0b3159 0,#004e94 30%,#f4f8fc 30%)}}
+
+
+.documentLayout{display:grid;grid-template-columns:minmax(330px,.8fr) minmax(0,1.2fr);gap:20px;align-items:start}
+.documentForm{position:sticky;top:18px}
+.documentEditor{min-height:330px!important;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.documentList{display:grid;gap:14px}
+.documentCard{display:grid;gap:10px;border-left:5px solid #173f69}
+.documentCardHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.documentCardHeader h2{margin:6px 0 0}
+.documentCard p{margin:0}
+.documentHash{display:block;padding:9px 10px;border-radius:8px;background:#f4f7fa;color:#52657a;font-size:.72rem;overflow-wrap:anywhere}
+.documentActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.documentActions button{border:0;border-radius:9px;padding:10px 13px;background:#173f69;color:#fff;font-weight:800;cursor:pointer}
+.documentActions button:disabled{opacity:.6;cursor:wait}
+.documentStatus-DRAFT{background:#edf1f5;color:#31465a}
+.documentStatus-REVIEW{background:#fff4c9;color:#755900}
+.documentStatus-APPROVED{background:#e4f1ff;color:#174f82}
+.documentStatus-ISSUED{background:#e7f5eb;color:#255e38}
+.documentStatus-CANCELLED{background:#ffe0e0;color:#8d1616}
+@media(max-width:900px){.documentLayout{grid-template-columns:1fr}.documentForm{position:static}.documentEditor{min-height:260px!important}}
