@@ -39,6 +39,9 @@ export default function CampoPage() {
   const [positions, setPositions] = useState<FieldPosition[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
+  const [historyHours, setHistoryHours] = useState(24);
+  const [historyPositions, setHistoryPositions] = useState<FieldPosition[]>([]);
+  const [historySignals, setHistorySignals] = useState<MonitoringSignal[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
@@ -73,6 +76,22 @@ export default function CampoPage() {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar.");
     });
   }, []);
+
+  useEffect(() => {
+    void fetch(`${API_URL}/api/v1/field/history?hours=${historyHours}`, { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Não foi possível carregar o histórico geoespacial.");
+        return response.json();
+      })
+      .then((body) => {
+        setHistoryPositions(body.positions ?? []);
+        setHistorySignals(body.monitoringEvents ?? []);
+      })
+      .catch(() => {
+        setHistoryPositions([]);
+        setHistorySignals([]);
+      });
+  }, [historyHours]);
 
   const selected = useMemo(
     () => incidents.find((item) => item.id === selectedId) ?? null,
@@ -131,11 +150,12 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.10</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.11</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências ativas e últimas posições informadas pelas equipes.</p>
         </div>
         <div className="headerActions">
+          <label className="secondaryLink">Histórico <select value={historyHours} onChange={(event)=>setHistoryHours(Number(event.target.value))}><option value={6}>6h</option><option value={24}>24h</option><option value={72}>72h</option></select></label>
           <Link className="secondaryLink" href="/painel">Painel</Link>
           <button className="primaryButton" disabled={sharing} onClick={shareLocation}>
             {sharing ? "Localizando..." : "Registrar minha posição"}
@@ -214,6 +234,12 @@ export default function CampoPage() {
             </div>
           </div>
         </aside>
+      </section>
+
+      <section className="detailSection">
+        <div><span className="eyebrow">HISTÓRICO GEOESPACIAL</span><h2>Janela de {historyHours} hora(s)</h2></div>
+        <div className="dataGrid"><article className="card"><h2>{historyPositions.length}</h2><p>registros de posição de equipes</p></article><article className="card"><h2>{historySignals.length}</h2><p>eventos ambientais georreferenciados</p></article></div>
+        <div className="grid">{historySignals.slice(0,12).map((signal)=><article className="card" key={`hist-${signal.id}`}><h2>{signal.stationCode} · {signal.stationName}</h2><p><strong>{signal.severity}</strong> · {signal.title}</p><p>{signal.metric}: {signal.observedValue} {signal.unit}</p><p>{new Date(signal.createdAt).toLocaleString("pt-BR")}</p><a className="secondaryLink" href={`https://www.openstreetmap.org/?mlat=${signal.latitude}&mlon=${signal.longitude}#map=17/${signal.latitude}/${signal.longitude}`} target="_blank" rel="noreferrer">Abrir ponto histórico</a></article>)}</div>
       </section>
 
       <section className="detailSection">
