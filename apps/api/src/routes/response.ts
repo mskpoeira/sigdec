@@ -19,10 +19,13 @@ const stationSchema=z.object({
  latitude:z.number().min(-90).max(90).optional(), longitude:z.number().min(-180).max(180).optional()
 }).refine(v=>(v.latitude===undefined)===(v.longitude===undefined),{message:"Latitude e longitude devem ser informadas em conjunto."});
 const readingSchema=z.object({ measuredAt:z.coerce.date(), metric:z.string().trim().min(1).max(50), value:z.number(), unit:z.string().trim().min(1).max(30), source:z.string().trim().max(40).default("manual") });
-const thresholdSchema=z.object({stationId:z.string().uuid(),metric:z.string().trim().min(1).max(50),severity:z.enum(["WATCH","WARNING","EMERGENCY"]),comparison:z.enum(["GTE","LTE"]),thresholdValue:z.number(),unit:z.string().trim().min(1).max(30),title:z.string().trim().min(3).max(240),guidance:z.string().trim().max(3000).optional()});
+const thresholdSchema=z.object({stationId:z.string().uuid(),metric:z.string().trim().min(1).max(50),severity:z.enum(["WATCH","WARNING","EMERGENCY"]),comparison:z.enum(["GTE","LTE"]),thresholdValue:z.number(),unit:z.string().trim().min(1).max(30),title:z.string().trim().min(3).max(240),guidance:z.string().trim().max(3000).optional(),protocolVersionId:z.string().uuid().optional()});
 const monitoringEventStatusSchema=z.object({status:z.enum(["ACKNOWLEDGED","CLOSED"])});
 const ingestKeySchema=z.object({name:z.string().trim().min(3).max(120)});
 const externalReadingSchema=z.object({measuredAt:z.coerce.date(),metric:z.string().trim().min(1).max(50),value:z.number(),unit:z.string().trim().min(1).max(30)});
+const rotateKeySchema=z.object({name:z.string().trim().min(3).max(120).optional()});
+const protocolSchema=z.object({code:z.string().trim().min(2).max(60),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(80).default("MONITORING")});
+const protocolVersionSchema=z.object({severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]).optional(),triggerSummary:z.string().trim().max(3000).optional(),guidance:z.string().trim().max(5000).optional(),steps:z.array(z.string().trim().min(2).max(500)).max(50).default([]),changeSummary:z.string().trim().max(1000).optional()});
 
 
 function tokenHash(token:string){return createHash("sha256").update(token).digest("hex");}
@@ -32,8 +35,8 @@ async function persistMonitoringReading(organizationId:string,stationId:string,v
   RETURNING id`,[stationId,v.measuredAt,v.metric,v.value,v.unit,v.source]);
  const readingId=reading.rows[0]?.id;
  if(readingId){
-  await db.query(`INSERT INTO monitoring_events(organization_id,station_id,reading_id,threshold_id,severity,metric,observed_value,threshold_value,unit,title,guidance)
-   SELECT t.organization_id,t.station_id,$1,t.id,t.severity,t.metric,$2,t.threshold_value,t.unit,t.title,t.guidance
+  await db.query(`INSERT INTO monitoring_events(organization_id,station_id,reading_id,threshold_id,severity,metric,observed_value,threshold_value,unit,title,guidance,protocol_version_id)
+   SELECT t.organization_id,t.station_id,$1,t.id,t.severity,t.metric,$2,t.threshold_value,t.unit,t.title,t.guidance,t.protocol_version_id
      FROM monitoring_thresholds t
     WHERE t.organization_id=$3 AND t.station_id=$4 AND t.metric=$5 AND t.unit=$6 AND t.active=true
       AND ((t.comparison='GTE' AND $2>=t.threshold_value) OR (t.comparison='LTE' AND $2<=t.threshold_value))
@@ -83,8 +86,26 @@ export async function responseRoutes(app:FastifyInstance){
  app.get("/api/v1/monitoring/stations/:id/ingest-keys",{preHandler:requirePermission("integrations.manage")},async(req,reply)=>{
   const o=org(authFrom(req).organizationId),{id}=req.params as {id:string};
   const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[id,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const r=await db.query(`SELECT id,name,active,created_at AS "createdAt",last_used_at AS "lastUsedAt" FROM monitoring_ingest_keys WHERE station_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,[id,o]);
+  const r=await db.query(`SELECT id,name,active,created_at AS "createdAt",last_used_at AS "lastUsedAt",revoked_at AS "revokedAt",replaces_key_id AS "replacesKeyId" FROM monitoring_ingest_keys WHERE station_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,[id,o]);
   return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/ingest-keys/:id/revoke",{preHandler:requirePermission("integrations.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const before=await db.query(`SELECT k.id,k.name,k.active,k.station_id AS "stationId" FROM monitoring_ingest_keys k WHERE k.id=$1 AND k.organization_id=$2`,[id,o]);
+  const key=before.rows[0];if(!key)return reply.code(404).send({error:"NOT_FOUND"});if(!key.active)return reply.code(409).send({error:"ALREADY_REVOKED"});
+  const r=await db.query(`UPDATE monitoring_ingest_keys SET active=false,revoked_at=now(),revoked_by=$1 WHERE id=$2 AND organization_id=$3 RETURNING id,active,revoked_at AS "revokedAt"`,[a.userId,id,o]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"MONITORING_INGEST_KEY_REVOKED","monitoring_ingest_key",id,req.ip,req.headers["user-agent"]??null,JSON.stringify(key),JSON.stringify(r.rows[0])]);
+  return r.rows[0];
+ });
+ app.post("/api/v1/monitoring/ingest-keys/:id/rotate",{preHandler:requirePermission("integrations.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=rotateKeySchema.safeParse(req.body??{});if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const client=await db.connect();try{await client.query("BEGIN");const old=await client.query(`SELECT id,name,station_id AS "stationId",active FROM monitoring_ingest_keys WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[id,o]);const key=old.rows[0];if(!key){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}if(!key.active){await client.query("ROLLBACK");return reply.code(409).send({error:"ALREADY_REVOKED"});}
+   const token="sigdec_"+randomBytes(32).toString("base64url"),name=p.data.name??key.name;
+   await client.query(`UPDATE monitoring_ingest_keys SET active=false,revoked_at=now(),revoked_by=$1 WHERE id=$2`,[a.userId,id]);
+   const created=await client.query(`INSERT INTO monitoring_ingest_keys(organization_id,station_id,name,token_hash,created_by,replaces_key_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,created_at AS "createdAt"`,[o,key.stationId,name,tokenHash(token),a.userId,id]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"MONITORING_INGEST_KEY_ROTATED","monitoring_ingest_key",created.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify({replacedKeyId:id}),JSON.stringify({newKeyId:created.rows[0]?.id,stationId:key.stationId})]);
+   await client.query("COMMIT");return reply.code(201).send({...created.rows[0],token,replacedKeyId:id});
+  }catch(e){await client.query("ROLLBACK");throw e}finally{client.release();}
  });
  app.post("/api/v1/integrations/monitoring/readings",async(req,reply)=>{
   const header=req.headers.authorization??"";if(!header.startsWith("Bearer "))return reply.code(401).send({error:"UNAUTHENTICATED"});
@@ -111,6 +132,35 @@ export async function responseRoutes(app:FastifyInstance){
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"ALERT_DRAFT_FROM_MONITORING_EVENT","alert",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify({status:"DRAFT",severity:x.severity,title:x.title}),JSON.stringify({monitoringEventId:id})]);
   return reply.code(201).send({id:r.rows[0]?.id,status:r.rows[0]?.status});
  });
+ app.get("/api/v1/monitoring/protocols",{preHandler:requirePermission("monitoring.read")},async req=>{
+  const o=org(authFrom(req).organizationId);
+  const r=await db.query(`SELECT p.id,p.code,p.title,p.category,p.active,p.created_at AS "createdAt",v.id AS "activeVersionId",v.version_no AS "activeVersionNo",v.severity,v.trigger_summary AS "triggerSummary",v.guidance,v.steps
+   FROM operational_protocols p LEFT JOIN operational_protocol_versions v ON v.protocol_id=p.id AND v.status='ACTIVE'
+   WHERE p.organization_id=$1 ORDER BY p.code`,[o]);return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/protocols",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=protocolSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const r=await db.query(`INSERT INTO operational_protocols(organization_id,code,title,category,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,code,title,category`,[o,v.code,v.title,v.category,a.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,$2,$3,$4,$5,$6,$7)`,[a.userId,"OPERATIONAL_PROTOCOL_CREATED","operational_protocol",r.rows[0]?.id,req.ip,req.headers["user-agent"]??null,JSON.stringify(r.rows[0])]);
+  return reply.code(201).send(r.rows[0]);
+ });
+ app.get("/api/v1/monitoring/protocols/:id/versions",{preHandler:requirePermission("monitoring.read")},async(req,reply)=>{
+  const o=org(authFrom(req).organizationId),{id}=req.params as {id:string};const p=await db.query("SELECT 1 FROM operational_protocols WHERE id=$1 AND organization_id=$2",[id,o]);if(!p.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`SELECT id,version_no AS "versionNo",severity,trigger_summary AS "triggerSummary",guidance,steps,status,change_summary AS "changeSummary",created_at AS "createdAt",activated_at AS "activatedAt" FROM operational_protocol_versions WHERE protocol_id=$1 ORDER BY version_no DESC`,[id]);return {items:r.rows};
+ });
+ app.post("/api/v1/monitoring/protocols/:id/versions",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=protocolVersionSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const protocol=await db.query("SELECT 1 FROM operational_protocols WHERE id=$1 AND organization_id=$2",[id,o]);if(!protocol.rows[0])return reply.code(404).send({error:"NOT_FOUND"});const v=p.data;
+  const r=await db.query(`INSERT INTO operational_protocol_versions(protocol_id,version_no,severity,trigger_summary,guidance,steps,change_summary,created_by) SELECT $1,COALESCE(MAX(version_no),0)+1,$2,$3,$4,$5::jsonb,$6,$7 FROM operational_protocol_versions WHERE protocol_id=$1 RETURNING id,version_no AS "versionNo",status`,[id,v.severity??null,v.triggerSummary??null,v.guidance??null,JSON.stringify(v.steps),v.changeSummary??null,a.userId]);
+  return reply.code(201).send(r.rows[0]);
+ });
+ app.post("/api/v1/monitoring/protocols/:id/versions/:versionId/activate",{preHandler:requirePermission("protocols.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id,versionId}=req.params as {id:string;versionId:string};const client=await db.connect();try{await client.query("BEGIN");const target=await client.query(`SELECT v.id,v.version_no AS "versionNo",v.status FROM operational_protocol_versions v JOIN operational_protocols p ON p.id=v.protocol_id WHERE v.id=$1 AND v.protocol_id=$2 AND p.organization_id=$3 FOR UPDATE`,[versionId,id,o]);if(!target.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
+   await client.query(`UPDATE operational_protocol_versions SET status='RETIRED' WHERE protocol_id=$1 AND status='ACTIVE' AND id<>$2`,[id,versionId]);
+   const r=await client.query(`UPDATE operational_protocol_versions SET status='ACTIVE',activated_at=COALESCE(activated_at,now()) WHERE id=$1 RETURNING id,version_no AS "versionNo",status,activated_at AS "activatedAt"`,[versionId]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[a.userId,"OPERATIONAL_PROTOCOL_VERSION_ACTIVATED","operational_protocol_version",versionId,req.ip,req.headers["user-agent"]??null,JSON.stringify(target.rows[0]),JSON.stringify(r.rows[0])]);
+   await client.query("COMMIT");return r.rows[0];
+  }catch(e){await client.query("ROLLBACK");throw e}finally{client.release();}
+ });
  app.get("/api/v1/monitoring/readings/latest",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
   const r=await db.query(`SELECT DISTINCT ON (r.station_id,r.metric) r.id,r.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",r.metric,r.value,r.unit,r.source,r.measured_at AS "measuredAt"
@@ -120,21 +170,22 @@ export async function responseRoutes(app:FastifyInstance){
  });
  app.get("/api/v1/monitoring/thresholds",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
-  const r=await db.query(`SELECT t.id,t.station_id AS "stationId",s.name AS "stationName",t.metric,t.severity,t.comparison,t.threshold_value AS "thresholdValue",t.unit,t.title,t.guidance,t.active
-   FROM monitoring_thresholds t JOIN monitoring_stations s ON s.id=t.station_id WHERE t.organization_id=$1 ORDER BY s.name,t.metric,t.threshold_value`,[o]);
+  const r=await db.query(`SELECT t.id,t.station_id AS "stationId",s.name AS "stationName",t.metric,t.severity,t.comparison,t.threshold_value AS "thresholdValue",t.unit,t.title,t.guidance,t.active,t.protocol_version_id AS "protocolVersionId",p.code AS "protocolCode",pv.version_no AS "protocolVersionNo"
+   FROM monitoring_thresholds t JOIN monitoring_stations s ON s.id=t.station_id LEFT JOIN operational_protocol_versions pv ON pv.id=t.protocol_version_id LEFT JOIN operational_protocols p ON p.id=pv.protocol_id WHERE t.organization_id=$1 ORDER BY s.name,t.metric,t.threshold_value`,[o]);
   return {items:r.rows};
  });
  app.post("/api/v1/monitoring/thresholds",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
   const a=authFrom(req),o=org(a.organizationId),p=thresholdSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
   const station=await db.query("SELECT 1 FROM monitoring_stations WHERE id=$1 AND organization_id=$2",[v.stationId,o]);if(!station.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const r=await db.query(`INSERT INTO monitoring_thresholds(organization_id,station_id,metric,severity,comparison,threshold_value,unit,title,guidance,created_by)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[o,v.stationId,v.metric,v.severity,v.comparison,v.thresholdValue,v.unit,v.title,v.guidance??null,a.userId]);
+  if(v.protocolVersionId){const pv=await db.query(`SELECT 1 FROM operational_protocol_versions pv JOIN operational_protocols p ON p.id=pv.protocol_id WHERE pv.id=$1 AND p.organization_id=$2 AND pv.status='ACTIVE'`,[v.protocolVersionId,o]);if(!pv.rows[0])return reply.code(400).send({error:"INVALID_PROTOCOL_VERSION"});}
+  const r=await db.query(`INSERT INTO monitoring_thresholds(organization_id,station_id,metric,severity,comparison,threshold_value,unit,title,guidance,created_by,protocol_version_id)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,[o,v.stationId,v.metric,v.severity,v.comparison,v.thresholdValue,v.unit,v.title,v.guidance??null,a.userId,v.protocolVersionId??null]);
   return reply.code(201).send(r.rows[0]);
  });
  app.get("/api/v1/monitoring/events",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId);
-  const r=await db.query(`SELECT e.id,e.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",e.severity,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.title,e.guidance,e.status,e.created_at AS "createdAt",a.id AS "alertId",a.status AS "alertStatus"
-   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id LEFT JOIN alerts a ON a.monitoring_event_id=e.id WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 200`,[o]);
+  const r=await db.query(`SELECT e.id,e.station_id AS "stationId",s.name AS "stationName",s.code AS "stationCode",e.severity,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.title,e.guidance,e.status,e.created_at AS "createdAt",a.id AS "alertId",a.status AS "alertStatus",e.protocol_version_id AS "protocolVersionId",p.code AS "protocolCode",pv.version_no AS "protocolVersionNo",pv.steps AS "protocolSteps"
+   FROM monitoring_events e JOIN monitoring_stations s ON s.id=e.station_id LEFT JOIN alerts a ON a.monitoring_event_id=e.id LEFT JOIN operational_protocol_versions pv ON pv.id=e.protocol_version_id LEFT JOIN operational_protocols p ON p.id=pv.protocol_id WHERE e.organization_id=$1 ORDER BY e.created_at DESC LIMIT 200`,[o]);
   return {items:r.rows};
  });
  app.patch("/api/v1/monitoring/events/:id/status",{preHandler:requirePermission("monitoring.manage")},async(req,reply)=>{
