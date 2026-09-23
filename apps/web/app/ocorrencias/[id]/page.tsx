@@ -97,7 +97,9 @@ const eventLabels: Record<string, string> = {
   "dispatch.status_changed": "Despacho atualizado",
   "civil_action.created": "Ação da Defesa Civil registrada",
   "support_request.created": "Solicitação operacional criada",
-  "support_request.status_changed": "Solicitação operacional atualizada"
+  "support_request.status_changed": "Solicitação operacional atualizada",
+  "sidec_export.created": "Pacote SIDEC gerado",
+  "sidec_export.status_changed": "Pacote SIDEC atualizado"
 };
 
 const dispatchNext: Record<string, string[]> = {
@@ -320,6 +322,7 @@ export default function OcorrenciaDetalhePage() {
           <p>{incident.type_group} · {incident.type_name}</p>
         </div>
         <div className="headerActions">
+          <Link className="secondaryLink" href={`/ocorrencias/${id}/sidec`}>Pacotes SIDEC</Link>
           <Link className="secondaryLink" href={`/ocorrencias/${id}/extrato`}>Extrato operacional</Link>
           <Link className="secondaryLink" href="/ocorrencias">Voltar</Link>
           <span className={`statusTag priority-${incident.priority}`}>
