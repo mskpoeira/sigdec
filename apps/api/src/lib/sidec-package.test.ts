@@ -11,9 +11,11 @@ test("hash canonico independe da ordem das chaves",()=>{
 
 test("gera pacote SIDEC com arrays vazios por padrao",()=>{
  const pkg=buildSidecPackage({generatedAt:"2026-09-23T18:00:00-03:00",municipality:{name:"Ubatuba",state:"SP"},incident:{protocol:"DC-2026-000001"}});
- assert.equal(pkg.schemaVersion,"1.0");
+ assert.equal(pkg.schemaVersion,"1.1");
  assert.deepEqual(pkg.actions,[]);
  assert.deepEqual(pkg.inspections,[]);
+ assert.deepEqual(pkg.documents,[]);
+ assert.deepEqual(pkg.mappedFields,{});
 });
 
 test("csv resumo contem protocolo e COBRADE",()=>{
