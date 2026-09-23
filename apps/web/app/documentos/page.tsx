@@ -127,6 +127,18 @@ export default function DocumentosPage() {
     setLegalBasis(template.defaultLegalBasis ?? "");
   }
 
+  async function generateSitrep(){
+    setBusy(true);setMessage("");
+    try{
+      const response=await fetch(`${API}/api/v1/technical-documents/sitrep-draft`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:"{}"});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(body.message??"Não foi possível gerar o SITREP.");
+      setMessage(`SITREP ${body.document?.number??""} criado como rascunho oficial.`);
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha ao gerar SITREP.");}
+    finally{setBusy(false)}
+  }
+
   async function createDocument(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -258,11 +270,11 @@ export default function DocumentosPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.5</span>
+          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.11</span>
           <h1>Documentos técnicos</h1>
           <p>Elaboração, revisão, aprovação, emissão, integridade e PDF.</p>
         </div>
-        <Link className="secondaryLink" href="/painel">Painel</Link>
+        <div className="headerActions"><button className="primaryButton" disabled={busy} onClick={()=>void generateSitrep()} type="button">Gerar SITREP atual</button><Link className="secondaryLink" href="/painel">Painel</Link></div>
       </header>
 
       {message && <section className="infoCard">{message}</section>}
