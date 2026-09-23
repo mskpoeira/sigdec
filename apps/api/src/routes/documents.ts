@@ -4,6 +4,7 @@ import PDFDocument from "pdfkit";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
+import { buildPublicBulletinContent } from "../lib/public-bulletin.js";
 
 const documentType = z.enum(["REPORT","OPINION","INTERDICTION","DECLARATION","FORM","OTHER"]);
 
@@ -213,7 +214,7 @@ export async function documentRoutes(app: FastifyInstance) {
               d.recipient, d.valid_until AS "validUntil",
               d.created_at AS "createdAt", d.updated_at AS "updatedAt",
               d.approved_at AS "approvedAt", d.issued_at AS "issuedAt",
-              d.cancelled_at AS "cancelledAt",
+              d.cancelled_at AS "cancelledAt", d.source_type AS "sourceType",
               i.protocol, creator.display_name AS "createdByName",
               approver.display_name AS "approvedByName"
          FROM technical_documents d
@@ -336,6 +337,71 @@ export async function documentRoutes(app: FastifyInstance) {
     } finally {
       client.release();
     }
+  });
+
+  app.post("/api/v1/technical-documents/:id/public-bulletin-draft", {
+    preHandler: requirePermission("documents.manage")
+  }, async (request, reply) => {
+    const auth=authFrom(request);
+    const orgId=organization(auth.organizationId);
+    const {id}=request.params as {id:string};
+    const source=await db.query(
+      `SELECT id,number,status,content_hash AS "contentHash",source_type AS "sourceType",source_snapshot AS "sourceSnapshot"
+         FROM technical_documents
+        WHERE id=$1 AND organization_id=$2`,
+      [id,orgId]
+    );
+    const sitrep=source.rows[0] as Record<string,any>|undefined;
+    if(!sitrep)return reply.code(404).send({error:"NOT_FOUND"});
+    if(sitrep.sourceType!=="SITREP")return reply.code(409).send({error:"SOURCE_NOT_SITREP"});
+    if(!["APPROVED","ISSUED"].includes(String(sitrep.status)))return reply.code(409).send({error:"SITREP_NOT_APPROVED"});
+
+    const content=buildPublicBulletinContent(sitrep.sourceSnapshot??{});
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      const year=new Date().getFullYear();
+      const counter=await client.query<{last_number:number}>(
+        `INSERT INTO technical_document_counters(organization_id,year,document_type,last_number)
+         VALUES($1,$2,'OTHER',1)
+         ON CONFLICT(organization_id,year,document_type)
+         DO UPDATE SET last_number=technical_document_counters.last_number+1
+         RETURNING last_number`,
+        [orgId,year]
+      );
+      const sequence=counter.rows[0]?.last_number;
+      if(!sequence)throw new Error("Falha ao gerar numeração do boletim.");
+      const number=`DOC-${year}-${String(sequence).padStart(6,"0")}`;
+      const title="Boletim Público — Defesa Civil";
+      const subject=`Boletim derivado do SITREP ${sitrep.number}`;
+      const legalBasis="Lei Federal nº 12.608/2012 e normas de proteção e defesa civil aplicáveis.";
+      const contentHash=hashContent({documentType:"OTHER",number,title,subject,content,legalBasis});
+      const snapshot={sourceDocumentId:id,sourceNumber:sitrep.number,sourceHash:sitrep.contentHash,sourceSnapshot:sitrep.sourceSnapshot,generatedAt:new Date().toISOString()};
+      const created=await client.query<{id:string}>(
+        `INSERT INTO technical_documents(
+          organization_id,document_type,number,title,subject,content,legal_basis,
+          revision,content_hash,created_by,source_type,source_snapshot
+        ) VALUES($1,'OTHER',$2,$3,$4,$5::jsonb,$6,1,$7,$8,'PUBLIC_BULLETIN',$9::jsonb)
+        RETURNING id`,
+        [orgId,number,title,subject,JSON.stringify({text:content}),legalBasis,contentHash,auth.userId,JSON.stringify(snapshot)]
+      );
+      const bulletinId=created.rows[0]?.id;
+      if(!bulletinId)throw new Error("Falha ao criar boletim.");
+      await client.query(
+        `INSERT INTO technical_document_versions(document_id,version_no,content,change_summary,created_by,content_hash,metadata)
+         VALUES($1,1,$2::jsonb,'Derivação de SITREP aprovado/emitido',$3,$4,$5::jsonb)`,
+        [bulletinId,JSON.stringify({text:content}),auth.userId,contentHash,JSON.stringify({sourceDocumentId:id,sourceNumber:sitrep.number})]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+         VALUES($1,'technical_document.public_bulletin_generate','technical_document',$2,$3,$4,$5::jsonb,$6::jsonb)`,
+        [auth.userId,bulletinId,request.ip,request.headers["user-agent"]??null,JSON.stringify({number,status:"DRAFT",contentHash}),JSON.stringify({sourceDocumentId:id,sourceNumber:sitrep.number})]
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({document:{id:bulletinId,number,status:"DRAFT",revision:1},source:{id,number:sitrep.number}});
+    }catch(error){
+      await client.query("ROLLBACK");throw error;
+    }finally{client.release();}
   });
 
   app.get("/api/v1/technical-documents/:id", {
