@@ -20,6 +20,10 @@ type FieldIncident = {
   teamCode: string | null;
 };
 
+type MonitoringSignal = { id:string; severity:string; title:string; status:string; metric:string; observedValue:number|string; thresholdValue:number|string; unit:string; createdAt:string; stationCode:string; stationName:string; latitude:number; longitude:number; protocolCode:string|null; protocolVersionNo:number|null; };
+
+type Sitrep = { generatedAt:string; activeIncidents:number; p1Incidents:number; p2Incidents:number; openMonitoringEvents:number; emergencyMonitoringEvents:number; publishedAlerts:number; openShelters:number; displacedHouseholds:number; homelessHouseholds:number; activeOperations:number; activeOperationalPeriods:number; };
+
 type FieldPosition = {
   userId: string;
   displayName: string;
@@ -33,6 +37,8 @@ type FieldPosition = {
 export default function CampoPage() {
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
   const [positions, setPositions] = useState<FieldPosition[]>([]);
+  const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
+  const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
@@ -52,10 +58,13 @@ export default function CampoPage() {
     const body = await response.json();
     setIncidents(body.incidents ?? []);
     setPositions(body.positions ?? []);
+    setMonitoringEvents(body.monitoringEvents ?? []);
     const firstLocated = (body.incidents ?? []).find(
       (item: FieldIncident) => item.latitude !== null && item.longitude !== null
     );
     setSelectedId((current) => current || firstLocated?.id || "");
+    const sitrepResponse = await fetch(`${API_URL}/api/v1/sco/sitrep`, { credentials: "include" });
+    if (sitrepResponse.ok) setSitrep(await sitrepResponse.json());
     setMessage("");
   }
 
@@ -135,6 +144,8 @@ export default function CampoPage() {
       </header>
 
       {message && <section className="infoCard">{message}</section>}
+
+      {sitrep && <section className="dataGrid"><article className="card"><h2>{sitrep.activeIncidents}</h2><p>Ocorrências ativas · P1 {sitrep.p1Incidents} · P2 {sitrep.p2Incidents}</p></article><article className="card"><h2>{sitrep.openMonitoringEvents}</h2><p>Eventos ambientais · emergência {sitrep.emergencyMonitoringEvents}</p></article><article className="card"><h2>{sitrep.publishedAlerts}</h2><p>Alertas publicados</p></article><article className="card"><h2>{sitrep.openShelters}</h2><p>Abrigos abertos · desalojadas {sitrep.displacedHouseholds} · desabrigadas {sitrep.homelessHouseholds}</p></article><article className="card"><h2>{sitrep.activeOperations}</h2><p>Operações SCO · períodos ativos {sitrep.activeOperationalPeriods}</p></article></section>}
 
       <section className="fieldLayout">
         <div className="fieldMap card">
