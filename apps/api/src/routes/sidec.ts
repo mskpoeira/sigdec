@@ -209,7 +209,7 @@ export async function sidecRoutes(app:FastifyInstance){
  app.get("/api/v1/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId);
   const r=await db.query(`SELECT e.id,e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,e.schema_version AS "schemaVersion",e.status,
-    e.snapshot_hash AS "snapshotHash",e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",
+    e.snapshot_hash AS "snapshotHash",e.manifest_hash AS "manifestHash",e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",
     e.exported_at AS "exportedAt",e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",
     e.rejected_at AS "rejectedAt",e.created_at AS "createdAt",e.updated_at AS "updatedAt"
     FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
@@ -222,7 +222,7 @@ export async function sidecRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const incident=await db.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[id,org]);
   if(!incident.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const r=await db.query(`SELECT e.id,e.revision,e.schema_version AS "schemaVersion",e.status,e.snapshot_hash AS "snapshotHash",
+  const r=await db.query(`SELECT e.id,e.revision,e.schema_version AS "schemaVersion",e.status,e.snapshot_hash AS "snapshotHash",e.manifest_hash AS "manifestHash",
     e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",e.exported_at AS "exportedAt",
     e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",e.rejected_at AS "rejectedAt",
     e.created_at AS "createdAt",e.updated_at AS "updatedAt",
@@ -341,7 +341,9 @@ export async function sidecRoutes(app:FastifyInstance){
 
  app.get("/api/v1/sidec-exports/:id/compare",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
-  const against=String((request.query as {against?:string})?.against??"").trim();
+  const query=request.query as {against?:string;category?:string};
+  const against=String(query?.against??"").trim();
+  const category=String(query?.category??"all").trim();
   const currentResult=await db.query(`SELECT id,incident_id AS "incidentId",revision,snapshot FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
   const current=currentResult.rows[0] as {id:string;incidentId:string;revision:number;snapshot:SidecPackage}|undefined;
   if(!current)return reply.code(404).send({error:"NOT_FOUND"});
@@ -353,7 +355,8 @@ export async function sidecRoutes(app:FastifyInstance){
   if(!previous)return {current:{id:current.id,revision:current.revision},against:null,differences:[]};
   if(previous.incidentId!==current.incidentId)return reply.code(409).send({error:"DIFFERENT_INCIDENTS"});
   const differences=diffSidecValues(previous.snapshot,current.snapshot);
-  return {current:{id:current.id,revision:current.revision},against:{id:previous.id,revision:previous.revision},count:differences.length,differences:differences.slice(0,500)};
+  const filtered=filterSidecDiffs(differences,category);
+  return {current:{id:current.id,revision:current.revision},against:{id:previous.id,revision:previous.revision},category,categories:["all",...sidecDiffCategories],count:filtered.length,totalCount:differences.length,differences:filtered.slice(0,500)};
  });
 
  app.get("/api/v1/sidec-exports/:id/download",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
