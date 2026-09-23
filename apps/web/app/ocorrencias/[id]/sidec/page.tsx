@@ -203,8 +203,8 @@ export default function SidecExportsPage(){
      </div>
 
      {comparisons[item.id]&&<div className="infoCard" style={{marginTop:10}}>
-      <strong>{comparisons[item.id].against?`R${comparisons[item.id].against?.revision} → R${item.revision}: ${comparisons[item.id].count??0} alteração(ões)`:"Primeira revisão"}</strong>
-      {(comparisons[item.id].differences??[]).slice(0,40).map((diff,index)=><div key={`${diff.path}-${index}`} style={{marginTop:8}}><code>{diff.path}</code><div><small>Antes: {show(diff.before)}</small></div><div><small>Depois: {show(diff.after)}</small></div></div>)}
+      <strong>{comparisons[item.id]?.against?`R${comparisons[item.id]?.against?.revision} → R${item.revision}: ${comparisons[item.id]?.count??0} alteração(ões)`:"Primeira revisão"}</strong>
+      {(comparisons[item.id]?.differences??[]).slice(0,40).map((diff,index)=><div key={`${diff.path}-${index}`} style={{marginTop:8}}><code>{diff.path}</code><div><small>Antes: {show(diff.before)}</small></div><div><small>Depois: {show(diff.after)}</small></div></div>)}
      </div>}
 
      {item.status==="READY"&&<div className="headerActions" style={{marginTop:10}}><button className="primaryButton" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"EXPORTED")}>Marcar como exportado</button><button className="secondaryLink" disabled={busy} type="button" onClick={()=>void changeStatus(item.id,"CANCELLED")}>Cancelar</button></div>}
