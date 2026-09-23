@@ -228,6 +228,116 @@ export async function documentRoutes(app: FastifyInstance) {
     return { items: result.rows };
   });
 
+  app.post("/api/v1/technical-documents/sitrep-draft", {
+    preHandler: requirePermission("documents.manage")
+  }, async (request, reply) => {
+    const auth = authFrom(request);
+    const orgId = organization(auth.organizationId);
+
+    const [summary, incidents, monitoring] = await Promise.all([
+      db.query(`SELECT
+        (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE'))::int AS "activeIncidents",
+        (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE') AND priority='P1')::int AS "p1Incidents",
+        (SELECT count(*) FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE') AND priority='P2')::int AS "p2Incidents",
+        (SELECT count(*) FROM monitoring_events WHERE organization_id=$1 AND status<>'CLOSED')::int AS "openMonitoringEvents",
+        (SELECT count(*) FROM monitoring_events WHERE organization_id=$1 AND status<>'CLOSED' AND severity='EMERGENCY')::int AS "emergencyMonitoringEvents",
+        (SELECT count(*) FROM alerts WHERE organization_id=$1 AND status='PUBLISHED')::int AS "publishedAlerts",
+        (SELECT count(*) FROM shelters WHERE organization_id=$1 AND status IN ('OPEN','FULL'))::int AS "openShelters",
+        (SELECT count(*) FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL AND condition='DISPLACED')::int AS "displacedHouseholds",
+        (SELECT count(*) FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL AND condition='HOMELESS')::int AS "homelessHouseholds",
+        (SELECT count(*) FROM emergency_operations WHERE organization_id=$1 AND ended_at IS NULL)::int AS "activeOperations",
+        (SELECT count(*) FROM operational_periods p JOIN emergency_operations e ON e.id=p.operation_id WHERE e.organization_id=$1 AND p.status='ACTIVE')::int AS "activeOperationalPeriods"`,[orgId]),
+      db.query(`SELECT protocol,priority,summary,neighborhood,status,updated_at AS "updatedAt"
+        FROM incidents
+        WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
+        ORDER BY CASE priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,updated_at DESC
+        LIMIT 15`,[orgId]),
+      db.query(`SELECT e.severity,e.title,e.metric,e.observed_value AS "observedValue",e.threshold_value AS "thresholdValue",e.unit,e.status,e.created_at AS "createdAt",
+          s.code AS "stationCode",s.name AS "stationName",p.code AS "protocolCode",pv.version_no AS "protocolVersionNo"
+        FROM monitoring_events e
+        JOIN monitoring_stations s ON s.id=e.station_id
+        LEFT JOIN operational_protocol_versions pv ON pv.id=e.protocol_version_id
+        LEFT JOIN operational_protocols p ON p.id=pv.protocol_id
+        WHERE e.organization_id=$1 AND e.status<>'CLOSED'
+        ORDER BY CASE e.severity WHEN 'EMERGENCY' THEN 1 WHEN 'WARNING' THEN 2 WHEN 'WATCH' THEN 3 ELSE 4 END,e.created_at DESC
+        LIMIT 15`,[orgId])
+    ]);
+
+    const snapshot = {
+      generatedAt: new Date().toISOString(),
+      summary: summary.rows[0] ?? {},
+      incidents: incidents.rows,
+      monitoringEvents: monitoring.rows
+    };
+    const s = snapshot.summary as Record<string, any>;
+    const generatedLabel = new Date(snapshot.generatedAt).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"});
+    const incidentLines = incidents.rows.length
+      ? incidents.rows.map((x:any)=>`- ${x.protocol} · ${x.priority} · ${x.summary}${x.neighborhood?" · "+x.neighborhood:""} · ${x.status}`).join("\n")
+      : "- Nenhuma ocorrência ativa.";
+    const monitoringLines = monitoring.rows.length
+      ? monitoring.rows.map((x:any)=>`- ${x.severity} · ${x.stationCode} / ${x.stationName} · ${x.title} · ${x.metric}: ${x.observedValue} ${x.unit} (limiar ${x.thresholdValue} ${x.unit})${x.protocolCode?" · protocolo "+x.protocolCode+" v"+x.protocolVersionNo:""}`).join("\n")
+      : "- Nenhum evento de monitoramento aberto.";
+
+    const content = [
+      `SITREP — SITUAÇÃO OPERACIONAL\nGerado em: ${generatedLabel}`,
+      `1. RESUMO EXECUTIVO\nOcorrências ativas: ${s.activeIncidents??0} (P1: ${s.p1Incidents??0}; P2: ${s.p2Incidents??0})\nEventos de monitoramento abertos: ${s.openMonitoringEvents??0} (emergência: ${s.emergencyMonitoringEvents??0})\nAlertas publicados: ${s.publishedAlerts??0}\nAbrigos abertos/lotados: ${s.openShelters??0}\nFamílias desalojadas assistidas: ${s.displacedHouseholds??0}\nFamílias desabrigadas assistidas: ${s.homelessHouseholds??0}\nOperações SCO ativas: ${s.activeOperations??0}\nPeríodos operacionais ativos: ${s.activeOperationalPeriods??0}`,
+      `2. OCORRÊNCIAS ATIVAS\n${incidentLines}`,
+      `3. MONITORAMENTO E ALERTAS OPERACIONAIS\n${monitoringLines}`,
+      "4. OBSERVAÇÕES DO COMANDO\n[Inserir avaliação do comando antes de encaminhar para revisão.]",
+      "5. PRÓXIMAS AÇÕES\n[Registrar prioridades, responsáveis e prazos do próximo período operacional.]"
+    ].join("\n\n");
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const year = new Date().getFullYear();
+      const counter = await client.query<{ last_number: number }>(
+        `INSERT INTO technical_document_counters(organization_id,year,document_type,last_number)
+         VALUES($1,$2,'REPORT',1)
+         ON CONFLICT(organization_id,year,document_type)
+         DO UPDATE SET last_number=technical_document_counters.last_number+1
+         RETURNING last_number`,
+        [orgId,year]
+      );
+      const sequence = counter.rows[0]?.last_number;
+      if (!sequence) throw new Error("Falha ao gerar numeração do SITREP.");
+      const number = `REL-${year}-${String(sequence).padStart(6,"0")}`;
+      const title = `SITREP — Situação Operacional — ${generatedLabel}`;
+      const subject = "Situação operacional consolidada da Defesa Civil";
+      const legalBasis = "Lei Federal nº 12.608/2012 e normas de proteção e defesa civil aplicáveis.";
+      const contentHash = hashContent({documentType:"REPORT",number,title,subject,content,legalBasis});
+
+      const created = await client.query<{id:string}>(
+        `INSERT INTO technical_documents(
+           organization_id,document_type,number,title,subject,content,legal_basis,
+           revision,content_hash,created_by,source_type,source_snapshot
+         ) VALUES($1,'REPORT',$2,$3,$4,$5::jsonb,$6,1,$7,$8,'SITREP',$9::jsonb)
+         RETURNING id`,
+        [orgId,number,title,subject,JSON.stringify({text:content}),legalBasis,contentHash,auth.userId,JSON.stringify(snapshot)]
+      );
+      const id=created.rows[0]?.id;
+      if(!id) throw new Error("Falha ao criar SITREP.");
+
+      await client.query(
+        `INSERT INTO technical_document_versions(document_id,version_no,content,change_summary,created_by,content_hash,metadata)
+         VALUES($1,1,$2::jsonb,'Geração automática do SITREP',$3,$4,$5::jsonb)`,
+        [id,JSON.stringify({text:content}),auth.userId,contentHash,JSON.stringify({sourceType:"SITREP",generatedAt:snapshot.generatedAt})]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+         VALUES($1,'technical_document.sitrep_generate','technical_document',$2,$3,$4,$5::jsonb,$6::jsonb)`,
+        [auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify({number,status:"DRAFT",contentHash}),JSON.stringify({sourceType:"SITREP",generatedAt:snapshot.generatedAt})]
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({document:{id,number,status:"DRAFT",revision:1},snapshot});
+    } catch(error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
   app.get("/api/v1/technical-documents/:id", {
     preHandler: requirePermission("documents.read")
   }, async (request, reply) => {
