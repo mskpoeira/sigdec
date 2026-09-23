@@ -8,16 +8,17 @@ const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
 type ExportDocument={id:string;number?:string|null;title:string;documentType:string;revision:number;contentHash?:string|null};
 type SidecExport={
- id:string;revision:number;schemaVersion:string;status:string;snapshotHash:string;
+ id:string;revision:number;schemaVersion:string;status:string;snapshotHash:string;manifestHash?:string|null;
  externalProtocol?:string|null;externalNotes?:string|null;exportedAt?:string|null;submittedAt?:string|null;
  acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];
 };
 type Mapping={sourcePath:string;targetField:string;required:boolean;enabled:boolean;sortOrder:number};
 type Check={code:string;label:string;required:boolean;ok:boolean;detail?:string};
 type AvailableDocument={id:string;number?:string|null;title:string;documentType:string;revision:number;contentHash?:string|null;issuedAt:string};
-type Readiness={ready:boolean;checks:Check[];mappings:Mapping[];availableDocuments:AvailableDocument[];mappedFields:Record<string,unknown>};
+type CobradeRequirement={sourcePath:string;label:string;required:boolean;enabled:boolean;sortOrder:number};
+type Readiness={ready:boolean;checks:Check[];mappings:Mapping[];cobradeCode?:string|null;cobradeRequirements:CobradeRequirement[];availableDocuments:AvailableDocument[];mappedFields:Record<string,unknown>};
 type Diff={path:string;before:unknown;after:unknown};
-type CompareResult={current:{id:string;revision:number};against:{id:string;revision:number}|null;count?:number;differences:Diff[]};
+type CompareResult={current:{id:string;revision:number};against:{id:string;revision:number}|null;category?:string;categories?:string[];count?:number;totalCount?:number;differences:Diff[]};
 
 const statusLabels:Record<string,string>={
  READY:"Pronto para exportação",EXPORTED:"Exportado",SUBMITTED:"Protocolado no SIDEC",
@@ -35,9 +36,12 @@ export default function SidecExportsPage(){
  const [items,setItems]=useState<SidecExport[]>([]);
  const [readiness,setReadiness]=useState<Readiness|null>(null);
  const [mappingRows,setMappingRows]=useState<Mapping[]>([]);
+ const [cobradeRows,setCobradeRows]=useState<CobradeRequirement[]>([]);
  const [sourceOptions,setSourceOptions]=useState<string[]>([]);
  const [selectedDocuments,setSelectedDocuments]=useState<string[]>([]);
  const [comparisons,setComparisons]=useState<Record<string,CompareResult>>({});
+ const [compareCategories,setCompareCategories]=useState<Record<string,string>>({});
+ const [returnPayloads,setReturnPayloads]=useState<Record<string,string>>({});
  const [protocols,setProtocols]=useState<Record<string,string>>({});
  const [notes,setNotes]=useState<Record<string,string>>({});
  const [message,setMessage]=useState("Carregando interoperabilidade...");
@@ -65,6 +69,7 @@ export default function SidecExportsPage(){
    setReadiness(readinessBody??null);
    setMappingRows((mappingBody?.items??readinessBody?.mappings??[]).map((x:Mapping)=>({...x})));
    setSourceOptions(mappingBody?.sourceOptions??[]);
+   setCobradeRows((readinessBody?.cobradeRequirements??[]).map((x:CobradeRequirement)=>({...x})));
    setSelectedDocuments(current=>current.filter(id=>(readinessBody?.availableDocuments??[]).some((d:AvailableDocument)=>d.id===id)));
    setMessage("");
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar interoperabilidade SIDEC.");}
@@ -133,12 +138,12 @@ export default function SidecExportsPage(){
   finally{setBusy(false)}
  }
 
- function downloadUrl(id:string,format:"json"|"csv"){return `${API}/api/v1/sidec-exports/${id}/download?format=${format}`}
+ function downloadUrl(id:string,format:"json"|"csv"|"zip"){return `${API}/api/v1/sidec-exports/${id}/download?format=${format}`}
  function documentPdfUrl(id:string){return `${API}/api/v1/technical-documents/${id}/pdf`}
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP · v1.14</span><h1>Pacotes da ocorrência</h1><p>Checklist, documentos oficiais, mapeamento e revisões para lançamento controlado no sistema estadual.</p></div>
+   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP · v1.15</span><h1>Pacotes da ocorrência</h1><p>Checklist por COBRADE, manifesto íntegro, ZIP documental, mapeamento e revisões para lançamento controlado no sistema estadual.</p></div>
    <div className="headerActions"><button className="primaryButton" disabled={busy||!readiness?.ready} type="button" onClick={()=>void generate()}>Gerar nova revisão</button><Link className="secondaryLink" href={`/ocorrencias/${incidentId}`}>Voltar à ocorrência</Link></div>
   </header>
 
