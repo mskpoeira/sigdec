@@ -4,7 +4,9 @@ import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 function org(id:string|null){if(!id)throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409});return id;}
 const risk=z.object({code:z.string().trim().min(1).max(40),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(100),probability:z.number().int().min(1).max(5),impact:z.number().int().min(1).max(5),mitigation:z.string().trim().max(5000).optional()});
-const alert=z.object({riskId:z.string().uuid().optional(),severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]),title:z.string().trim().min(3).max(240),message:z.string().trim().min(3).max(5000)});\nconst riskStatus=z.object({status:z.enum(["ACTIVE","MITIGATED","CLOSED"])});\nconst alertStatus=z.object({status:z.enum(["DRAFT","PUBLISHED","CLOSED"])});
+const alert=z.object({riskId:z.string().uuid().optional(),severity:z.enum(["INFO","WATCH","WARNING","EMERGENCY"]),title:z.string().trim().min(3).max(240),message:z.string().trim().min(3).max(5000)});
+const riskStatus=z.object({status:z.enum(["ACTIVE","MITIGATED","CLOSED"])});
+const alertStatus=z.object({status:z.enum(["DRAFT","PUBLISHED","CLOSED"])});
 const s2id=z.object({incidentId:z.string().uuid().optional(),cobrade:z.string().trim().min(3).max(30),recordType:z.enum(["FIDE","DMATE","OTHER"]),payload:z.record(z.string(),z.unknown()).default({})});
 const training=z.object({name:z.string().trim().min(3).max(240),trainingType:z.enum(["COURSE","DRILL","SIMULATION","AAR"]),startsAt:z.coerce.date(),endsAt:z.coerce.date().optional(),location:z.string().trim().max(240).optional(),objectives:z.string().trim().max(5000).optional()});
 const recovery=z.object({incidentId:z.string().uuid().optional(),title:z.string().trim().min(3).max(240),category:z.string().trim().min(2).max(100),responsible:z.string().trim().max(200).optional(),estimatedCost:z.number().nonnegative().optional(),notes:z.string().trim().max(5000).optional()});
