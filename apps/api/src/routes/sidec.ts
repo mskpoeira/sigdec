@@ -362,21 +362,74 @@ export async function sidecRoutes(app:FastifyInstance){
  app.get("/api/v1/sidec-exports/:id/download",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const format=String((request.query as {format?:string})?.format??"json").toLowerCase();
-  const r=await db.query(`SELECT e.revision,e.snapshot,e.snapshot_hash AS "snapshotHash",i.protocol
+  const r=await db.query(`SELECT e.revision,e.schema_version AS "schemaVersion",e.snapshot,e.snapshot_hash AS "snapshotHash",
+      e.manifest_hash AS "manifestHash",i.protocol
     FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
     WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
-  const item=r.rows[0] as {revision:number;snapshot:SidecPackage;snapshotHash:string;protocol:string}|undefined;
+  const item=r.rows[0] as {revision:number;schemaVersion:string;snapshot:SidecPackage;snapshotHash:string;manifestHash?:string|null;protocol:string}|undefined;
   if(!item)return reply.code(404).send({error:"NOT_FOUND"});
   const safeProtocol=item.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
+
   if(format==="csv"){
    reply.header("Content-Type","text/csv; charset=utf-8");
    reply.header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${item.revision}.csv"`);
    return "\uFEFF"+sidecPackageSummaryCsv(item.snapshot);
   }
+
+  if(format==="zip"){
+   const docs=await db.query(`SELECT d.document_id AS id,d.document_number AS number,d.document_title AS title,
+      d.document_type AS "documentType",d.document_revision AS revision,d.content_hash AS "contentHash"
+      FROM sidec_export_documents d WHERE d.export_id=$1 ORDER BY d.document_title,d.document_id`,[id]);
+   const manifest=buildSidecManifest({
+    packageSchemaVersion:item.schemaVersion,
+    revision:item.revision,
+    snapshotHash:item.snapshotHash,
+    documents:docs.rows as SidecManifestDocument[]
+   });
+   const computedManifestHash=hashSidecManifest(manifest);
+   if(item.manifestHash&&item.manifestHash!==computedManifestHash){
+    return reply.code(409).send({error:"MANIFEST_INTEGRITY_ERROR",expected:item.manifestHash,computed:computedManifestHash});
+   }
+
+   const entries:Array<{name:string;data:Buffer|string}>=[
+    {name:"pacote.json",data:JSON.stringify({snapshotHash:item.snapshotHash,manifestHash:computedManifestHash,...item.snapshot},null,2)},
+    {name:"resumo.csv",data:"\uFEFF"+sidecPackageSummaryCsv(item.snapshot)},
+    {name:"manifesto.json",data:JSON.stringify({manifestHash:computedManifestHash,...manifest},null,2)}
+   ];
+
+   for(const documentRef of docs.rows as SidecManifestDocument[]){
+    const documentResult=await db.query<Record<string,any>>(`SELECT d.id,d.document_type AS "documentType",d.number,d.title,
+      d.subject,d.status,d.revision,d.content->>'text' AS "contentText",d.legal_basis AS "legalBasis",d.recipient,
+      d.valid_until AS "validUntil",d.content_hash AS "contentHash",o.name AS "organizationName",i.protocol
+      FROM technical_documents d
+      JOIN organizations o ON o.id=d.organization_id
+      LEFT JOIN incidents i ON i.id=d.incident_id
+      WHERE d.id=$1 AND d.organization_id=$2 AND d.status='ISSUED'`,[documentRef.id,org]);
+    const document=documentResult.rows[0];
+    if(!document)return reply.code(409).send({error:"DOCUMENT_NOT_AVAILABLE",documentId:documentRef.id});
+    if(documentRef.contentHash&&document.contentHash!==documentRef.contentHash){
+     return reply.code(409).send({error:"DOCUMENT_INTEGRITY_ERROR",documentId:documentRef.id});
+    }
+    const signatures=await db.query<Record<string,any>>(`SELECT s.signature_type AS "signatureType",s.signed_at AS "signedAt",
+      u.display_name AS "displayName",u.matricula
+      FROM technical_document_signatures s JOIN users u ON u.id=s.signed_by
+      WHERE s.document_id=$1 ORDER BY s.signed_at`,[documentRef.id]);
+    const pdf=await buildPdf(document,signatures.rows);
+    const safeDocument=String(documentRef.number??documentRef.id).replace(/[^0-9A-Za-z_-]/g,"_");
+    entries.push({name:`documentos/${safeDocument}.pdf`,data:pdf});
+   }
+
+   const zip=await zipBuffer(entries);
+   return reply.type("application/zip")
+    .header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${item.revision}.zip"`)
+    .header("Content-Length",String(zip.length))
+    .send(zip);
+  }
+
   if(format!=="json")return reply.code(400).send({error:"UNSUPPORTED_FORMAT"});
   reply.header("Content-Type","application/json; charset=utf-8");
   reply.header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${item.revision}.json"`);
-  return JSON.stringify({snapshotHash:item.snapshotHash,...item.snapshot},null,2);
+  return JSON.stringify({snapshotHash:item.snapshotHash,manifestHash:item.manifestHash??null,...item.snapshot},null,2);
  });
 
  app.patch("/api/v1/sidec-exports/:id/status",{preHandler:requirePermission("sidec_exports.manage")},async(request,reply)=>{
