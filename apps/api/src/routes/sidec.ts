@@ -85,7 +85,8 @@ export async function sidecRoutes(app:FastifyInstance){
   const client=await db.connect();
   try{
    await client.query("BEGIN");
-   const revisionResult=await client.query<{revision:number}>(`SELECT COALESCE(MAX(revision),0)+1 AS revision FROM sidec_exports WHERE incident_id=$1 FOR UPDATE`,[id]);
+   await client.query("SELECT id FROM incidents WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
+   const revisionResult=await client.query<{revision:number}>(`SELECT COALESCE(MAX(revision),0)+1 AS revision FROM sidec_exports WHERE incident_id=$1`,[id]);
    const revision=Number(revisionResult.rows[0]?.revision??1);
    const created=await client.query<{id:string}>(`INSERT INTO sidec_exports(
       organization_id,incident_id,revision,schema_version,status,snapshot,snapshot_hash,created_by
