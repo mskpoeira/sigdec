@@ -253,8 +253,10 @@ export async function sidecRoutes(app:FastifyInstance){
 
   const mappings=await effectiveMappings(org);
   const root=incidentRoot(incidentRow);
-  const checks=evaluateSidecReadiness(root,mappings);
-  if(!isSidecReady(checks))return reply.code(409).send({error:"NOT_READY",checks});
+  const cobradeCode=String(incidentRow.cobradeCode??"").trim()||null;
+  const cobradeRequirements=await effectiveCobradeRequirements(org,cobradeCode);
+  const checks=[...evaluateSidecReadiness(root,mappings),...evaluateCobradeRequirements(root,cobradeRequirements)];
+  if(!isSidecReady(checks))return reply.code(409).send({error:"NOT_READY",checks,cobradeCode,cobradeRequirements});
 
   const selectedDocuments=documentIds.length
    ? await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
@@ -297,7 +299,15 @@ export async function sidecRoutes(app:FastifyInstance){
    mappedFields:buildMappedFields(root,mappings)
   });
   const snapshotHash=hashSidecPackage(pkg);
-  const readinessSnapshot={ready:true,checks,mappings};
+  const readinessSnapshot={ready:true,checks,mappings,cobradeCode,cobradeRequirements};
+  const manifestDocuments=(selectedDocuments.rows as Array<Record<string,any>>).map(document=>({
+   id:String(document.id),
+   number:document.number??null,
+   title:String(document.title),
+   documentType:String(document.documentType),
+   revision:Number(document.revision),
+   contentHash:document.contentHash??null
+  })) satisfies SidecManifestDocument[];
 
   const client=await db.connect();
   try{
@@ -305,10 +315,12 @@ export async function sidecRoutes(app:FastifyInstance){
    await client.query("SELECT id FROM incidents WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
    const revisionResult=await client.query<{revision:number}>(`SELECT COALESCE(MAX(revision),0)+1 AS revision FROM sidec_exports WHERE incident_id=$1`,[id]);
    const revision=Number(revisionResult.rows[0]?.revision??1);
+   const manifest=buildSidecManifest({packageSchemaVersion:"1.1",revision,snapshotHash,documents:manifestDocuments});
+   const manifestHash=hashSidecManifest(manifest);
    const created=await client.query<{id:string}>(`INSERT INTO sidec_exports(
-      organization_id,incident_id,revision,schema_version,status,snapshot,snapshot_hash,readiness_snapshot,created_by
-    ) VALUES($1,$2,$3,'1.1','READY',$4::jsonb,$5,$6::jsonb,$7) RETURNING id`,
-    [org,id,revision,JSON.stringify(pkg),snapshotHash,JSON.stringify(readinessSnapshot),auth.userId]);
+      organization_id,incident_id,revision,schema_version,status,snapshot,snapshot_hash,manifest_hash,readiness_snapshot,created_by
+    ) VALUES($1,$2,$3,'1.1','READY',$4::jsonb,$5,$6,$7::jsonb,$8) RETURNING id`,
+    [org,id,revision,JSON.stringify(pkg),snapshotHash,manifestHash,JSON.stringify(readinessSnapshot),auth.userId]);
    const exportId=created.rows[0]?.id;
    if(!exportId)throw new Error("Falha ao criar pacote SIDEC.");
    for(const document of selectedDocuments.rows as Array<Record<string,any>>){
@@ -317,11 +329,11 @@ export async function sidecRoutes(app:FastifyInstance){
     ) VALUES($1,$2,$3,$4,$5,$6,$7)`,[exportId,document.id,document.number??null,document.title,document.documentType,document.revision,document.contentHash??null]);
    }
    await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
-      VALUES($1,'sidec_export.created',$2,$3,$4::jsonb)`,[id,auth.userId,`Pacote SIDEC revisão ${revision} gerado.`,JSON.stringify({exportId,revision,snapshotHash,documents:documentIds.length})]);
+      VALUES($1,'sidec_export.created',$2,$3,$4::jsonb)`,[id,auth.userId,`Pacote SIDEC revisão ${revision} gerado.`,JSON.stringify({exportId,revision,snapshotHash,manifestHash,documents:documentIds.length})]);
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
-      VALUES($1,'sidec_export.create','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,exportId,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,revision,status:"READY",snapshotHash}),JSON.stringify({schemaVersion:"1.1",documents:documentIds.length})]);
+      VALUES($1,'sidec_export.create','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,exportId,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,revision,status:"READY",snapshotHash,manifestHash}),JSON.stringify({schemaVersion:"1.1",documents:documentIds.length,cobradeCode})]);
    await client.query("COMMIT");
-   return reply.code(201).send({id:exportId,revision,status:"READY",schemaVersion:"1.1",snapshotHash,readiness:readinessSnapshot,documents:selectedDocuments.rows});
+   return reply.code(201).send({id:exportId,revision,status:"READY",schemaVersion:"1.1",snapshotHash,manifestHash,readiness:readinessSnapshot,documents:selectedDocuments.rows});
   }catch(error){
    await client.query("ROLLBACK");throw error;
   }finally{client.release();}
