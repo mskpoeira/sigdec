@@ -7,7 +7,7 @@ import { db } from "../db.js";
 import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
 import { buildPdf } from "./documents.js";
-import { buildMappedFields, diffSidecValues, evaluateCobradeRequirements, evaluateSidecReadiness, isSidecReady, type CobradeRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
+import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
 const exportCreateSchema=z.object({
  documentIds:z.array(z.string().uuid()).max(50).default([])
@@ -41,6 +41,19 @@ const cobradeRequirementsUpdateSchema=z.object({
  items:z.array(cobradeRequirementSchema).max(100)
 });
 
+const documentRequirementSchema=z.object({
+ documentType:z.enum(["REPORT","OPINION","INTERDICTION","DECLARATION","FORM","OTHER"]),
+ label:z.string().trim().min(3).max(200),
+ minCount:z.number().int().min(1).max(20).default(1),
+ required:z.boolean().default(true),
+ enabled:z.boolean().default(true)
+});
+const documentRequirementsUpdateSchema=z.object({
+ scopeType:z.enum(["DEFAULT","COBRADE","INCIDENT_TYPE"]),
+ scopeValue:z.string().trim().min(1).max(80).default("*"),
+ items:z.array(documentRequirementSchema).max(20)
+});
+
 const returnEnvelopeSchema=z.object({
  schemaVersion:z.literal("sigdec-sidec-return/1.0"),
  externalProtocol:z.string().trim().min(1).max(200),
@@ -64,6 +77,19 @@ const transitions:Record<string,string[]>={
  REJECTED:[],
  CANCELLED:[]
 };
+
+async function effectiveDocumentRequirements(org:string,cobradeCode:string|null|undefined,typeCode:string|null|undefined):Promise<SidecDocumentRequirement[]>{
+ const r=await db.query(`SELECT scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
+   label,min_count AS "minCount",required,enabled
+   FROM sidec_document_requirements
+   WHERE organization_id=$1 AND enabled=true AND (
+     (scope_type='DEFAULT' AND scope_value='*')
+     OR (scope_type='COBRADE' AND $2::text IS NOT NULL AND scope_value=$2)
+     OR (scope_type='INCIDENT_TYPE' AND $3::text IS NOT NULL AND scope_value=$3)
+   )
+   ORDER BY CASE scope_type WHEN 'DEFAULT' THEN 1 WHEN 'INCIDENT_TYPE' THEN 2 ELSE 3 END,document_type`,[org,cobradeCode??null,typeCode??null]);
+ return r.rows as SidecDocumentRequirement[];
+}
 
 async function effectiveCobradeRequirements(org:string,cobradeCode:string|null|undefined):Promise<CobradeRequirement[]>{
  if(!cobradeCode)return [];
