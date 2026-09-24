@@ -1144,6 +1144,7 @@ export async function sidecRoutes(app:FastifyInstance){
   const current=currentResult.rows[0] as any;
   if(!current)return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
   const previous=current.retainUntil?new Date(current.retainUntil):null;
+  if(parsed.data.retainUntil.getTime()<=Date.now())return reply.code(409).send({error:"RETENTION_FUTURE_REQUIRED"});
   if(previous&&parsed.data.retainUntil.getTime()<=previous.getTime()){
    return reply.code(409).send({error:"RETENTION_EXTENSION_REQUIRED",currentRetainUntil:previous.toISOString()});
   }
