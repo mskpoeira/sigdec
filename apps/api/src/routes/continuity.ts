@@ -438,4 +438,81 @@ export async function continuityRoutes(app:FastifyInstance){
   ]);
   return loadExercise(org,id);
  });
+ app.post("/api/v1/sidec/continuity/exercises/:exerciseId/steps/:stepId/evidence",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const {exerciseId,stepId}=request.params as {exerciseId:string;stepId:string};
+  const parsed=evidenceSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const valid=await db.query(`SELECT 1 FROM sidec_continuity_exercises e JOIN sidec_continuity_exercise_steps es ON es.exercise_id=e.id WHERE e.id=$1 AND e.organization_id=$2 AND es.step_id=$3`,[exerciseId,org,stepId]);
+  if(!valid.rows[0])return reply.code(404).send({error:"STEP_NOT_FOUND"});
+  const created=await db.query(`INSERT INTO sidec_continuity_step_evidence(organization_id,exercise_id,step_id,evidence_type,title,reference,content_hash,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,step_id AS "stepId",evidence_type AS "evidenceType",title,reference,content_hash AS "contentHash",created_at AS "createdAt"`,[org,exerciseId,stepId,parsed.data.evidenceType,parsed.data.title,parsed.data.reference,parsed.data.contentHash??null,auth.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,'sidec_continuity.evidence_create','sidec_continuity_exercise',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,exerciseId,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),JSON.stringify({stepId})]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.put("/api/v1/sidec/continuity/exercises/:id/aar",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=aarUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const exercise=await db.query(`SELECT status FROM sidec_continuity_exercises WHERE id=$1 AND organization_id=$2`,[id,org]);
+  if(!exercise.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  if(exercise.rows[0].status!=="COMPLETED")return reply.code(409).send({error:"COMPLETED_EXERCISE_REQUIRED"});
+  const existing=await db.query(`SELECT id,status FROM sidec_continuity_aars WHERE exercise_id=$1 AND organization_id=$2`,[id,org]);
+  if(existing.rows[0]?.status==="FINAL")return reply.code(409).send({error:"AAR_IMMUTABLE"});
+  let aarId=existing.rows[0]?.id as string|undefined;
+  if(aarId){
+   await db.query(`UPDATE sidec_continuity_aars SET executive_summary=$1,strengths=$2,gaps=$3,recommendations=$4,updated_at=now() WHERE id=$5 AND organization_id=$6 AND status='DRAFT'`,[parsed.data.executiveSummary,parsed.data.strengths,parsed.data.gaps,parsed.data.recommendations,aarId,org]);
+  }else{
+   const created=await db.query(`INSERT INTO sidec_continuity_aars(organization_id,exercise_id,status,executive_summary,strengths,gaps,recommendations,created_by) VALUES($1,$2,'DRAFT',$3,$4,$5,$6,$7) RETURNING id`,[org,id,parsed.data.executiveSummary,parsed.data.strengths,parsed.data.gaps,parsed.data.recommendations,auth.userId]);
+   aarId=String(created.rows[0].id);
+  }
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,'sidec_continuity.aar_save','sidec_continuity_aar',$2,$3,$4,$5::jsonb)`,[auth.userId,aarId,request.ip,request.headers["user-agent"]??null,JSON.stringify(parsed.data)]);
+  return loadExercise(org,id);
+ });
+
+ app.post("/api/v1/sidec/continuity/exercises/:id/aar/actions",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=aarActionCreateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.ownerUserId){const owner=await db.query(`SELECT 1 FROM users WHERE id=$1 AND organization_id=$2`,[parsed.data.ownerUserId,org]);if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});}
+  const aar=await db.query(`SELECT a.id,a.status FROM sidec_continuity_aars a JOIN sidec_continuity_exercises e ON e.id=a.exercise_id WHERE a.exercise_id=$1 AND a.organization_id=$2 AND e.status='COMPLETED'`,[id,org]);
+  if(!aar.rows[0])return reply.code(409).send({error:"AAR_DRAFT_REQUIRED"});
+  if(aar.rows[0].status!=="DRAFT")return reply.code(409).send({error:"AAR_IMMUTABLE"});
+  const created=await db.query(`INSERT INTO sidec_continuity_action_items(aar_id,title,description,priority,owner_user_id,due_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,created_at AS "createdAt"`,[aar.rows[0].id,parsed.data.title,parsed.data.description,parsed.data.priority,parsed.data.ownerUserId??null,parsed.data.dueAt??null]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_create','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),JSON.stringify({exerciseId:id})]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.patch("/api/v1/sidec/continuity/exercises/:exerciseId/aar/actions/:actionId",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);const {exerciseId,actionId}=request.params as {exerciseId:string;actionId:string};
+  const parsed=aarActionUpdateSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.ownerUserId){const owner=await db.query(`SELECT 1 FROM users WHERE id=$1 AND organization_id=$2`,[parsed.data.ownerUserId,org]);if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});}
+  const current=await db.query(`SELECT ai.*,a.status AS aar_status FROM sidec_continuity_action_items ai JOIN sidec_continuity_aars a ON a.id=ai.aar_id WHERE ai.id=$1 AND a.exercise_id=$2 AND a.organization_id=$3`,[actionId,exerciseId,org]);
+  const row=current.rows[0] as any;if(!row)return reply.code(404).send({error:"ACTION_NOT_FOUND"});
+  const contentChange=parsed.data.title!==undefined||parsed.data.description!==undefined||parsed.data.priority!==undefined||parsed.data.ownerUserId!==undefined||parsed.data.dueAt!==undefined;
+  if(row.aar_status==="FINAL"&&contentChange)return reply.code(409).send({error:"AAR_ACTION_CONTENT_IMMUTABLE"});
+  const nextStatus=parsed.data.status??row.status;const completedAt=nextStatus==="DONE"?(row.completed_at??new Date()):null;
+  const updated=await db.query(`UPDATE sidec_continuity_action_items SET title=$1,description=$2,priority=$3,owner_user_id=$4,due_at=$5,status=$6,completed_at=$7,updated_at=now() WHERE id=$8 RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,completed_at AS "completedAt",updated_at AS "updatedAt"`,[parsed.data.title??row.title,parsed.data.description??row.description,parsed.data.priority??row.priority,parsed.data.ownerUserId===undefined?row.owner_user_id:parsed.data.ownerUserId,parsed.data.dueAt===undefined?row.due_at:parsed.data.dueAt,nextStatus,completedAt,actionId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_update','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(updated.rows[0]),JSON.stringify({exerciseId})]);
+  return updated.rows[0];
+ });
+
+ app.post("/api/v1/sidec/continuity/exercises/:id/aar/finalize",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};const exercise=await loadExercise(org,id);
+  if(!exercise)return reply.code(404).send({error:"NOT_FOUND"});if(exercise.status!=="COMPLETED")return reply.code(409).send({error:"COMPLETED_EXERCISE_REQUIRED"});
+  const aar=exercise.aar;if(!aar)return reply.code(409).send({error:"AAR_DRAFT_REQUIRED"});if(aar.status==="FINAL")return exercise;
+  const incomplete=(aar.actions??[]).filter((action:any)=>action.status!=="CANCELLED"&&(!action.ownerUserId||!action.dueAt));
+  if(incomplete.length)return reply.code(409).send({error:"AAR_ACTIONS_INCOMPLETE",actionIds:incomplete.map((action:any)=>action.id)});
+  await db.query(`UPDATE sidec_continuity_aars SET status='FINAL',finalized_by=$1,finalized_at=now(),updated_at=now() WHERE id=$2 AND organization_id=$3 AND status='DRAFT'`,[auth.userId,aar.id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,'sidec_continuity.aar_finalize','sidec_continuity_aar',$2,$3,$4,$5::jsonb)`,[auth.userId,aar.id,request.ip,request.headers["user-agent"]??null,JSON.stringify({exerciseId:id,actions:(aar.actions??[]).length})]);
+  return loadExercise(org,id);
+ });
+
+ app.get("/api/v1/sidec/continuity/exercises/:id/report.pdf",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};const exercise=await loadExercise(org,id);if(!exercise)return reply.code(404).send({error:"NOT_FOUND"});
+  const organization=await db.query(`SELECT name FROM organizations WHERE id=$1`,[org]);
+  const pdf=await buildContinuityExerciseReportPdf({organizationName:String(organization.rows[0]?.name??"Organização"),exercise,aar:exercise.aar});
+  return reply.type("application/pdf").header("Content-Disposition",`attachment; filename="SIGDEC-continuity-exercise-${id}.pdf"`).header("Content-Length",String(pdf.length)).send(pdf);
+ });
+
 }
