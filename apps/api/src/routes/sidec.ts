@@ -1169,7 +1169,16 @@ export async function sidecRoutes(app:FastifyInstance){
    returns:returns.rows,
    timeline:timeline.rows,
    audits:audits.rows,
-   verifications:verifications.rows
+   verifications:verifications.rows,
+   archive:(await db.query(`SELECT r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId",r.etag,
+     r.object_lock_mode AS "objectLockMode",r.retain_until AS "retainUntil",r.legal_hold AS "legalHold",
+     r.content_hash AS "contentHash",r.archived_at AS "archivedAt",
+     COALESCE((SELECT json_agg(json_build_object(
+       'existsRemote',v.exists_remote,'hashValid',v.hash_valid,'observedHash',v.observed_hash,
+       'objectLockMode',v.object_lock_mode,'retainUntil',v.retain_until,'legalHold',v.legal_hold,
+       'source',v.verification_source,'error',v.error_message,'verifiedAt',v.verified_at
+     ) ORDER BY v.verified_at) FROM sidec_archive_verifications v WHERE v.export_id=r.export_id),'[]'::json) AS verifications
+     FROM sidec_archive_receipts r WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org])).rows[0]??null
   };
   const download=String((request.query as {download?:string})?.download??"").trim()==="1";
   if(download){
@@ -1280,12 +1289,20 @@ export async function sidecRoutes(app:FastifyInstance){
     t.key_id AS "ed25519KeyId",t.signature AS "ed25519Signature",t.public_key AS "ed25519PublicKey",
     t.public_key_fingerprint AS "ed25519Fingerprint",t.attested_at AS "attestedAt",
     ts.statement_hash AS "statementHash",ts.timestamped_at AS "timestampedAt",ts.key_id AS "timestampKeyId",
-    ts.signature AS "timestampSignature",ts.public_key AS "timestampPublicKey",ts.public_key_fingerprint AS "timestampFingerprint"
+    ts.signature AS "timestampSignature",ts.public_key AS "timestampPublicKey",ts.public_key_fingerprint AS "timestampFingerprint",
+    (wr.export_id IS NOT NULL) AS "archiveCreated",wr.object_lock_mode AS "archiveLockMode",
+    wr.retain_until AS "archiveRetainUntil",wr.legal_hold AS "archiveLegalHold",wr.archived_at AS "archivedAt",
+    wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",wv.verified_at AS "archiveVerifiedAt"
    FROM sidec_export_artifacts a
    JOIN sidec_exports e ON e.id=a.export_id
    JOIN incidents i ON i.id=e.incident_id
    LEFT JOIN sidec_artifact_attestations t ON t.export_id=a.export_id
    LEFT JOIN sidec_integrity_timestamps ts ON ts.export_id=a.export_id
+   LEFT JOIN sidec_archive_receipts wr ON wr.export_id=a.export_id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid,verified_at FROM sidec_archive_verifications av
+    WHERE av.export_id=a.export_id ORDER BY verified_at DESC LIMIT 1
+   ) wv ON true
    WHERE a.content_hash=$1 LIMIT 1`,[artifactHash]);
   const row=r.rows[0] as any;
   if(!row||!row.ed25519Signature)return reply.code(404).send({error:"PUBLIC_INTEGRITY_NOT_AVAILABLE"});
@@ -1318,7 +1335,11 @@ export async function sidecRoutes(app:FastifyInstance){
    valid,artifactHash:row.artifactHash,manifestHash:row.manifestHash,
    protocol:row.protocol,revision:Number(row.revision),schemaVersion:row.schemaVersion,sealedAt:row.sealedAt,
    ed25519:{keyId:row.ed25519KeyId,publicKeyFingerprint:row.ed25519Fingerprint,attestedAt:row.attestedAt,valid:asymmetricValid},
-   timestamp:{keyId:row.timestampKeyId,statementHash:row.statementHash,timestampedAt:row.timestampedAt,publicKeyFingerprint:row.timestampFingerprint,valid:timestampValid}
+   timestamp:{keyId:row.timestampKeyId,statementHash:row.statementHash,timestampedAt:row.timestampedAt,publicKeyFingerprint:row.timestampFingerprint,valid:timestampValid},
+   archive:row.archiveCreated?{
+    preserved:true,lockMode:row.archiveLockMode,retainUntil:row.archiveRetainUntil,legalHold:Boolean(row.archiveLegalHold),
+    archivedAt:row.archivedAt,existsRemote:row.archiveExistsRemote,hashValid:row.archiveHashValid,verifiedAt:row.archiveVerifiedAt
+   }:{preserved:false}
   };
  });
 
