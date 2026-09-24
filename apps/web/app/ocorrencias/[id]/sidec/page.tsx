@@ -338,7 +338,7 @@ export default function SidecExportsPage(){
      <p><strong>{statusLabels[item.status]??item.status}</strong> · schema {item.schemaVersion}</p>
      <p>Gerado em {new Date(item.createdAt).toLocaleString("pt-BR")}</p>
      <p style={{overflowWrap:"anywhere"}}><strong>Snapshot SHA-256:</strong> {item.snapshotHash}</p>{item.manifestHash&&<p style={{overflowWrap:"anywhere"}}><strong>Manifesto SHA-256:</strong> {item.manifestHash}</p>}
-     {item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
+     {item.artifactSealed&&<><p style={{overflowWrap:"anywhere"}}><strong>ZIP selado SHA-256:</strong> {item.artifactHash}</p><p style={{overflowWrap:"anywhere"}}><strong>Assinatura interna HMAC-SHA256:</strong> {item.manifestSignature}</p>{item.artifactSignedAt&&<p>Selado em {new Date(item.artifactSignedAt).toLocaleString("pt-BR")}</p>}</>}{item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
      {item.externalNotes&&<p>{item.externalNotes}</p>}
 
      {item.documents?.length>0&&<div><strong>Documentos do pacote</strong><ul>{item.documents.map(doc=><li key={doc.id}><a href={documentPdfUrl(doc.id)} target="_blank" rel="noreferrer">{doc.number??"Documento"} · {doc.title} · R{doc.revision}</a></li>)}</ul></div>}
@@ -346,7 +346,7 @@ export default function SidecExportsPage(){
      <div className="headerActions">
       <a className="secondaryLink" href={downloadUrl(item.id,"json")}>Baixar JSON</a>
       <a className="secondaryLink" href={downloadUrl(item.id,"csv")}>Baixar CSV</a>
-      <a className="primaryButton" href={downloadUrl(item.id,"zip")}>Baixar ZIP completo</a>
+      <a className="primaryButton" href={downloadUrl(item.id,"zip")}>{item.artifactSealed?"Baixar ZIP selado":"Baixar prévia ZIP"}</a>
       <select aria-label="Categoria da comparação" value={compareCategories[item.id]??"all"} onChange={e=>setCompareCategories(values=>({...values,[item.id]:e.target.value}))}>
        <option value="all">Todas as diferenças</option><option value="incident">Ocorrência</option><option value="mappedFields">Campos mapeados</option><option value="documents">Documentos</option><option value="actions">Ações</option><option value="inspections">Vistorias</option><option value="supportRequests">Solicitações</option><option value="humanitarianDeliveries">Assistência</option><option value="timeline">Timeline</option><option value="municipality">Município</option><option value="other">Outros</option>
       </select>
