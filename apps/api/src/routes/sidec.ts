@@ -13,6 +13,7 @@ import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySid
 import { archiveSidecArtifact, archiveSidecReplica, enableSidecArchiveLegalHold, enableSidecReplicaLegalHold, extendSidecArchiveRetention, extendSidecReplicaRetention, restoreSidecArchiveObject, restoreSidecReplicaObject, verifySidecArchive, verifySidecReplica, wormMode, wormReplicaEnabled, wormReplicaMode } from "../lib/sidec-worm.js";
 import { hasZipSignature, nextResilienceRetryAt, shouldAlertResilience } from "../lib/sidec-resilience.js";
 import { buildSidecResiliencePdf, resiliencePct } from "../lib/sidec-resilience-report.js";
+import { evaluateSidecContinuity, type SidecContinuityPolicy } from "../lib/sidec-continuity.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -86,6 +87,13 @@ const archiveLegalHoldEnableSchema=z.object({
 
 const restoreDrillSchema=z.object({
  destination:z.enum(["PRIMARY","REPLICA"])
+});
+
+const resiliencePolicySchema=z.object({
+ rpoMinutes:z.number().int().min(15).max(10080),
+ rtoMinutes:z.number().int().min(15).max(43200),
+ drillMaxAgeHours:z.number().int().min(24).max(8760),
+ enabled:z.boolean()
 });
 
 
@@ -818,6 +826,71 @@ function incidentRoot(incident:Record<string,unknown>){
 function organizationId(value:string|null){
  if(!value){const error=new Error("Usuário sem organização vinculada.");(error as Error&{statusCode?:number}).statusCode=409;throw error;}
  return value;
+}
+
+const defaultSidecContinuityPolicy:SidecContinuityPolicy={
+ enabled:true,
+ rpoMinutes:1440,
+ rtoMinutes:240,
+ drillMaxAgeHours:168
+};
+
+async function effectiveSidecContinuityPolicy(org:string){
+ const r=await db.query(`SELECT enabled,rpo_minutes AS "rpoMinutes",rto_minutes AS "rtoMinutes",
+   drill_max_age_hours AS "drillMaxAgeHours",updated_at AS "updatedAt"
+  FROM sidec_resilience_policies WHERE organization_id=$1`,[org]);
+ const row=r.rows[0];
+ if(!row)return {...defaultSidecContinuityPolicy,updatedAt:null};
+ return {
+  enabled:Boolean(row.enabled),
+  rpoMinutes:Number(row.rpoMinutes),
+  rtoMinutes:Number(row.rtoMinutes),
+  drillMaxAgeHours:Number(row.drillMaxAgeHours),
+  updatedAt:row.updatedAt??null
+ };
+}
+
+async function buildSidecContinuityReadiness(org:string){
+ const policy=await effectiveSidecContinuityPolicy(org);
+ const [replication,drills]=await Promise.all([
+  db.query(`SELECT count(*)::int AS archives,
+    count(s.export_id)::int AS replicas,
+    count(*) FILTER(WHERE s.export_id IS NULL)::int AS "missingReplicas",
+    max(GREATEST(0,EXTRACT(EPOCH FROM (s.replicated_at-p.archived_at))/60.0))
+      FILTER(WHERE s.export_id IS NOT NULL) AS "maxReplicationDelayMinutes"
+   FROM sidec_archive_receipts p
+   LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+   WHERE p.organization_id=$1`,[org]),
+  db.query(`SELECT DISTINCT ON(destination) destination,performed_at AS "performedAt",duration_ms AS "durationMs"
+   FROM sidec_restore_drills
+   WHERE organization_id=$1 AND success=true
+   ORDER BY destination,performed_at DESC`,[org])
+ ]);
+ const coverage=replication.rows[0]??{};
+ const byDestination=new Map<string,any>(drills.rows.map((row:any)=>[String(row.destination),row]));
+ const primary=byDestination.get("PRIMARY");
+ const replica=byDestination.get("REPLICA");
+ const metrics={
+  archives:Number(coverage.archives??0),
+  replicas:Number(coverage.replicas??0),
+  missingReplicas:Number(coverage.missingReplicas??0),
+  maxReplicationDelayMinutes:coverage.maxReplicationDelayMinutes===null?null:Math.round(Number(coverage.maxReplicationDelayMinutes)*100)/100,
+  replicaRequired:wormReplicaEnabled(),
+  latestSuccessfulPrimaryDrillAt:primary?.performedAt?new Date(primary.performedAt):null,
+  latestSuccessfulPrimaryDrillDurationMinutes:primary?.durationMs===undefined?null:Math.round((Number(primary.durationMs)/60000)*100)/100,
+  latestSuccessfulReplicaDrillAt:replica?.performedAt?new Date(replica.performedAt):null,
+  latestSuccessfulReplicaDrillDurationMinutes:replica?.durationMs===undefined?null:Math.round((Number(replica.durationMs)/60000)*100)/100
+ };
+ return {
+  policy,
+  metrics:{
+   ...metrics,
+   latestSuccessfulPrimaryDrillAt:metrics.latestSuccessfulPrimaryDrillAt?.toISOString()??null,
+   latestSuccessfulReplicaDrillAt:metrics.latestSuccessfulReplicaDrillAt?.toISOString()??null
+  },
+  readiness:evaluateSidecContinuity(policy,metrics),
+  note:"RPO é confrontado com atraso de replicação WORM. RTO usa duração de drills como evidência administrativa e não representa, isoladamente, recuperação integral do SIGDEC."
+ };
 }
 
 export async function sidecRoutes(app:FastifyInstance){
@@ -1746,6 +1819,44 @@ export async function sidecRoutes(app:FastifyInstance){
   return {items:r.rows};
  });
 
+ app.get("/api/v1/sidec/resilience/policy",{preHandler:requirePermission("sidec_resilience.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  return effectiveSidecContinuityPolicy(org);
+ });
+
+ app.put("/api/v1/sidec/resilience/policy",{preHandler:requirePermission("sidec_resilience.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=resiliencePolicySchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const before=await effectiveSidecContinuityPolicy(org);
+  const item=parsed.data;
+  const saved=await db.query(`INSERT INTO sidec_resilience_policies(
+      organization_id,rpo_minutes,rto_minutes,drill_max_age_hours,enabled,updated_by,updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,now())
+    ON CONFLICT(organization_id) DO UPDATE SET
+      rpo_minutes=EXCLUDED.rpo_minutes,
+      rto_minutes=EXCLUDED.rto_minutes,
+      drill_max_age_hours=EXCLUDED.drill_max_age_hours,
+      enabled=EXCLUDED.enabled,
+      updated_by=EXCLUDED.updated_by,
+      updated_at=now()
+    RETURNING enabled,rpo_minutes AS "rpoMinutes",rto_minutes AS "rtoMinutes",
+      drill_max_age_hours AS "drillMaxAgeHours",updated_at AS "updatedAt"`,[
+    org,item.rpoMinutes,item.rtoMinutes,item.drillMaxAgeHours,item.enabled,auth.userId
+  ]);
+  const after=saved.rows[0];
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_resilience.policy_update','sidec_resilience_policy',$2,$3,$4::jsonb,$5::jsonb)`,[
+    auth.userId,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(after)
+  ]);
+  return after;
+ });
+
+ app.get("/api/v1/sidec/resilience/readiness",{preHandler:requirePermission("sidec_resilience.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  return buildSidecContinuityReadiness(org);
+ });
+
  app.get("/api/v1/sidec/resilience/report",{preHandler:requirePermission("sidec_resilience.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId);
   const query=request.query as {days?:string;download?:string;format?:string;months?:string};
@@ -1811,8 +1922,9 @@ export async function sidecRoutes(app:FastifyInstance){
     FROM months ORDER BY month_start`,[org,months])
   ]);
   const p=primary.rows[0]??{},r=replica.rows[0]??{},cv=coverage.rows[0]??{};
+  const continuity=await buildSidecContinuityReadiness(org);
   const report={
-   reportVersion:"sigdec-sidec-resilience-report/1.1",
+   reportVersion:"sigdec-sidec-resilience-report/1.2",
    generatedAt:new Date().toISOString(),period:{days,from:from.toISOString(),to:new Date().toISOString()},
    redundancy:{
     archives:Number(cv.archives??0),replicas:Number(cv.replicas??0),
@@ -1832,6 +1944,7 @@ export async function sidecRoutes(app:FastifyInstance){
    })),
    conditions:conditions.rows[0]??{},
    retries:retries.rows[0]??{},
+   continuity,
    trend:trend.rows.map((x:any)=>({
     month:String(x.month),
     primaryChecks:Number(x.primaryChecks??0),
