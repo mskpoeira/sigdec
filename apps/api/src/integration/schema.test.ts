@@ -26,6 +26,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0033_sidec_continuity_runbook.sql"));
  assert.ok(files.includes("0034_sidec_continuity_evidence_aar.sql"));
  assert.ok(files.includes("0035_sidec_continuity_schedule_escalation_lessons.sql"));
+ assert.ok(files.includes("0036_sidec_continuity_action_effectiveness.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -317,6 +318,23 @@ test("SIDEC v1.28 possui agenda escalonamento alertas e licoes de continuidade",
  const alertDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='sidec_continuity_action_alerts'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
  assert.match(alertDefs,/DUE_SOON/);assert.match(alertDefs,/OVERDUE/);
+});
+
+test("SIDEC v1.29 possui vinculos e avaliacao de eficacia das acoes",async()=>{
+ const columns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_action_items'
+   AND column_name IN ('risk_id','recovery_action_id','effectiveness','effectiveness_notes','effectiveness_evaluated_at','effectiveness_evaluated_by')
+  ORDER BY column_name`);
+ assert.deepEqual(columns.rows.map(x=>x.column_name),[
+  "effectiveness","effectiveness_evaluated_at","effectiveness_evaluated_by","effectiveness_notes","recovery_action_id","risk_id"
+ ]);
+ const defs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_action_items'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/NOT_EVALUATED/);
+ assert.match(defs,/EFFECTIVE/);
+ assert.match(defs,/PARTIAL/);
+ assert.match(defs,/INEFFECTIVE/);
+ assert.match(defs,/status = 'DONE'/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
