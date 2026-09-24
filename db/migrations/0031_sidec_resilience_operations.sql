@@ -1,3 +1,6 @@
+ALTER TABLE sidec_archive_replicas
+  ALTER COLUMN replicated_by DROP NOT NULL;
+
 CREATE TABLE sidec_replica_retry_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   export_id uuid NOT NULL REFERENCES sidec_archive_receipts(export_id) ON DELETE CASCADE,
