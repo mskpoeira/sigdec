@@ -1220,7 +1220,12 @@ export async function sidecRoutes(app:FastifyInstance){
   if(!verification.existsRemote||verification.hashValid!==true){
    return reply.code(502).send({error:"WORM_ARCHIVE_VERIFICATION_FAILED",receipt,verification});
   }
-  return reply.code(201).send({receipt,verification});
+  let replica:unknown={enabled:wormReplicaEnabled(),created:false};
+  if(wormReplicaEnabled()){
+   try{replica=await createSidecArchiveReplica(org,id,auth.userId)}
+   catch(error){replica={enabled:true,created:false,error:error instanceof Error?error.message:String(error)}}
+  }
+  return reply.code(201).send({receipt,verification,replica});
  });
 
  app.post("/api/v1/sidec-exports/:id/archive/verify",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
@@ -1288,7 +1293,12 @@ export async function sidecRoutes(app:FastifyInstance){
    ]);
    await client.query("COMMIT");
   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
-  return {objectLockMode:mode,retainUntil:parsed.data.retainUntil.toISOString(),legalHold:Boolean(current.legalHold),verification};
+  let replicaSync:unknown={enabled:wormReplicaEnabled(),synced:false};
+  if(wormReplicaEnabled()){
+   try{replicaSync=await syncSidecReplicaPolicy(org,id)}
+   catch(error){replicaSync={enabled:true,synced:false,error:error instanceof Error?error.message:String(error)}}
+  }
+  return {objectLockMode:mode,retainUntil:parsed.data.retainUntil.toISOString(),legalHold:Boolean(current.legalHold),verification,replicaSync};
  });
 
  app.post("/api/v1/sidec-exports/:id/archive/enable-legal-hold",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
@@ -1334,7 +1344,12 @@ export async function sidecRoutes(app:FastifyInstance){
    ]);
    await client.query("COMMIT");
   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
-  return {legalHold:true,verification};
+  let replicaSync:unknown={enabled:wormReplicaEnabled(),synced:false};
+  if(wormReplicaEnabled()){
+   try{replicaSync=await syncSidecReplicaPolicy(org,id)}
+   catch(error){replicaSync={enabled:true,synced:false,error:error instanceof Error?error.message:String(error)}}
+  }
+  return {legalHold:true,verification,replicaSync};
  });
 
  app.get("/api/v1/sidec/archive-health",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
