@@ -19,6 +19,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0026_sidec_ed25519_integrity_proofs.sql"));
  assert.ok(files.includes("0027_sidec_public_integrity_timestamp_custody.sql"));
  assert.ok(files.includes("0028_sidec_worm_archive.sql"));
+ assert.ok(files.includes("0029_sidec_worm_governance.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -171,6 +172,19 @@ test("SIDEC v1.20 possui recibo e verificacao de arquivo WORM",async()=>{
  assert.match(vdefs,/SCHEDULED/);
  assert.match(vdefs,/MANUAL/);
  assert.match(vdefs,/ARCHIVE/);
+});
+
+test("SIDEC v1.21 possui historico monotônico de governanca WORM",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_archive_policy_events'`);
+ assert.equal(tables.rowCount,1);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_archive_policy_events'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/RETENTION_EXTENDED/);
+ assert.match(defs,/LEGAL_HOLD_ENABLED/);
+ assert.doesNotMatch(defs,/RETENTION_SHORTENED/);
+ assert.doesNotMatch(defs,/LEGAL_HOLD_DISABLED/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
