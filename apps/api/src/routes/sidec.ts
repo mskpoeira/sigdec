@@ -1066,6 +1066,13 @@ export async function sidecRoutes(app:FastifyInstance){
   });
   let hmacValid:boolean|null=null;
   try{hmacValid=verifySidecManifestSignature(proof.manifest.sha256,proof.hmac.signature,proof.hmac.keyId)}catch{hmacValid=null}
+  const timestampValid=proof.proofVersion==="sigdec-sidec-integrity-proof/1.1"
+   ? verifySidecTimestamp({
+      manifestHash:proof.manifest.sha256,artifactHash:proof.artifact.sha256,attestationSignature:proof.ed25519.signature,
+      timestampedAt:proof.timestamp.timestampedAt,statementHash:proof.timestamp.statementHash,
+      signature:proof.timestamp.signature,publicKey:proof.timestamp.publicKey,publicKeyFingerprint:proof.timestamp.publicKeyFingerprint
+     })
+   : null;
 
   const registered=await db.query(`SELECT e.organization_id AS "organizationId"
     FROM sidec_exports e
@@ -1075,7 +1082,7 @@ export async function sidecRoutes(app:FastifyInstance){
       AND i.protocol=$4 AND e.revision=$5 AND e.schema_version=$6`,
    [proof.export.id,proof.artifact.sha256,proof.manifest.sha256,proof.export.protocol,proof.export.revision,proof.export.schemaVersion]);
   const organizationIdValue=registered.rows[0]?.organizationId??null;
-  const overallValid=asymmetricValid;
+  const overallValid=asymmetricValid&&(timestampValid===null||timestampValid);
   await db.query(`INSERT INTO sidec_integrity_verifications(
     export_id,organization_id,proof_version,artifact_hash,manifest_hash,hmac_valid,asymmetric_valid,overall_valid,
     verification_source,ip,user_agent
@@ -1085,10 +1092,61 @@ export async function sidecRoutes(app:FastifyInstance){
   return {
    valid:overallValid,
    asymmetricValid,
+   timestampValid,
    hmacValid,
    registeredArtifact:Boolean(organizationIdValue),
    proofVersion:proof.proofVersion,
    publicKeyFingerprint:proof.ed25519.publicKeyFingerprint
+  };
+ });
+
+ app.get("/api/v1/public/sidec-integrity/:artifactHash",async(request,reply)=>{
+  const {artifactHash}=request.params as {artifactHash:string};
+  if(!/^[a-f0-9]{64}$/.test(artifactHash))return reply.code(400).send({error:"INVALID_ARTIFACT_HASH"});
+  const r=await db.query(`SELECT e.id AS "exportId",e.revision,e.schema_version AS "schemaVersion",i.protocol,
+    a.content_hash AS "artifactHash",a.manifest_hash AS "manifestHash",a.signed_at AS "sealedAt",
+    t.key_id AS "ed25519KeyId",t.signature AS "ed25519Signature",t.public_key AS "ed25519PublicKey",
+    t.public_key_fingerprint AS "ed25519Fingerprint",t.attested_at AS "attestedAt",
+    ts.statement_hash AS "statementHash",ts.timestamped_at AS "timestampedAt",ts.key_id AS "timestampKeyId",
+    ts.signature AS "timestampSignature",ts.public_key AS "timestampPublicKey",ts.public_key_fingerprint AS "timestampFingerprint"
+   FROM sidec_export_artifacts a
+   JOIN sidec_exports e ON e.id=a.export_id
+   JOIN incidents i ON i.id=e.incident_id
+   LEFT JOIN sidec_artifact_attestations t ON t.export_id=a.export_id
+   LEFT JOIN sidec_integrity_timestamps ts ON ts.export_id=a.export_id
+   WHERE a.content_hash=$1 LIMIT 1`,[artifactHash]);
+  const row=r.rows[0] as any;
+  if(!row||!row.ed25519Signature)return reply.code(404).send({error:"PUBLIC_INTEGRITY_NOT_AVAILABLE"});
+  if(!row.timestampSignature){
+   const exportOrg=await db.query(`SELECT organization_id AS "organizationId" FROM sidec_exports WHERE id=$1`,[row.exportId]);
+   const org=exportOrg.rows[0]?.organizationId;
+   if(org)await ensureSidecIntegrityTimestamp(String(org),String(row.exportId),null);
+   const retry=await db.query(`SELECT statement_hash AS "statementHash",timestamped_at AS "timestampedAt",key_id AS "timestampKeyId",
+     signature AS "timestampSignature",public_key AS "timestampPublicKey",public_key_fingerprint AS "timestampFingerprint"
+     FROM sidec_integrity_timestamps WHERE export_id=$1`,[row.exportId]);
+   Object.assign(row,retry.rows[0]??{});
+  }
+  const asymmetricValid=verifySidecIntegrity({
+   manifestHash:row.manifestHash,artifactHash:row.artifactHash,signature:row.ed25519Signature,
+   publicKey:row.ed25519PublicKey,publicKeyFingerprint:row.ed25519Fingerprint
+  });
+  const timestampValid=Boolean(row.timestampSignature)&&verifySidecTimestamp({
+   manifestHash:row.manifestHash,artifactHash:row.artifactHash,attestationSignature:row.ed25519Signature,
+   timestampedAt:new Date(row.timestampedAt).toISOString(),statementHash:row.statementHash,
+   signature:row.timestampSignature,publicKey:row.timestampPublicKey,publicKeyFingerprint:row.timestampFingerprint
+  });
+  const valid=asymmetricValid&&timestampValid;
+  await db.query(`INSERT INTO sidec_integrity_verifications(
+    export_id,organization_id,proof_version,artifact_hash,manifest_hash,hmac_valid,asymmetric_valid,overall_valid,
+    verification_source,ip,user_agent
+   ) SELECT e.id,e.organization_id,'sigdec-sidec-integrity-proof/1.1',$1,$2,NULL,$3,$4,'EXTERNAL',$5,$6
+     FROM sidec_exports e WHERE e.id=$7`,
+   [row.artifactHash,row.manifestHash,asymmetricValid,valid,request.ip,request.headers["user-agent"]??null,row.exportId]);
+  return {
+   valid,artifactHash:row.artifactHash,manifestHash:row.manifestHash,
+   protocol:row.protocol,revision:Number(row.revision),schemaVersion:row.schemaVersion,sealedAt:row.sealedAt,
+   ed25519:{keyId:row.ed25519KeyId,publicKeyFingerprint:row.ed25519Fingerprint,attestedAt:row.attestedAt,valid:asymmetricValid},
+   timestamp:{keyId:row.timestampKeyId,statementHash:row.statementHash,timestampedAt:row.timestampedAt,publicKeyFingerprint:row.timestampFingerprint,valid:timestampValid}
   };
  });
 
