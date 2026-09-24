@@ -17,6 +17,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0024_sidec_sealed_artifacts_document_requirements.sql"));
  assert.ok(files.includes("0025_sidec_key_versions_deadlines_retention.sql"));
  assert.ok(files.includes("0026_sidec_ed25519_integrity_proofs.sql"));
+ assert.ok(files.includes("0027_sidec_public_integrity_timestamp_custody.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -138,6 +139,20 @@ test("SIDEC v1.18 possui atestacao Ed25519 e historico de verificacoes",async()=
   WHERE table_schema='public' AND table_name='sidec_integrity_verifications'
     AND column_name IN ('hmac_valid','asymmetric_valid','overall_valid','verification_source') ORDER BY column_name`);
  assert.deepEqual(columns.rows.map(x=>x.column_name),["asymmetric_valid","hmac_valid","overall_valid","verification_source"]);
+});
+
+test("SIDEC v1.19 possui carimbo interno Ed25519 e suporte a cadeia de custodia",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_integrity_timestamps'`);
+ assert.equal(tables.rowCount,1);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_integrity_timestamps'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/Ed25519/);
+ const columns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_integrity_timestamps'
+    AND column_name IN ('statement_hash','timestamped_at','signature','public_key','public_key_fingerprint') ORDER BY column_name`);
+ assert.deepEqual(columns.rows.map(x=>x.column_name),["public_key","public_key_fingerprint","signature","statement_hash","timestamped_at"]);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
