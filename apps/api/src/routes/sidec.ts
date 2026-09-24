@@ -8,6 +8,7 @@ import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type Sidec
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
 import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, verifySidecManifestSignature } from "../lib/sidec-signature.js";
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
+import { signSidecIntegrity, verifySidecIntegrity } from "../lib/sidec-asymmetric.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -237,12 +238,34 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{
  return {zip,manifest,manifestHash:computedManifestHash,manifestSignature,signingKeyId,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
 }
 
+async function ensureSidecArtifactAttestation(org:string,id:string,userId:string){
+ const current=await db.query(`SELECT t.export_id AS "exportId",t.algorithm,t.key_id AS "keyId",t.signature,
+   t.public_key AS "publicKey",t.public_key_fingerprint AS "publicKeyFingerprint",t.attested_at AS "attestedAt"
+   FROM sidec_artifact_attestations t WHERE t.export_id=$1 AND t.organization_id=$2`,[id,org]);
+ if(current.rows[0])return current.rows[0];
+
+ const artifact=await db.query(`SELECT export_id AS "exportId",content_hash AS "artifactHash",manifest_hash AS "manifestHash"
+   FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ const row=artifact.rows[0] as {exportId:string;artifactHash:string;manifestHash:string}|undefined;
+ if(!row)throw Object.assign(new Error("Artefato SIDEC selado não encontrado."),{statusCode:404,code:"SEALED_ARTIFACT_NOT_FOUND"});
+ const signed=signSidecIntegrity(row.manifestHash,row.artifactHash);
+ await db.query(`INSERT INTO sidec_artifact_attestations(
+   export_id,organization_id,algorithm,key_id,signature,public_key,public_key_fingerprint,attested_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+  ON CONFLICT(export_id) DO NOTHING`,
+ [id,org,signed.algorithm,signed.keyId,signed.signature,signed.publicKey,signed.publicKeyFingerprint,userId]);
+ const result=await db.query(`SELECT export_id AS "exportId",algorithm,key_id AS "keyId",signature,
+   public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint",attested_at AS "attestedAt"
+   FROM sidec_artifact_attestations WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ return result.rows[0];
+}
+
 async function sealSidecExportArtifact(org:string,id:string,userId:string){
  const existing=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
    manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
    FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
- if(existing.rows[0])return existing.rows[0];
+ if(existing.rows[0]){await ensureSidecArtifactAttestation(org,id,userId);return existing.rows[0];}
 
  const sourceResult=await db.query(`SELECT e.revision,e.schema_version AS "schemaVersion",e.snapshot,e.snapshot_hash AS "snapshotHash",
    e.manifest_hash AS "manifestHash",e.status,i.protocol
@@ -265,6 +288,7 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
  await db.query(`INSERT INTO sidec_artifact_retention(export_id,organization_id,retention_class,retain_until,updated_by)
   VALUES($1,$2,'UNSPECIFIED',NULL,$3)
   ON CONFLICT(export_id) DO NOTHING`,[id,org,userId]);
+ await ensureSidecArtifactAttestation(org,id,userId);
  const sealed=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
    manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
@@ -845,14 +869,14 @@ export async function sidecRoutes(app:FastifyInstance){
   if(format==="zip"){
    let artifactResult=await db.query(`SELECT file_name AS "fileName",byte_size AS "byteSize",content_hash AS "contentHash",
      content,manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
-     manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+     manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
      FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
 
    if(!artifactResult.rows[0]&&item.status&&item.status!=="READY"&&item.status!=="CANCELLED"){
     await sealSidecExportArtifact(org,id,auth.userId);
     artifactResult=await db.query(`SELECT file_name AS "fileName",byte_size AS "byteSize",content_hash AS "contentHash",
       content,manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
-      manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+      manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
       FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
    }
 
