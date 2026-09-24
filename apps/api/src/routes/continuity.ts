@@ -221,13 +221,13 @@ export async function continuityRoutes(app:FastifyInstance){
       id,step.phase,step.sortOrder,step.title,step.instructions,step.expectedMinutes,step.ownerUserId??null,step.required
     ]);
    }
-   const after=await loadRunbookPlan(org,id);
+   const afterSnapshot={...parsed.data,id,version:before.version,status:"DRAFT"};
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
     VALUES($1,'sidec_continuity.runbook_update','sidec_continuity_plan',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
-    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(after)
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(afterSnapshot)
    ]);
    await client.query("COMMIT");
-   return after;
+   return loadRunbookPlan(org,id);
   }catch(error){
    await client.query("ROLLBACK");
    throw error;
