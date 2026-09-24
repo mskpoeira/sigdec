@@ -394,6 +394,210 @@ export async function continuityRoutes(app:FastifyInstance){
   }finally{client.release();}
  });
 
+ app.get("/api/v1/sidec/continuity/schedules",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const r=await db.query(`SELECT s.id,s.name,s.interval_days AS "intervalDays",s.next_due_at AS "nextDueAt",
+    s.default_scenario AS "defaultScenario",s.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",
+    s.enabled,s.last_exercise_id AS "lastExerciseId",s.created_at AS "createdAt",s.updated_at AS "updatedAt",
+    CASE WHEN s.enabled=false THEN 'DISABLED'
+      WHEN s.next_due_at<=now() THEN 'OVERDUE'
+      WHEN s.next_due_at<=now()+interval '7 days' THEN 'DUE_SOON'
+      ELSE 'SCHEDULED' END AS "dueState"
+    FROM sidec_continuity_schedules s
+    LEFT JOIN users u ON u.id=s.owner_user_id
+    WHERE s.organization_id=$1 ORDER BY s.enabled DESC,s.next_due_at,s.name`,[org]);
+  return {items:r.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/schedules",{preHandler:requirePermission("sidec_continuity_schedule.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=scheduleCreateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.ownerUserId){
+   const owner=await db.query("SELECT 1 FROM users WHERE id=$1 AND organization_id=$2",[parsed.data.ownerUserId,org]);
+   if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});
+  }
+  const created=await db.query(`INSERT INTO sidec_continuity_schedules(
+    organization_id,name,interval_days,next_due_at,default_scenario,owner_user_id,enabled,created_by
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+   RETURNING id,name,interval_days AS "intervalDays",next_due_at AS "nextDueAt",default_scenario AS "defaultScenario",
+    owner_user_id AS "ownerUserId",enabled,created_at AS "createdAt"`,[
+    org,parsed.data.name,parsed.data.intervalDays,parsed.data.nextDueAt,parsed.data.defaultScenario,
+    parsed.data.ownerUserId??null,parsed.data.enabled,auth.userId
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.schedule_create','sidec_continuity_schedule',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0])
+  ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.patch("/api/v1/sidec/continuity/schedules/:id",{preHandler:requirePermission("sidec_continuity_schedule.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=scheduleUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const beforeResult=await db.query(`SELECT * FROM sidec_continuity_schedules WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const before=beforeResult.rows[0] as any;if(!before)return reply.code(404).send({error:"NOT_FOUND"});
+  const ownerUserId=parsed.data.ownerUserId===undefined?before.owner_user_id:parsed.data.ownerUserId;
+  if(ownerUserId){
+   const owner=await db.query("SELECT 1 FROM users WHERE id=$1 AND organization_id=$2",[ownerUserId,org]);
+   if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});
+  }
+  const updated=await db.query(`UPDATE sidec_continuity_schedules SET name=$1,interval_days=$2,next_due_at=$3,
+    default_scenario=$4,owner_user_id=$5,enabled=$6,updated_at=now()
+    WHERE id=$7 AND organization_id=$8
+    RETURNING id,name,interval_days AS "intervalDays",next_due_at AS "nextDueAt",default_scenario AS "defaultScenario",
+     owner_user_id AS "ownerUserId",enabled,updated_at AS "updatedAt"`,[
+    parsed.data.name??before.name,parsed.data.intervalDays??before.interval_days,
+    parsed.data.nextDueAt??before.next_due_at,parsed.data.defaultScenario??before.default_scenario,
+    ownerUserId,parsed.data.enabled??before.enabled,id,org
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.schedule_update','sidec_continuity_schedule',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(updated.rows[0])
+  ]);
+  return updated.rows[0];
+ });
+
+ app.get("/api/v1/sidec/continuity/contacts",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const r=await db.query(`SELECT id,contact_scope AS "contactScope",escalation_level AS "escalationLevel",name,
+    role_title AS "roleTitle",organization_name AS "organizationName",channel_type AS "channelType",
+    channel_value AS "channelValue",notes,active,created_at AS "createdAt",updated_at AS "updatedAt"
+    FROM sidec_continuity_contacts WHERE organization_id=$1
+    ORDER BY active DESC,escalation_level,name`,[org]);
+  return {items:r.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/contacts",{preHandler:requirePermission("sidec_continuity_contacts.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=continuityContactSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const v=parsed.data;
+  const created=await db.query(`INSERT INTO sidec_continuity_contacts(
+    organization_id,contact_scope,escalation_level,name,role_title,organization_name,channel_type,channel_value,notes,active,created_by
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+   RETURNING id,contact_scope AS "contactScope",escalation_level AS "escalationLevel",name,role_title AS "roleTitle",
+    organization_name AS "organizationName",channel_type AS "channelType",channel_value AS "channelValue",notes,active`,[
+    org,v.contactScope,v.escalationLevel,v.name,v.roleTitle??null,v.organizationName??null,v.channelType,
+    v.channelValue,v.notes??null,v.active,auth.userId
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.contact_create','sidec_continuity_contact',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0])
+  ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.patch("/api/v1/sidec/continuity/contacts/:id",{preHandler:requirePermission("sidec_continuity_contacts.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=continuityContactSchema.partial().safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const beforeResult=await db.query("SELECT * FROM sidec_continuity_contacts WHERE id=$1 AND organization_id=$2",[id,org]);
+  const before=beforeResult.rows[0] as any;if(!before)return reply.code(404).send({error:"NOT_FOUND"});
+  const v=parsed.data;
+  const updated=await db.query(`UPDATE sidec_continuity_contacts SET contact_scope=$1,escalation_level=$2,name=$3,
+    role_title=$4,organization_name=$5,channel_type=$6,channel_value=$7,notes=$8,active=$9,updated_at=now()
+    WHERE id=$10 AND organization_id=$11
+    RETURNING id,contact_scope AS "contactScope",escalation_level AS "escalationLevel",name,role_title AS "roleTitle",
+    organization_name AS "organizationName",channel_type AS "channelType",channel_value AS "channelValue",notes,active`,[
+    v.contactScope??before.contact_scope,v.escalationLevel??before.escalation_level,v.name??before.name,
+    v.roleTitle===undefined?before.role_title:v.roleTitle,v.organizationName===undefined?before.organization_name:v.organizationName,
+    v.channelType??before.channel_type,v.channelValue??before.channel_value,v.notes===undefined?before.notes:v.notes,
+    v.active??before.active,id,org
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.contact_update','sidec_continuity_contact',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(updated.rows[0])
+  ]);
+  return updated.rows[0];
+ });
+
+ app.get("/api/v1/sidec/continuity/action-alerts",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const evaluation=await evaluateContinuityActionAlerts(org);
+  const r=await db.query(`SELECT al.id,al.action_id AS "actionId",al.alert_type AS "alertType",al.due_at AS "dueAt",
+    al.detected_at AS "detectedAt",ai.title,ai.priority,ai.status,owner.display_name AS "ownerName",
+    e.id AS "exerciseId",e.scenario,p.version AS "planVersion"
+    FROM sidec_continuity_action_alerts al
+    JOIN sidec_continuity_action_items ai ON ai.id=al.action_id
+    JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+    JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+    JOIN sidec_continuity_plans p ON p.id=e.plan_id
+    LEFT JOIN users owner ON owner.id=ai.owner_user_id
+    WHERE al.organization_id=$1 AND al.acknowledged_at IS NULL
+      AND ai.status IN ('OPEN','IN_PROGRESS') AND ai.due_at=al.due_at
+      AND (
+       (al.alert_type='OVERDUE' AND ai.due_at<=now()) OR
+       (al.alert_type='DUE_SOON' AND ai.due_at>now() AND ai.due_at<=now()+($2::text||' hours')::interval)
+      )
+    ORDER BY CASE al.alert_type WHEN 'OVERDUE' THEN 1 ELSE 2 END,
+      CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,ai.due_at`,[org,evaluation.dueSoonHours]);
+  return {dueSoonHours:evaluation.dueSoonHours,items:r.rows};
+ });
+
+ app.patch("/api/v1/sidec/continuity/action-alerts/:id/ack",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const updated=await db.query(`UPDATE sidec_continuity_action_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),
+    acknowledged_by=CASE WHEN acknowledged_at IS NULL THEN $1 ELSE acknowledged_by END
+    WHERE id=$2 AND organization_id=$3
+    RETURNING id,acknowledged_at AS "acknowledgedAt"`,[auth.userId,id,org]);
+  if(!updated.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.action_alert_ack','sidec_continuity_action_alert',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(updated.rows[0])
+  ]);
+  return updated.rows[0];
+ });
+
+ app.get("/api/v1/sidec/continuity/lessons",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const [summary,recent]=await Promise.all([
+   db.query(`SELECT l.recurrence_key AS "recurrenceKey",l.category,count(*)::int AS occurrences,
+      max(l.created_at) AS "lastSeenAt",
+      array_agg(DISTINCT l.title ORDER BY l.title) AS titles
+     FROM sidec_continuity_lessons l
+     JOIN sidec_continuity_aars a ON a.id=l.aar_id
+     WHERE l.organization_id=$1 AND a.status='FINAL'
+     GROUP BY l.recurrence_key,l.category
+     ORDER BY count(*) DESC,max(l.created_at) DESC LIMIT 50`,[org]),
+   db.query(`SELECT l.id,l.category,l.recurrence_key AS "recurrenceKey",l.title,l.observation,l.severity,
+      l.created_at AS "createdAt",e.id AS "exerciseId",p.version AS "planVersion"
+     FROM sidec_continuity_lessons l
+     JOIN sidec_continuity_aars a ON a.id=l.aar_id
+     JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+     JOIN sidec_continuity_plans p ON p.id=e.plan_id
+     WHERE l.organization_id=$1
+     ORDER BY l.created_at DESC LIMIT 100`,[org])
+  ]);
+  return {summary:summary.rows,recent:recent.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/exercises/:id/aar/lessons",{preHandler:requirePermission("sidec_continuity_lessons.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=continuityLessonSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const aarResult=await db.query(`SELECT a.id,a.status FROM sidec_continuity_aars a
+    JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+    WHERE a.exercise_id=$1 AND a.organization_id=$2 AND e.status='COMPLETED'`,[id,org]);
+  const aar=aarResult.rows[0];
+  if(!aar)return reply.code(409).send({error:"AAR_DRAFT_REQUIRED"});
+  if(aar.status!=="DRAFT")return reply.code(409).send({error:"AAR_IMMUTABLE"});
+  const v=parsed.data;
+  const created=await db.query(`INSERT INTO sidec_continuity_lessons(
+    organization_id,aar_id,category,recurrence_key,title,observation,severity,created_by
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+   RETURNING id,category,recurrence_key AS "recurrenceKey",title,observation,severity,created_at AS "createdAt"`,[
+    org,aar.id,v.category,v.recurrenceKey,v.title,v.observation,v.severity,auth.userId
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.lesson_create','sidec_continuity_lesson',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,
+    JSON.stringify(created.rows[0]),JSON.stringify({exerciseId:id,aarId:aar.id})
+  ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
  app.get("/api/v1/sidec/continuity/exercises",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const rows=await db.query(`SELECT id FROM sidec_continuity_exercises
