@@ -10,6 +10,7 @@ import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, v
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
 import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js";
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
+import { archiveSidecArtifact, verifySidecArchive } from "../lib/sidec-worm.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -424,6 +425,41 @@ async function buildSidecIntegrityProof(org:string,id:string,userId:string){
    publicKey:timestamp.publicKey,publicKeyFingerprint:timestamp.publicKeyFingerprint
   }
  };
+}
+
+async function recordArchiveVerification(input:{
+ org:string;exportId:string;source:"SCHEDULED"|"MANUAL"|"ARCHIVE";
+ bucket:string;key:string;expectedHash:string;
+}){
+ const verification=await verifySidecArchive({bucket:input.bucket,key:input.key,expectedHash:input.expectedHash});
+ await db.query(`INSERT INTO sidec_archive_verifications(
+  export_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,retain_until,legal_hold,
+  verification_source,error_message
+ ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[
+  input.exportId,input.org,input.expectedHash,verification.observedHash,verification.existsRemote,verification.hashValid,
+  verification.objectLockMode,verification.retainUntil,verification.legalHold,input.source,verification.errorMessage
+ ]);
+ return verification;
+}
+
+export async function evaluateSidecArchiveVerifications(organizationId?:string){
+ const params:unknown[]=[];
+ let where="";
+ if(organizationId){params.push(organizationId);where="WHERE r.organization_id=$1";}
+ const rows=await db.query(`SELECT r.export_id AS "exportId",r.organization_id AS "organizationId",r.bucket,
+   r.object_key AS "objectKey",r.content_hash AS "contentHash"
+   FROM sidec_archive_receipts r ${where}
+   ORDER BY r.archived_at ASC LIMIT 500`,params);
+ let checked=0,failed=0;
+ for(const row of rows.rows as Array<any>){
+  const result=await recordArchiveVerification({
+   org:String(row.organizationId),exportId:String(row.exportId),source:"SCHEDULED",
+   bucket:String(row.bucket),key:String(row.objectKey),expectedHash:String(row.contentHash)
+  });
+  checked++;
+  if(!result.existsRemote||result.hashValid!==true)failed++;
+ }
+ return {checked,failed};
 }
 
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
@@ -978,6 +1014,93 @@ export async function sidecRoutes(app:FastifyInstance){
   const differences=diffSidecValues(previous.snapshot,current.snapshot);
   const filtered=filterSidecDiffs(differences,category);
   return {current:{id:current.id,revision:current.revision},against:{id:previous.id,revision:previous.revision},category,categories:["all",...sidecDiffCategories],count:filtered.length,totalCount:differences.length,differences:filtered.slice(0,500)};
+ });
+
+ app.get("/api/v1/sidec-exports/:id/archive",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const r=await db.query(`SELECT r.export_id AS "exportId",r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId",
+    r.etag,r.storage_class AS "storageClass",r.object_lock_mode AS "objectLockMode",r.retain_until AS "retainUntil",
+    r.legal_hold AS "legalHold",r.content_hash AS "contentHash",r.archived_at AS "archivedAt",
+    v.exists_remote AS "existsRemote",v.hash_valid AS "hashValid",v.observed_hash AS "observedHash",
+    v.verified_at AS "verifiedAt",v.error_message AS "verificationError"
+   FROM sidec_archive_receipts r
+   LEFT JOIN LATERAL (
+    SELECT * FROM sidec_archive_verifications x WHERE x.export_id=r.export_id ORDER BY x.verified_at DESC LIMIT 1
+   ) v ON true
+   WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  if(!r.rows[0])return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
+  return r.rows[0];
+ });
+
+ app.post("/api/v1/sidec-exports/:id/archive",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const existing=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",content_hash AS "contentHash",
+    object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",legal_hold AS "legalHold",archived_at AS "archivedAt"
+    FROM sidec_archive_receipts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+  if(existing.rows[0])return existing.rows[0];
+
+  const source=await db.query(`SELECT a.file_name AS "fileName",a.content_hash AS "contentHash",a.manifest_hash AS "manifestHash",a.content,
+    r.retention_class AS "retentionClass",r.retain_until AS "retainUntil",r.legal_hold AS "legalHold",
+    e.incident_id AS "incidentId",e.revision
+   FROM sidec_export_artifacts a
+   JOIN sidec_exports e ON e.id=a.export_id
+   LEFT JOIN sidec_artifact_retention r ON r.export_id=a.export_id
+   WHERE a.export_id=$1 AND a.organization_id=$2`,[id,org]);
+  const item=source.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"SEALED_ARTIFACT_NOT_FOUND"});
+  if(!item.retentionClass||item.retentionClass==="UNSPECIFIED")return reply.code(409).send({error:"RETENTION_POLICY_REQUIRED"});
+  if(!item.retainUntil&&!item.legalHold)return reply.code(409).send({error:"RETENTION_DATE_OR_LEGAL_HOLD_REQUIRED"});
+
+  const archived=await archiveSidecArtifact({
+   content:item.content,artifactHash:item.contentHash,manifestHash:item.manifestHash,fileName:item.fileName,
+   retention:{retainUntil:item.retainUntil?new Date(item.retainUntil):null,legalHold:Boolean(item.legalHold)}
+  });
+  const inserted=await db.query(`INSERT INTO sidec_archive_receipts(
+    export_id,organization_id,bucket,object_key,version_id,etag,storage_class,object_lock_mode,retain_until,legal_hold,content_hash,archived_by
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+   ON CONFLICT(export_id) DO NOTHING
+   RETURNING export_id AS "exportId",bucket,object_key AS "objectKey",version_id AS "versionId",etag,
+    storage_class AS "storageClass",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
+    legal_hold AS "legalHold",content_hash AS "contentHash",archived_at AS "archivedAt"`,[
+    id,org,archived.bucket,archived.key,archived.versionId,archived.etag,archived.storageClass,
+    archived.objectLockMode,archived.retainUntil,archived.legalHold,item.contentHash,auth.userId
+  ]);
+  const receipt=inserted.rows[0]??(await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",
+    content_hash AS "contentHash",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
+    legal_hold AS "legalHold",archived_at AS "archivedAt" FROM sidec_archive_receipts WHERE export_id=$1`,[id])).rows[0];
+  const verification=await recordArchiveVerification({
+   org,exportId:id,source:"ARCHIVE",bucket:receipt.bucket,key:receipt.objectKey,expectedHash:item.contentHash
+  });
+  await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+   VALUES($1,'sidec_archive.created',$2,$3,$4::jsonb)`,[
+   item.incidentId,auth.userId,`Pacote SIDEC revisão ${item.revision} arquivado em Object Lock.`,
+   JSON.stringify({exportId:id,bucket:receipt.bucket,objectKey:receipt.objectKey,hashValid:verification.hashValid})
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+   VALUES($1,'sidec_archive.create','sidec_archive_receipt',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+   auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(receipt),
+   JSON.stringify({hashValid:verification.hashValid,existsRemote:verification.existsRemote})
+  ]);
+  if(!verification.existsRemote||verification.hashValid!==true){
+   return reply.code(502).send({error:"WORM_ARCHIVE_VERIFICATION_FAILED",receipt,verification});
+  }
+  return reply.code(201).send({receipt,verification});
+ });
+
+ app.post("/api/v1/sidec-exports/:id/archive/verify",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const receipt=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",content_hash AS "contentHash"
+   FROM sidec_archive_receipts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+  const item=receipt.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
+  const verification=await recordArchiveVerification({
+   org,exportId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,expectedHash:item.contentHash
+  });
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+   VALUES($1,'sidec_archive.verify','sidec_archive_receipt',$2,$3,$4,$5::jsonb)`,[
+   auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification)
+  ]);
+  return verification;
  });
 
  app.get("/api/v1/sidec-exports/:id/integrity-proof",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
