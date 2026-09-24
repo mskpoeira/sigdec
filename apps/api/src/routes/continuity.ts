@@ -410,6 +410,8 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!exercise)return reply.code(404).send({error:"NOT_FOUND"});
   if(exercise.status!=="IN_PROGRESS")return reply.code(409).send({error:"EXERCISE_NOT_EDITABLE",status:exercise.status});
   if(exercise.summary.requiredPending>0)return reply.code(409).send({error:"REQUIRED_STEPS_PENDING",pending:exercise.summary.requiredPending});
+  const undocumented=exercise.steps.filter((step:any)=>step.required&&(step.status==="SKIPPED"||step.status==="FAILED")&&!String(step.notes??"").trim()&&!(step.evidence??[]).length);
+  if(undocumented.length)return reply.code(409).send({error:"EVIDENCE_REQUIRED_FOR_EXCEPTION",stepIds:undocumented.map((step:any)=>step.stepId)});
   const result=exercise.summary.result??"PARTIAL";
   await db.query(`UPDATE sidec_continuity_exercises SET status='COMPLETED',result=$1,notes=$2,
     completed_by=$3,completed_at=now() WHERE id=$4 AND organization_id=$5`,[
