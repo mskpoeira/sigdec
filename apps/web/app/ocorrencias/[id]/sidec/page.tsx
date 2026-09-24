@@ -252,6 +252,7 @@ export default function SidecExportsPage(){
  function documentPdfUrl(id:string){return `${API}/api/v1/technical-documents/${id}/pdf`}
  function integrityProofUrl(id:string){return `${API}/api/v1/sidec-exports/${id}/integrity-proof?download=1`}
  function integrityEvidenceUrl(id:string){return `${API}/api/v1/sidec-exports/${id}/integrity-evidence?download=1`}
+ function custodyPdfUrl(id:string){return `${API}/api/v1/sidec-exports/${id}/custody-pdf`}
 
  return <main className="shell moduleShell">
   <header className="listHeader">
@@ -364,7 +365,7 @@ export default function SidecExportsPage(){
      <div className="headerActions">
       <a className="secondaryLink" href={downloadUrl(item.id,"json")}>Baixar JSON</a>
       <a className="secondaryLink" href={downloadUrl(item.id,"csv")}>Baixar CSV</a>
-      <a className="primaryButton" href={downloadUrl(item.id,"zip")}>{item.artifactSealed?"Baixar ZIP selado":"Baixar prévia ZIP"}</a>{item.artifactSealed&&<><a className="secondaryLink" href={integrityProofUrl(item.id)}>Baixar comprovante</a><a className="secondaryLink" href={integrityEvidenceUrl(item.id)}>Baixar evidências</a><Link className="secondaryLink" href="/verificar-integridade">Verificar comprovante</Link></>}
+      <a className="primaryButton" href={downloadUrl(item.id,"zip")}>{item.artifactSealed?"Baixar ZIP selado":"Baixar prévia ZIP"}</a>{item.artifactSealed&&<><a className="secondaryLink" href={integrityProofUrl(item.id)}>Baixar comprovante</a><a className="secondaryLink" href={integrityEvidenceUrl(item.id)}>Baixar evidências</a><a className="secondaryLink" href={custodyPdfUrl(item.id)}>Baixar cadeia de custódia PDF</a>{item.artifactHash&&<Link className="secondaryLink" href={`/integridade/${item.artifactHash}`}>Abrir verificação pública</Link>}<Link className="secondaryLink" href="/verificar-integridade">Verificar comprovante</Link></>}
       <select aria-label="Categoria da comparação" value={compareCategories[item.id]??"all"} onChange={e=>setCompareCategories(values=>({...values,[item.id]:e.target.value}))}>
        <option value="all">Todas as diferenças</option><option value="incident">Ocorrência</option><option value="mappedFields">Campos mapeados</option><option value="documents">Documentos</option><option value="actions">Ações</option><option value="inspections">Vistorias</option><option value="supportRequests">Solicitações</option><option value="humanitarianDeliveries">Assistência</option><option value="timeline">Timeline</option><option value="municipality">Município</option><option value="other">Outros</option>
       </select>
