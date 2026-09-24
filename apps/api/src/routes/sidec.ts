@@ -177,7 +177,7 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{
  }
  const zip=await zipBuffer(entries);
  const safeProtocol=item.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
- return {zip,manifest,manifestHash:computedManifestHash,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
+ return {zip,manifest,manifestHash:computedManifestHash,manifestSignature,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
 }
 
 async function sealSidecExportArtifact(org:string,id:string,userId:string){
