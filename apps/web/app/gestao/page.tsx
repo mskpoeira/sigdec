@@ -84,7 +84,7 @@ export default function GestaoPage(){
    </div>
    <div className="headerActions" style={{marginTop:10}}>
     <a className="secondaryLink" href={`${API}/api/v1/sidec/resilience/report?days=30&months=12&format=pdf`}>Baixar PDF gerencial</a>
-    <a className="secondaryLink" href={`${API}/api/v1/sidec/resilience/report?days=30&months=12&download=1`}>Baixar JSON técnico</a>
+    <a className="secondaryLink" href={`${API}/api/v1/sidec/resilience/report?days=30&months=12&download=1`}>Baixar JSON técnico</a><Link className="secondaryLink" href="/continuidade">Plano de Continuidade</Link>
    </div>
    <h3 style={{marginTop:16}}>Prontidão de continuidade</h3>
    <div className="statsGrid">
