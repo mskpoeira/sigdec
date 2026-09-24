@@ -24,6 +24,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0031_sidec_resilience_operations.sql"));
  assert.ok(files.includes("0032_sidec_continuity_objectives.sql"));
  assert.ok(files.includes("0033_sidec_continuity_runbook.sql"));
+ assert.ok(files.includes("0034_sidec_continuity_evidence_aar.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -53,6 +54,31 @@ test("runbook SIDEC possui versionamento, etapas e exercícios controlados",asyn
  assert.match(exerciseDefs,/COMPLETED/);
  assert.match(exerciseDefs,/PASS/);
  assert.match(exerciseDefs,/FAIL/);
+});
+
+test("SIDEC v1.27 possui evidencias AAR e acoes corretivas",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_step_evidence','sidec_continuity_aars','sidec_continuity_action_items'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_aars","sidec_continuity_action_items","sidec_continuity_step_evidence"
+ ]);
+ const evidenceDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_step_evidence'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(evidenceDefs,/NOTE/);
+ assert.match(evidenceDefs,/LINK/);
+ assert.match(evidenceDefs,/DOCUMENT/);
+ assert.match(evidenceDefs,/HASH/);
+ const aarDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_aars'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(aarDefs,/DRAFT/);
+ assert.match(aarDefs,/FINAL/);
+ const actionDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_action_items'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(actionDefs,/CRITICAL/);
+ assert.match(actionDefs,/IN_PROGRESS/);
+ assert.match(actionDefs,/DONE/);
 });
 
 test("política de continuidade SIDEC possui objetivos administrativos válidos",async()=>{
