@@ -21,6 +21,10 @@ CREATE UNIQUE INDEX sidec_continuity_plans_active_unique
   ON sidec_continuity_plans(organization_id)
   WHERE status='ACTIVE';
 
+CREATE UNIQUE INDEX sidec_continuity_plans_draft_unique
+  ON sidec_continuity_plans(organization_id)
+  WHERE status='DRAFT';
+
 CREATE INDEX sidec_continuity_plans_org_idx
   ON sidec_continuity_plans(organization_id,version DESC);
 
@@ -60,6 +64,10 @@ CREATE TABLE sidec_continuity_exercises (
 
 CREATE INDEX sidec_continuity_exercises_org_idx
   ON sidec_continuity_exercises(organization_id,started_at DESC);
+
+CREATE UNIQUE INDEX sidec_continuity_exercises_open_unique
+  ON sidec_continuity_exercises(organization_id)
+  WHERE status='IN_PROGRESS';
 
 CREATE TABLE sidec_continuity_exercise_steps (
   exercise_id uuid NOT NULL REFERENCES sidec_continuity_exercises(id) ON DELETE CASCADE,
