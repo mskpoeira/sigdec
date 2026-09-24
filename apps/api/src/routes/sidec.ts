@@ -575,11 +575,12 @@ export async function sidecRoutes(app:FastifyInstance){
     i.reference_point AS "referencePoint",i.latitude,i.longitude,i.created_at AS "createdAt",i.updated_at AS "updatedAt",
     t.code AS "typeCode",t.name AS "typeName",t.group_name AS "typeGroup",t.cobrade_code AS "cobradeCode",
     latest.id AS "exportId",latest.revision,latest.status AS "exportStatus",latest.external_protocol AS "externalProtocol",
-    latest.updated_at AS "exportUpdatedAt",(artifact.export_id IS NOT NULL) AS "artifactSealed"
+    latest.created_at AS "exportCreatedAt",latest.updated_at AS "exportUpdatedAt",latest.exported_at AS "exportedAt",
+    latest.submitted_at AS "submittedAt",latest.rejected_at AS "rejectedAt",(artifact.export_id IS NOT NULL) AS "artifactSealed"
    FROM incidents i
    JOIN incident_types t ON t.id=i.incident_type_id
    LEFT JOIN LATERAL (
-    SELECT e.id,e.revision,e.status,e.external_protocol,e.updated_at
+    SELECT e.id,e.revision,e.status,e.external_protocol,e.created_at,e.updated_at,e.exported_at,e.submitted_at,e.rejected_at
     FROM sidec_exports e WHERE e.incident_id=i.id AND e.organization_id=$1
     ORDER BY e.revision DESC LIMIT 1
    ) latest ON true
@@ -587,7 +588,7 @@ export async function sidecRoutes(app:FastifyInstance){
    WHERE i.organization_id=$1 AND i.status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
    ORDER BY i.updated_at DESC LIMIT 200`,[org]);
 
-  const mappings=await effectiveMappings(org);
+  const [mappings,deadlinePolicies]=await Promise.all([effectiveMappings(org),effectiveDeadlinePolicies(org)]);
   const allCobrade=await db.query(`SELECT cobrade_code AS "cobradeCode",source_path AS "sourcePath",label,required,enabled,sort_order AS "sortOrder"
     FROM sidec_cobrade_requirements WHERE organization_id=$1 AND enabled=true ORDER BY cobrade_code,sort_order`,[org]);
   const allDocRules=await db.query(`SELECT scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
@@ -630,11 +631,17 @@ export async function sidecRoutes(app:FastifyInstance){
     missing=failed.map(check=>check.label);
    }
    if(!pendingStatus)continue;
+   const deadline=row.exportStatus?sidecDueAt({
+    status:row.exportStatus,createdAt:row.exportCreatedAt,updatedAt:row.exportUpdatedAt,
+    exportedAt:row.exportedAt,submittedAt:row.submittedAt,rejectedAt:row.rejectedAt
+   },deadlinePolicies):null;
    items.push({
     incidentId:row.incidentId,protocol:row.protocol,summary:row.summary,priority:row.priority,
     typeCode:row.typeCode,cobradeCode:row.cobradeCode,pendingStatus,missing,
     exportId:row.exportId??null,revision:row.revision??null,exportStatus:row.exportStatus??null,
     externalProtocol:row.externalProtocol??null,artifactSealed:Boolean(row.artifactSealed),
+    dueAt:deadline?.dueAt.toISOString()??null,severity:deadline?.severity??null,
+    overdue:deadline?isSidecDeadlineOverdue(deadline.dueAt):false,
     updatedAt:row.exportUpdatedAt??row.updatedAt
    });
   }
