@@ -1128,6 +1128,135 @@ export async function sidecRoutes(app:FastifyInstance){
   return verification;
  });
 
+ app.post("/api/v1/sidec-exports/:id/archive/extend-retention",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=archiveRetentionExtensionSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const currentResult=await db.query(`SELECT r.export_id AS "exportId",r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId",
+    r.object_lock_mode AS "objectLockMode",r.retain_until AS "retainUntil",r.legal_hold AS "legalHold",
+    e.incident_id AS "incidentId",e.revision
+    FROM sidec_archive_receipts r JOIN sidec_exports e ON e.id=r.export_id
+    WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  const current=currentResult.rows[0] as any;
+  if(!current)return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
+  const previous=current.retainUntil?new Date(current.retainUntil):null;
+  if(previous&&parsed.data.retainUntil.getTime()<=previous.getTime()){
+   return reply.code(409).send({error:"RETENTION_EXTENSION_REQUIRED",currentRetainUntil:previous.toISOString()});
+  }
+  const mode=(current.objectLockMode??wormMode()) as "GOVERNANCE"|"COMPLIANCE";
+  await extendSidecArchiveRetention({
+   bucket:current.bucket,key:current.objectKey,versionId:current.versionId??null,mode,retainUntil:parsed.data.retainUntil
+  });
+  const verification=await recordArchiveVerification({
+   org,exportId:id,source:"MANUAL",bucket:current.bucket,key:current.objectKey,versionId:current.versionId??null,
+   expectedHash:(await db.query("SELECT content_hash AS hash FROM sidec_archive_receipts WHERE export_id=$1",[id])).rows[0].hash
+  });
+  if(!verification.existsRemote||verification.hashValid!==true)return reply.code(502).send({error:"WORM_RETENTION_VERIFICATION_FAILED",verification});
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   await client.query(`UPDATE sidec_archive_receipts SET object_lock_mode=$1,retain_until=$2 WHERE export_id=$3 AND organization_id=$4`,
+    [mode,parsed.data.retainUntil,id,org]);
+   await client.query(`UPDATE sidec_artifact_retention SET retain_until=$1,updated_by=$2,updated_at=now()
+    WHERE export_id=$3 AND organization_id=$4`,[parsed.data.retainUntil,auth.userId,id,org]);
+   await client.query(`INSERT INTO sidec_archive_policy_events(
+    export_id,organization_id,event_type,previous_retain_until,new_retain_until,previous_legal_hold,new_legal_hold,reason,actor_user_id
+   ) VALUES($1,$2,'RETENTION_EXTENDED',$3,$4,$5,$5,$6,$7)`,
+    [id,org,previous,parsed.data.retainUntil,Boolean(current.legalHold),parsed.data.reason,auth.userId]);
+   await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+    VALUES($1,'sidec_archive.retention_extended',$2,$3,$4::jsonb)`,[
+    current.incidentId,auth.userId,`Retenção WORM da revisão ${current.revision} estendida.`,
+    JSON.stringify({exportId:id,previousRetainUntil:previous?.toISOString()??null,newRetainUntil:parsed.data.retainUntil.toISOString(),reason:parsed.data.reason})
+   ]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+    VALUES($1,'sidec_archive.retention_extend','sidec_archive_receipt',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),
+    JSON.stringify({objectLockMode:mode,retainUntil:parsed.data.retainUntil.toISOString(),legalHold:Boolean(current.legalHold)}),
+    JSON.stringify({reason:parsed.data.reason,verification})
+   ]);
+   await client.query("COMMIT");
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+  return {objectLockMode:mode,retainUntil:parsed.data.retainUntil.toISOString(),legalHold:Boolean(current.legalHold),verification};
+ });
+
+ app.post("/api/v1/sidec-exports/:id/archive/enable-legal-hold",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=archiveLegalHoldEnableSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const currentResult=await db.query(`SELECT r.export_id AS "exportId",r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId",
+    r.object_lock_mode AS "objectLockMode",r.retain_until AS "retainUntil",r.legal_hold AS "legalHold",
+    e.incident_id AS "incidentId",e.revision
+    FROM sidec_archive_receipts r JOIN sidec_exports e ON e.id=r.export_id
+    WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  const current=currentResult.rows[0] as any;
+  if(!current)return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
+  if(current.legalHold)return {legalHold:true,alreadyEnabled:true};
+  await enableSidecArchiveLegalHold({bucket:current.bucket,key:current.objectKey,versionId:current.versionId??null});
+  const expectedHash=(await db.query("SELECT content_hash AS hash FROM sidec_archive_receipts WHERE export_id=$1",[id])).rows[0].hash;
+  const verification=await recordArchiveVerification({
+   org,exportId:id,source:"MANUAL",bucket:current.bucket,key:current.objectKey,versionId:current.versionId??null,expectedHash
+  });
+  if(!verification.existsRemote||verification.hashValid!==true||verification.legalHold!==true){
+   return reply.code(502).send({error:"WORM_LEGAL_HOLD_VERIFICATION_FAILED",verification});
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   await client.query(`UPDATE sidec_archive_receipts SET legal_hold=true WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+   await client.query(`UPDATE sidec_artifact_retention SET legal_hold=true,
+     retention_class=CASE WHEN retention_class='UNSPECIFIED' THEN 'LEGAL_HOLD' ELSE retention_class END,
+     updated_by=$1,updated_at=now() WHERE export_id=$2 AND organization_id=$3`,[auth.userId,id,org]);
+   await client.query(`INSERT INTO sidec_archive_policy_events(
+    export_id,organization_id,event_type,previous_retain_until,new_retain_until,previous_legal_hold,new_legal_hold,reason,actor_user_id
+   ) VALUES($1,$2,'LEGAL_HOLD_ENABLED',$3,$3,false,true,$4,$5)`,
+    [id,org,current.retainUntil??null,parsed.data.reason,auth.userId]);
+   await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+    VALUES($1,'sidec_archive.legal_hold_enabled',$2,$3,$4::jsonb)`,[
+    current.incidentId,auth.userId,`Legal hold ativado para o arquivo WORM da revisão ${current.revision}.`,
+    JSON.stringify({exportId:id,reason:parsed.data.reason})
+   ]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+    VALUES($1,'sidec_archive.legal_hold_enable','sidec_archive_receipt',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),
+    JSON.stringify({...current,legalHold:true}),JSON.stringify({reason:parsed.data.reason,verification})
+   ]);
+   await client.query("COMMIT");
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+  return {legalHold:true,verification};
+ });
+
+ app.get("/api/v1/sidec/archive-health",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
+  const r=await db.query(`SELECT ar.export_id AS "exportId",e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,
+    ar.archived_at AS "archivedAt",ar.object_lock_mode AS "objectLockMode",ar.retain_until AS "retainUntil",
+    ar.legal_hold AS "legalHold",v.exists_remote AS "existsRemote",v.hash_valid AS "hashValid",
+    v.verified_at AS "verifiedAt",v.error_message AS "errorMessage",
+    CASE
+      WHEN v.id IS NULL THEN 'STALE'
+      WHEN v.exists_remote=false OR v.hash_valid=false THEN 'CRITICAL'
+      WHEN v.verified_at < now()-($2::text||' hours')::interval THEN 'STALE'
+      ELSE 'HEALTHY'
+    END AS health
+   FROM sidec_archive_receipts ar
+   JOIN sidec_exports e ON e.id=ar.export_id
+   JOIN incidents i ON i.id=e.incident_id
+   LEFT JOIN LATERAL (
+    SELECT id,exists_remote,hash_valid,verified_at,error_message
+    FROM sidec_archive_verifications x WHERE x.export_id=ar.export_id
+    ORDER BY verified_at DESC LIMIT 1
+   ) v ON true
+   WHERE ar.organization_id=$1
+   ORDER BY CASE
+      WHEN v.exists_remote=false OR v.hash_valid=false THEN 1
+      WHEN v.id IS NULL OR v.verified_at < now()-($2::text||' hours')::interval THEN 2
+      ELSE 3
+    END,v.verified_at NULLS FIRST,ar.archived_at DESC`,[org,staleHours]);
+  const items=r.rows;
+  const summary=items.reduce<Record<string,number>>((acc:any,row:any)=>{acc[row.health]=(acc[row.health]??0)+1;return acc;},{});
+  return {staleHours,summary,items};
+ });
+
  app.get("/api/v1/sidec-exports/:id/integrity-proof",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const proof=await buildSidecIntegrityProof(org,id,auth.userId);
