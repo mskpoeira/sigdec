@@ -18,6 +18,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0025_sidec_key_versions_deadlines_retention.sql"));
  assert.ok(files.includes("0026_sidec_ed25519_integrity_proofs.sql"));
  assert.ok(files.includes("0027_sidec_public_integrity_timestamp_custody.sql"));
+ assert.ok(files.includes("0028_sidec_worm_archive.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -153,6 +154,23 @@ test("SIDEC v1.19 possui carimbo interno Ed25519 e suporte a cadeia de custodia"
   WHERE table_schema='public' AND table_name='sidec_integrity_timestamps'
     AND column_name IN ('statement_hash','timestamped_at','signature','public_key','public_key_fingerprint') ORDER BY column_name`);
  assert.deepEqual(columns.rows.map(x=>x.column_name),["public_key","public_key_fingerprint","signature","statement_hash","timestamped_at"]);
+});
+
+test("SIDEC v1.20 possui recibo e verificacao de arquivo WORM",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_archive_receipts','sidec_archive_verifications') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_archive_receipts","sidec_archive_verifications"]);
+ const receiptConstraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_archive_receipts'::regclass`);
+ const defs=receiptConstraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/GOVERNANCE/);
+ assert.match(defs,/COMPLIANCE/);
+ const verificationConstraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_archive_verifications'::regclass`);
+ const vdefs=verificationConstraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(vdefs,/SCHEDULED/);
+ assert.match(vdefs,/MANUAL/);
+ assert.match(vdefs,/ARCHIVE/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
