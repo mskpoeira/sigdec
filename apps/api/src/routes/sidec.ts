@@ -1000,9 +1000,12 @@ export async function sidecRoutes(app:FastifyInstance){
   try{hmacValid=verifySidecManifestSignature(proof.manifest.sha256,proof.hmac.signature,proof.hmac.keyId)}catch{hmacValid=null}
 
   const registered=await db.query(`SELECT e.organization_id AS "organizationId"
-    FROM sidec_exports e JOIN sidec_export_artifacts a ON a.export_id=e.id
-    WHERE e.id=$1 AND a.content_hash=$2 AND a.manifest_hash=$3`,
-   [proof.export.id,proof.artifact.sha256,proof.manifest.sha256]);
+    FROM sidec_exports e
+    JOIN sidec_export_artifacts a ON a.export_id=e.id
+    JOIN incidents i ON i.id=e.incident_id
+    WHERE e.id=$1 AND a.content_hash=$2 AND a.manifest_hash=$3
+      AND i.protocol=$4 AND e.revision=$5 AND e.schema_version=$6`,
+   [proof.export.id,proof.artifact.sha256,proof.manifest.sha256,proof.export.protocol,proof.export.revision,proof.export.schemaVersion]);
   const organizationIdValue=registered.rows[0]?.organizationId??null;
   const overallValid=asymmetricValid;
   await db.query(`INSERT INTO sidec_integrity_verifications(
