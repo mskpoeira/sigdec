@@ -8,7 +8,7 @@ import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type Sidec
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
 import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, verifySidecManifestSignature } from "../lib/sidec-signature.js";
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
-import { signSidecIntegrity, verifySidecIntegrity } from "../lib/sidec-asymmetric.js";
+import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -288,6 +288,40 @@ async function ensureSidecArtifactAttestation(org:string,id:string,userId:string
    public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint",attested_at AS "attestedAt"
    FROM sidec_artifact_attestations WHERE export_id=$1 AND organization_id=$2`,[id,org]);
  return result.rows[0];
+}
+
+async function ensureSidecIntegrityTimestamp(org:string,id:string,userId:string|null){
+ const current=await db.query(`SELECT export_id AS "exportId",statement_hash AS "statementHash",timestamped_at AS "timestampedAt",
+   algorithm,key_id AS "keyId",signature,public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint"
+   FROM sidec_integrity_timestamps WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ if(current.rows[0])return current.rows[0];
+
+ const state=await db.query(`SELECT a.content_hash AS "artifactHash",a.manifest_hash AS "manifestHash",
+   t.signature AS "attestationSignature"
+   FROM sidec_export_artifacts a
+   JOIN sidec_artifact_attestations t ON t.export_id=a.export_id
+   WHERE a.export_id=$1 AND a.organization_id=$2`,[id,org]);
+ const row=state.rows[0] as {artifactHash:string;manifestHash:string;attestationSignature:string}|undefined;
+ if(!row)throw Object.assign(new Error("Atestação SIDEC não encontrada."),{statusCode:404,code:"ATTESTATION_NOT_FOUND"});
+ const timestampedAt=new Date().toISOString();
+ const signed=signSidecTimestamp({
+  manifestHash:row.manifestHash,artifactHash:row.artifactHash,
+  attestationSignature:row.attestationSignature,timestampedAt
+ });
+ await db.query(`INSERT INTO sidec_integrity_timestamps(
+   export_id,organization_id,statement_hash,timestamped_at,algorithm,key_id,signature,public_key,public_key_fingerprint,created_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  ON CONFLICT(export_id) DO NOTHING`,
+ [id,org,signed.statementHash,timestampedAt,signed.algorithm,signed.keyId,signed.signature,signed.publicKey,signed.publicKeyFingerprint,userId]);
+ const result=await db.query(`SELECT export_id AS "exportId",statement_hash AS "statementHash",timestamped_at AS "timestampedAt",
+   algorithm,key_id AS "keyId",signature,public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint"
+   FROM sidec_integrity_timestamps WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ return result.rows[0];
+}
+
+function publicIntegrityUrl(artifactHash:string){
+ const base=(process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000").replace(/\/$/,"");
+ return `${base}/integridade/${artifactHash}`;
 }
 
 async function sealSidecExportArtifact(org:string,id:string,userId:string){
