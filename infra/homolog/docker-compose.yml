@@ -39,6 +39,24 @@ services:
       - minio_data:/data
     networks: [sigdec]
 
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: sigdec-minio-init-homolog
+    restart: "no"
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      SIDEC_WORM_BUCKET: ${SIDEC_WORM_BUCKET:-sigdec-worm-v1}
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - >
+        until mc alias set sigdec http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 2; done;
+        mc mb --ignore-existing --with-lock "sigdec/$SIDEC_WORM_BUCKET";
+        mc version info "sigdec/$SIDEC_WORM_BUCKET";
+    networks: [sigdec]
+
   api:
     build:
       context: ../..
@@ -48,6 +66,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -59,6 +79,9 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      SIDEC_WORM_BUCKET: ${SIDEC_WORM_BUCKET:-sigdec-worm-v1}
+      SIDEC_WORM_MODE: ${SIDEC_WORM_MODE:-GOVERNANCE}
+      SIDEC_WORM_VERIFICATION_MINUTES: ${SIDEC_WORM_VERIFICATION_MINUTES:-1440}
       JWT_SECRET: ${JWT_SECRET}
       SESSION_HOURS: ${SESSION_HOURS}
       SIGDEC_PUBLIC_URL: https://${SIGDEC_DOMAIN}
