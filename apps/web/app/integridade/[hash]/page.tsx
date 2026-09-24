@@ -16,6 +16,7 @@ type PublicIntegrity={
  sealedAt:string;
  ed25519:{keyId:string;publicKeyFingerprint:string;attestedAt:string;valid:boolean};
  timestamp:{keyId:string;statementHash:string;timestampedAt:string;publicKeyFingerprint:string;valid:boolean};
+ archive:{preserved:boolean;lockMode?:string|null;retainUntil?:string|null;legalHold?:boolean;archivedAt?:string|null;existsRemote?:boolean|null;hashValid?:boolean|null;verifiedAt?:string|null};
 };
 
 export default function PublicIntegrityPage(){
@@ -58,6 +59,9 @@ export default function PublicIntegrityPage(){
    <p style={{overflowWrap:"anywhere"}}><strong>Manifesto SHA-256:</strong> {data.manifestHash}</p>
    <p style={{overflowWrap:"anywhere"}}><strong>Fingerprint Ed25519:</strong> {data.ed25519.publicKeyFingerprint}</p>
    <p style={{overflowWrap:"anywhere"}}><strong>Statement do timestamp:</strong> {data.timestamp.statementHash}</p>
+   <div className="dataGrid">
+    <article className="card"><h2>Preservação WORM</h2><p><strong>{data.archive.preserved?"Arquivado":"Ainda não arquivado"}</strong></p>{data.archive.preserved&&<><p>{data.archive.lockMode??"Legal hold"}</p><p>{data.archive.hashValid===true?"SHA-256 remoto confirmado":data.archive.hashValid===false?"Divergência detectada":"Verificação remota pendente"}</p>{data.archive.retainUntil&&<p>Reter até {new Date(data.archive.retainUntil).toLocaleString("pt-BR")}</p>}{data.archive.legalHold&&<p>Legal hold ativo</p>}</>}</article>
+   </div>
    <p>Selado em {new Date(data.sealedAt).toLocaleString("pt-BR")}.</p>
    <p><small>O carimbo apresentado é interno ao SIGDEC e assinado por Ed25519. Não equivale a carimbo do tempo de autoridade externa ou ICP-Brasil.</small></p>
   </section>}
