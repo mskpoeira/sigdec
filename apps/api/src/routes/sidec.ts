@@ -1006,9 +1006,19 @@ export async function sidecRoutes(app:FastifyInstance){
    if(artifact){
     const computedZipHash=hashBinary(artifact.content);
     if(computedZipHash!==artifact.contentHash)return reply.code(409).send({error:"SEALED_ZIP_INTEGRITY_ERROR",expected:artifact.contentHash,computed:computedZipHash});
-    if(!verifySidecManifestSignature(artifact.manifestHash,artifact.manifestSignature,artifact.signingKeyId)){
-     return reply.code(409).send({error:"MANIFEST_SIGNATURE_INVALID"});
-    }
+    const hmacValid=verifySidecManifestSignature(artifact.manifestHash,artifact.manifestSignature,artifact.signingKeyId);
+    if(!hmacValid)return reply.code(409).send({error:"MANIFEST_SIGNATURE_INVALID"});
+    const attestation=await ensureSidecArtifactAttestation(org,id,auth.userId) as any;
+    const asymmetricValid=verifySidecIntegrity({
+     manifestHash:artifact.manifestHash,artifactHash:artifact.contentHash,
+     signature:attestation.signature,publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint
+    });
+    if(!asymmetricValid)return reply.code(409).send({error:"ED25519_ATTESTATION_INVALID"});
+    await db.query(`INSERT INTO sidec_integrity_verifications(
+      export_id,organization_id,proof_version,artifact_hash,manifest_hash,hmac_valid,asymmetric_valid,overall_valid,
+      verification_source,ip,user_agent
+     ) VALUES($1,$2,'sigdec-sidec-integrity-proof/1.0',$3,$4,true,true,true,'INTERNAL',$5,$6)`,
+     [id,org,artifact.contentHash,artifact.manifestHash,request.ip,request.headers["user-agent"]??null]);
     return reply.type("application/zip")
      .header("Content-Disposition",`attachment; filename="${artifact.fileName}"`)
      .header("Content-Length",String(artifact.content.length))
@@ -1017,6 +1027,9 @@ export async function sidecRoutes(app:FastifyInstance){
      .header("X-SIGDEC-Manifest-SHA256",artifact.manifestHash)
      .header("X-SIGDEC-Manifest-Signature",artifact.manifestSignature)
      .header("X-SIGDEC-Signing-Key-Id",artifact.signingKeyId)
+     .header("X-SIGDEC-Ed25519-Key-Id",attestation.keyId)
+     .header("X-SIGDEC-Ed25519-Fingerprint",attestation.publicKeyFingerprint)
+     .header("X-SIGDEC-Ed25519-Signature",attestation.signature)
      .send(artifact.content);
    }
 
