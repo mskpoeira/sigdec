@@ -54,10 +54,10 @@ services:
     command:
       - >
         until mc alias set sigdec http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done;
-        mc mb --ignore-existing --with-lock "sigdec/$SIDEC_WORM_BUCKET";
-        mc mb --ignore-existing --with-lock "sigdec/$SIDEC_WORM_REPLICA_BUCKET";
-        mc version info "sigdec/$SIDEC_WORM_BUCKET";
-        mc version info "sigdec/$SIDEC_WORM_REPLICA_BUCKET";
+        mc mb --ignore-existing --with-lock "sigdec/${SIDEC_WORM_BUCKET:-sigdec-worm-v1}";
+        mc mb --ignore-existing --with-lock "sigdec/${SIDEC_WORM_REPLICA_BUCKET:-sigdec-worm-replica-v1}";
+        mc version info "sigdec/${SIDEC_WORM_BUCKET:-sigdec-worm-v1}";
+        mc version info "sigdec/${SIDEC_WORM_REPLICA_BUCKET:-sigdec-worm-replica-v1}";
     networks: [sigdec]
 
   api:
