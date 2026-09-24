@@ -1,0 +1,64 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect,useState } from "react";
+
+const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
+
+type PublicIntegrity={
+ valid:boolean;
+ artifactHash:string;
+ manifestHash:string;
+ protocol:string;
+ revision:number;
+ schemaVersion:string;
+ sealedAt:string;
+ ed25519:{keyId:string;publicKeyFingerprint:string;attestedAt:string;valid:boolean};
+ timestamp:{keyId:string;statementHash:string;timestampedAt:string;publicKeyFingerprint:string;valid:boolean};
+};
+
+export default function PublicIntegrityPage({params}:{params:Promise<{hash:string}>}){
+ const [hash,setHash]=useState("");
+ const [data,setData]=useState<PublicIntegrity|null>(null);
+ const [error,setError]=useState("");
+
+ useEffect(()=>{void params.then(p=>setHash(p.hash))},[params]);
+ useEffect(()=>{
+  if(!hash)return;
+  void fetch(`${API}/api/v1/public/sidec-integrity/${encodeURIComponent(hash)}`)
+   .then(async response=>{
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(body.error??"Comprovante público não localizado.");
+    setData(body);setError("");
+   }).catch(e=>setError(e instanceof Error?e.message:"Falha ao consultar integridade."));
+ },[hash]);
+
+ return <main className="shell moduleShell">
+  <header className="listHeader">
+   <div>
+    <span className="eyebrow">SIGDEC · INTEGRIDADE PÚBLICA</span>
+    <h1>Consulta de artefato SIDEC</h1>
+    <p>Verificação pública do estado criptográfico registrado pelo SIGDEC.</p>
+   </div>
+   <Link className="secondaryLink" href="/verificar-integridade">Verificar arquivo JSON</Link>
+  </header>
+
+  {!data&&!error&&<section className="infoCard">Consultando integridade...</section>}
+  {error&&<section className="warningCard">{error}</section>}
+
+  {data&&<section className={data.valid?"infoCard":"warningCard"}>
+   <h2>{data.valid?"✓ Integridade criptográfica válida":"⚠ Integridade não confirmada"}</h2>
+   <div className="dataGrid">
+    <article className="card"><h2>Ocorrência</h2><p>{data.protocol} · revisão {data.revision}</p><p>Schema {data.schemaVersion}</p></article>
+    <article className="card"><h2>Ed25519</h2><p><strong>{data.ed25519.valid?"Válido":"Inválido"}</strong></p><p>keyId: {data.ed25519.keyId}</p></article>
+    <article className="card"><h2>Carimbo interno</h2><p><strong>{data.timestamp.valid?"Válido":"Inválido"}</strong></p><p>{new Date(data.timestamp.timestampedAt).toLocaleString("pt-BR")}</p></article>
+   </div>
+   <p style={{overflowWrap:"anywhere"}}><strong>ZIP SHA-256:</strong> {data.artifactHash}</p>
+   <p style={{overflowWrap:"anywhere"}}><strong>Manifesto SHA-256:</strong> {data.manifestHash}</p>
+   <p style={{overflowWrap:"anywhere"}}><strong>Fingerprint Ed25519:</strong> {data.ed25519.publicKeyFingerprint}</p>
+   <p style={{overflowWrap:"anywhere"}}><strong>Statement do timestamp:</strong> {data.timestamp.statementHash}</p>
+   <p>Selado em {new Date(data.sealedAt).toLocaleString("pt-BR")}.</p>
+   <p><small>O carimbo apresentado é interno ao SIGDEC e assinado por Ed25519. Não equivale a carimbo do tempo de autoridade externa ou ICP-Brasil.</small></p>
+  </section>}
+ </main>;
+}
