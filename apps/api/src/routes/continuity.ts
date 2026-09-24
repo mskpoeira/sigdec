@@ -129,18 +129,52 @@ async function loadExercise(org:string,id:string){
   WHERE e.organization_id=$1 AND e.id=$2`,[org,id]);
  const exercise=exerciseResult.rows[0];
  if(!exercise)return null;
- const stepResult=await db.query(`SELECT es.step_id AS "stepId",s.phase,s.sort_order AS "sortOrder",s.title,
-   s.instructions,s.expected_minutes AS "expectedMinutes",s.required,s.owner_user_id AS "ownerUserId",
-   owner.display_name AS "ownerName",es.status,es.notes,es.completed_at AS "completedAt",
-   actor.display_name AS "completedByName"
-  FROM sidec_continuity_exercise_steps es
-  JOIN sidec_continuity_steps s ON s.id=es.step_id
-  LEFT JOIN users owner ON owner.id=s.owner_user_id
-  LEFT JOIN users actor ON actor.id=es.completed_by
-  WHERE es.exercise_id=$1
-  ORDER BY s.sort_order`,[id]);
- const summary=summarizeSidecContinuityExercise(stepResult.rows.map((row:any)=>({required:Boolean(row.required),status:row.status})));
- return {...exercise,summary,steps:stepResult.rows};
+ const [stepResult,evidenceResult,aarResult]=await Promise.all([
+  db.query(`SELECT es.step_id AS "stepId",s.phase,s.sort_order AS "sortOrder",s.title,
+    s.instructions,s.expected_minutes AS "expectedMinutes",s.required,s.owner_user_id AS "ownerUserId",
+    owner.display_name AS "ownerName",es.status,es.notes,es.completed_at AS "completedAt",
+    actor.display_name AS "completedByName"
+   FROM sidec_continuity_exercise_steps es
+   JOIN sidec_continuity_steps s ON s.id=es.step_id
+   LEFT JOIN users owner ON owner.id=s.owner_user_id
+   LEFT JOIN users actor ON actor.id=es.completed_by
+   WHERE es.exercise_id=$1
+   ORDER BY s.sort_order`,[id]),
+  db.query(`SELECT ev.id,ev.step_id AS "stepId",ev.evidence_type AS "evidenceType",ev.title,ev.reference,
+    ev.content_hash AS "contentHash",ev.created_at AS "createdAt",u.display_name AS "createdByName"
+   FROM sidec_continuity_step_evidence ev
+   LEFT JOIN users u ON u.id=ev.created_by
+   WHERE ev.organization_id=$1 AND ev.exercise_id=$2
+   ORDER BY ev.created_at`,[org,id]),
+  db.query(`SELECT a.id,a.status,a.executive_summary AS "executiveSummary",a.strengths,a.gaps,a.recommendations,
+    a.created_at AS "createdAt",a.updated_at AS "updatedAt",a.finalized_at AS "finalizedAt",
+    creator.display_name AS "createdByName",finalizer.display_name AS "finalizedByName"
+   FROM sidec_continuity_aars a
+   LEFT JOIN users creator ON creator.id=a.created_by
+   LEFT JOIN users finalizer ON finalizer.id=a.finalized_by
+   WHERE a.organization_id=$1 AND a.exercise_id=$2`,[org,id])
+ ]);
+ const evidenceByStep=new Map<string,any[]>();
+ for(const evidence of evidenceResult.rows){
+  const key=String(evidence.stepId),list=evidenceByStep.get(key)??[];
+  list.push(evidence);evidenceByStep.set(key,list);
+ }
+ const steps=stepResult.rows.map((row:any)=>({...row,evidence:evidenceByStep.get(String(row.stepId))??[]}));
+ const summary=summarizeSidecContinuityExercise(steps.map((row:any)=>({required:Boolean(row.required),status:row.status})));
+ const aarRow=aarResult.rows[0];
+ let aar:any=null;
+ if(aarRow){
+  const actions=await db.query(`SELECT ai.id,ai.title,ai.description,ai.priority,ai.owner_user_id AS "ownerUserId",
+    owner.display_name AS "ownerName",owner.matricula AS "ownerMatricula",ai.due_at AS "dueAt",ai.status,
+    ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt"
+   FROM sidec_continuity_action_items ai
+   LEFT JOIN users owner ON owner.id=ai.owner_user_id
+   WHERE ai.aar_id=$1
+   ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
+    ai.due_at NULLS LAST,ai.created_at`,[aarRow.id]);
+  aar={...aarRow,actions:actions.rows};
+ }
+ return {...exercise,summary,steps,aar};
 }
 
 export async function continuityRoutes(app:FastifyInstance){
