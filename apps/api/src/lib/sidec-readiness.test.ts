@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildMappedFields,diffSidecValues,evaluateCobradeRequirements,evaluateSidecReadiness,isSidecReady,type SidecMapping } from "./sidec-readiness.js";
+import { buildMappedFields,chooseRequiredDocumentIds,diffSidecValues,evaluateCobradeRequirements,evaluateDocumentRequirements,evaluateSidecReadiness,isSidecReady,mergeDocumentRequirements,type SidecMapping } from "./sidec-readiness.js";
 
 const mappings:SidecMapping[]=[
  {sourcePath:"incident.protocol",targetField:"ocorrencia.protocolo",required:true,enabled:true,sortOrder:10},
@@ -38,4 +38,27 @@ test("requisito adicional por COBRADE integra o checklist",()=>{
  assert.equal(extra.length,1);
  assert.equal(extra[0]?.ok,false);
  assert.equal(isSidecReady([...evaluateSidecReadiness(root,mappings),...extra]),false);
+});
+
+
+test("requisitos documentais usam maior minimo por tipo",()=>{
+ const rules=[
+  {scopeType:"DEFAULT" as const,scopeValue:"*",documentType:"REPORT" as const,label:"Relatório",minCount:1,required:true,enabled:true},
+  {scopeType:"COBRADE" as const,scopeValue:"123",documentType:"REPORT" as const,label:"Relatórios COBRADE",minCount:2,required:true,enabled:true}
+ ];
+ const merged=mergeDocumentRequirements(rules);
+ assert.equal(merged.length,1);
+ assert.equal(merged[0]?.minCount,2);
+});
+
+test("documentos obrigatorios bloqueiam prontidao e selecionam os mais recentes",()=>{
+ const rules=[{scopeType:"INCIDENT_TYPE" as const,scopeValue:"ALAG",documentType:"REPORT" as const,label:"Relatório técnico",minCount:2,required:true,enabled:true}];
+ const docs=[
+  {id:"1",documentType:"REPORT",issuedAt:"2026-09-20T10:00:00Z"},
+  {id:"2",documentType:"REPORT",issuedAt:"2026-09-22T10:00:00Z"},
+  {id:"3",documentType:"REPORT",issuedAt:"2026-09-23T10:00:00Z"}
+ ];
+ const checks=evaluateDocumentRequirements(docs,rules,["3"]);
+ assert.equal(checks[0]?.ok,false);
+ assert.deepEqual(chooseRequiredDocumentIds(docs,rules),["3","2"]);
 });
