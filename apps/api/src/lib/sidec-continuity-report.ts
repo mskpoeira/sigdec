@@ -32,6 +32,9 @@ export async function buildContinuityExerciseReportPdf(input:any){
    pdf.font("Helvetica-Bold").fontSize(9).fillColor("#173f69").text("Plano de ações corretivas");
    if(!(input.aar.actions??[]).length)p("Nenhuma ação corretiva registrada.");
    for(const a of input.aar.actions??[]){pdf.font("Helvetica-Bold").fontSize(8).text(`• [${a.priority}] ${a.title}`);pdf.font("Helvetica").fontSize(7.6).text(`Status: ${a.status} · Responsável: ${a.ownerName??"—"} · Prazo: ${when(a.dueAt)}`,{indent:10});if(a.description)p(a.description)}
+   pdf.font("Helvetica-Bold").fontSize(9).fillColor("#173f69").text("Lições aprendidas estruturadas");
+   if(!(input.aar.lessons??[]).length)p("Nenhuma lição estruturada registrada.");
+   for(const l of input.aar.lessons??[]){pdf.font("Helvetica-Bold").fontSize(8).text(`• [${l.severity}] ${l.title}`);pdf.font("Helvetica").fontSize(7.6).text(`${l.category} · chave: ${l.recurrenceKey}`,{indent:10});p(l.observation)}
   }
   section("NOTA DE GOVERNANÇA");p("Este relatório documenta um exercício controlado de continuidade. Não comprova failover real, restauração produtiva, alteração de DNS, remoção de retenção WORM ou outra ação destrutiva. As evidências são referências auditáveis registradas pelos operadores.");
   const range=pdf.bufferedPageRange();for(let i=range.start;i<range.start+range.count;i++){pdf.switchToPage(i);pdf.font("Helvetica").fontSize(7).fillColor("#607388").text(`SIGDEC · Continuidade SIDEC · exercício ${input.exercise.id} · página ${i+1} de ${range.count}`,pdf.page.margins.left,pdf.page.height-36,{width,align:"center",lineBreak:false})}
