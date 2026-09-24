@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSidecRunbookActivation } from "../lib/sidec-runbook.js";
+import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
@@ -45,6 +46,38 @@ const exerciseFinishSchema=z.object({
 const exerciseCancelSchema=z.object({
  reason:z.string().trim().min(5).max(8000)
 });
+
+const evidenceSchema=z.object({
+ evidenceType:z.enum(["NOTE","LINK","DOCUMENT","HASH"]),
+ title:z.string().trim().min(3).max(240),
+ reference:z.string().trim().min(1).max(8000),
+ contentHash:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional()
+});
+
+const aarUpdateSchema=z.object({
+ executiveSummary:z.string().trim().min(10).max(12000),
+ strengths:z.string().trim().min(5).max(12000),
+ gaps:z.string().trim().min(5).max(12000),
+ recommendations:z.string().trim().min(5).max(12000)
+});
+
+const aarActionCreateSchema=z.object({
+ title:z.string().trim().min(3).max(240),
+ description:z.string().trim().max(8000).default(""),
+ priority:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]).default("MEDIUM"),
+ ownerUserId:z.string().uuid().nullable().optional(),
+ dueAt:z.coerce.date().nullable().optional()
+});
+
+const aarActionUpdateSchema=z.object({
+ title:z.string().trim().min(3).max(240).optional(),
+ description:z.string().trim().max(8000).optional(),
+ priority:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]).optional(),
+ ownerUserId:z.string().uuid().nullable().optional(),
+ dueAt:z.coerce.date().nullable().optional(),
+ status:z.enum(["OPEN","IN_PROGRESS","DONE","CANCELLED"]).optional()
+});
+
 
 function organizationId(value:string|null){
  if(!value){
