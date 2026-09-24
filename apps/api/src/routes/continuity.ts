@@ -789,10 +789,18 @@ export async function continuityRoutes(app:FastifyInstance){
   const parsed=aarActionCreateSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   if(parsed.data.ownerUserId){const owner=await db.query(`SELECT 1 FROM users WHERE id=$1 AND organization_id=$2`,[parsed.data.ownerUserId,org]);if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});}
+  await validateActionReferences(org,{riskId:parsed.data.riskId,recoveryActionId:parsed.data.recoveryActionId});
   const aar=await db.query(`SELECT a.id,a.status FROM sidec_continuity_aars a JOIN sidec_continuity_exercises e ON e.id=a.exercise_id WHERE a.exercise_id=$1 AND a.organization_id=$2 AND e.status='COMPLETED'`,[id,org]);
   if(!aar.rows[0])return reply.code(409).send({error:"AAR_DRAFT_REQUIRED"});
   if(aar.rows[0].status!=="DRAFT")return reply.code(409).send({error:"AAR_IMMUTABLE"});
-  const created=await db.query(`INSERT INTO sidec_continuity_action_items(aar_id,title,description,priority,owner_user_id,due_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,created_at AS "createdAt"`,[aar.rows[0].id,parsed.data.title,parsed.data.description,parsed.data.priority,parsed.data.ownerUserId??null,parsed.data.dueAt??null]);
+  const created=await db.query(`INSERT INTO sidec_continuity_action_items(
+    aar_id,title,description,priority,owner_user_id,due_at,risk_id,recovery_action_id
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+   RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,
+    risk_id AS "riskId",recovery_action_id AS "recoveryActionId",effectiveness,created_at AS "createdAt"`,[
+    aar.rows[0].id,parsed.data.title,parsed.data.description,parsed.data.priority,parsed.data.ownerUserId??null,
+    parsed.data.dueAt??null,parsed.data.riskId??null,parsed.data.recoveryActionId??null
+  ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_create','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),JSON.stringify({exerciseId:id})]);
   return reply.code(201).send(created.rows[0]);
  });
@@ -801,13 +809,90 @@ export async function continuityRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId);const {exerciseId,actionId}=request.params as {exerciseId:string;actionId:string};
   const parsed=aarActionUpdateSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   if(parsed.data.ownerUserId){const owner=await db.query(`SELECT 1 FROM users WHERE id=$1 AND organization_id=$2`,[parsed.data.ownerUserId,org]);if(!owner.rows[0])return reply.code(400).send({error:"OWNER_OUTSIDE_ORGANIZATION"});}
+  await validateActionReferences(org,{riskId:parsed.data.riskId,recoveryActionId:parsed.data.recoveryActionId});
   const current=await db.query(`SELECT ai.*,a.status AS aar_status FROM sidec_continuity_action_items ai JOIN sidec_continuity_aars a ON a.id=ai.aar_id WHERE ai.id=$1 AND a.exercise_id=$2 AND a.organization_id=$3`,[actionId,exerciseId,org]);
   const row=current.rows[0] as any;if(!row)return reply.code(404).send({error:"ACTION_NOT_FOUND"});
-  const contentChange=parsed.data.title!==undefined||parsed.data.description!==undefined||parsed.data.priority!==undefined||parsed.data.ownerUserId!==undefined||parsed.data.dueAt!==undefined;
+  const contentChange=parsed.data.title!==undefined||parsed.data.description!==undefined||parsed.data.priority!==undefined||parsed.data.ownerUserId!==undefined||parsed.data.dueAt!==undefined||parsed.data.riskId!==undefined||parsed.data.recoveryActionId!==undefined;
   if(row.aar_status==="FINAL"&&contentChange)return reply.code(409).send({error:"AAR_ACTION_CONTENT_IMMUTABLE"});
   const nextStatus=parsed.data.status??row.status;const completedAt=nextStatus==="DONE"?(row.completed_at??new Date()):null;
-  const updated=await db.query(`UPDATE sidec_continuity_action_items SET title=$1,description=$2,priority=$3,owner_user_id=$4,due_at=$5,status=$6,completed_at=$7,updated_at=now() WHERE id=$8 RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,completed_at AS "completedAt",updated_at AS "updatedAt"`,[parsed.data.title??row.title,parsed.data.description??row.description,parsed.data.priority??row.priority,parsed.data.ownerUserId===undefined?row.owner_user_id:parsed.data.ownerUserId,parsed.data.dueAt===undefined?row.due_at:parsed.data.dueAt,nextStatus,completedAt,actionId]);
+  const updated=await db.query(`UPDATE sidec_continuity_action_items SET
+    title=$1,description=$2,priority=$3,owner_user_id=$4,due_at=$5,risk_id=$6,recovery_action_id=$7,
+    status=$8,completed_at=$9,updated_at=now()
+    WHERE id=$10
+    RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",
+      risk_id AS "riskId",recovery_action_id AS "recoveryActionId",status,completed_at AS "completedAt",
+      effectiveness,updated_at AS "updatedAt"`,[
+    parsed.data.title??row.title,parsed.data.description??row.description,parsed.data.priority??row.priority,
+    parsed.data.ownerUserId===undefined?row.owner_user_id:parsed.data.ownerUserId,
+    parsed.data.dueAt===undefined?row.due_at:parsed.data.dueAt,
+    parsed.data.riskId===undefined?row.risk_id:parsed.data.riskId,
+    parsed.data.recoveryActionId===undefined?row.recovery_action_id:parsed.data.recoveryActionId,
+    nextStatus,completedAt,actionId
+  ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_update','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(updated.rows[0]),JSON.stringify({exerciseId})]);
+  return updated.rows[0];
+ });
+
+ app.get("/api/v1/sidec/continuity/action-references",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const [risks,recoveryActions]=await Promise.all([
+   db.query(`SELECT id,code,title,category,status,probability,impact FROM risk_registers
+    WHERE organization_id=$1 ORDER BY (probability*impact) DESC,created_at DESC LIMIT 200`,[org]),
+   db.query(`SELECT id,title,category,status,responsible,due_at AS "dueAt" FROM recovery_actions
+    WHERE organization_id=$1 ORDER BY CASE status WHEN 'DONE' THEN 2 ELSE 1 END,due_at NULLS LAST,created_at DESC LIMIT 200`,[org])
+  ]);
+  return {risks:risks.rows,recoveryActions:recoveryActions.rows};
+ });
+
+ app.get("/api/v1/sidec/continuity/actions/metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const summary=await db.query(`SELECT
+    count(*)::int AS total,
+    count(*) FILTER(WHERE ai.status='DONE')::int AS done,
+    count(*) FILTER(WHERE ai.status IN ('OPEN','IN_PROGRESS') AND ai.due_at IS NOT NULL AND ai.due_at<now())::int AS overdue,
+    count(*) FILTER(WHERE ai.risk_id IS NOT NULL)::int AS "linkedRisks",
+    count(*) FILTER(WHERE ai.recovery_action_id IS NOT NULL)::int AS "linkedRecoveryActions",
+    round(avg(EXTRACT(EPOCH FROM (ai.completed_at-ai.created_at))/3600.0) FILTER(WHERE ai.completed_at IS NOT NULL)::numeric,1) AS "avgCompletionHours",
+    round((100.0*count(*) FILTER(WHERE ai.status='DONE' AND ai.due_at IS NOT NULL AND ai.completed_at<=ai.due_at)
+      /NULLIF(count(*) FILTER(WHERE ai.status='DONE' AND ai.due_at IS NOT NULL),0))::numeric,1) AS "onTimePct",
+    count(*) FILTER(WHERE ai.effectiveness='EFFECTIVE')::int AS effective,
+    count(*) FILTER(WHERE ai.effectiveness='PARTIAL')::int AS partial,
+    count(*) FILTER(WHERE ai.effectiveness='INEFFECTIVE')::int AS ineffective,
+    count(*) FILTER(WHERE ai.status='DONE' AND ai.effectiveness='NOT_EVALUATED')::int AS "awaitingEffectiveness"
+   FROM sidec_continuity_action_items ai
+   JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+   WHERE a.organization_id=$1`,[org]);
+  const byPriority=await db.query(`SELECT ai.priority,count(*)::int AS total,
+    count(*) FILTER(WHERE ai.status='DONE')::int AS done,
+    round(avg(EXTRACT(EPOCH FROM (ai.completed_at-ai.created_at))/3600.0) FILTER(WHERE ai.completed_at IS NOT NULL)::numeric,1) AS "avgCompletionHours"
+   FROM sidec_continuity_action_items ai JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+   WHERE a.organization_id=$1 GROUP BY ai.priority
+   ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`,[org]);
+  return {summary:summary.rows[0],byPriority:byPriority.rows};
+ });
+
+ app.patch("/api/v1/sidec/continuity/exercises/:exerciseId/aar/actions/:actionId/effectiveness",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{exerciseId,actionId}=request.params as {exerciseId:string;actionId:string};
+  const parsed=aarActionEffectivenessSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const current=await db.query(`SELECT ai.*,a.organization_id FROM sidec_continuity_action_items ai
+    JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+    WHERE ai.id=$1 AND a.exercise_id=$2 AND a.organization_id=$3`,[actionId,exerciseId,org]);
+  const row=current.rows[0] as any;
+  if(!row)return reply.code(404).send({error:"ACTION_NOT_FOUND"});
+  if(row.status!=="DONE")return reply.code(409).send({error:"DONE_ACTION_REQUIRED"});
+  const updated=await db.query(`UPDATE sidec_continuity_action_items
+    SET effectiveness=$1,effectiveness_notes=$2,effectiveness_evaluated_at=now(),effectiveness_evaluated_by=$3,updated_at=now()
+    WHERE id=$4
+    RETURNING id,effectiveness,effectiveness_notes AS "effectivenessNotes",
+      effectiveness_evaluated_at AS "effectivenessEvaluatedAt"`,[
+    parsed.data.effectiveness,parsed.data.notes,auth.userId,actionId
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+    VALUES($1,'sidec_continuity.action_effectiveness','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+    auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(updated.rows[0]),
+    JSON.stringify({exerciseId})
+  ]);
   return updated.rows[0];
  });
 
