@@ -1551,7 +1551,16 @@ export async function sidecRoutes(app:FastifyInstance){
    archivePolicyEvents:(await db.query(`SELECT event_type AS "eventType",previous_retain_until AS "previousRetainUntil",
      new_retain_until AS "newRetainUntil",previous_legal_hold AS "previousLegalHold",new_legal_hold AS "newLegalHold",
      reason,created_at AS "createdAt"
-     FROM sidec_archive_policy_events WHERE export_id=$1 AND organization_id=$2 ORDER BY created_at`,[id,org])).rows
+     FROM sidec_archive_policy_events WHERE export_id=$1 AND organization_id=$2 ORDER BY created_at`,[id,org])).rows,
+   archiveReplica:(await db.query(`SELECT r.destination_code AS "destinationCode",r.bucket,r.object_key AS "objectKey",
+     r.version_id AS "versionId",r.etag,r.object_lock_mode AS "objectLockMode",r.retain_until AS "retainUntil",
+     r.legal_hold AS "legalHold",r.content_hash AS "contentHash",r.replicated_at AS "replicatedAt",
+     COALESCE((SELECT json_agg(json_build_object(
+      'existsRemote',v.exists_remote,'hashValid',v.hash_valid,'observedHash',v.observed_hash,
+      'objectLockMode',v.object_lock_mode,'retainUntil',v.retain_until,'legalHold',v.legal_hold,
+      'source',v.verification_source,'error',v.error_message,'verifiedAt',v.verified_at
+     ) ORDER BY v.verified_at) FROM sidec_archive_replica_verifications v WHERE v.export_id=r.export_id),'[]'::json) AS verifications
+     FROM sidec_archive_replicas r WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org])).rows[0]??null
   };
   const download=String((request.query as {download?:string})?.download??"").trim()==="1";
   if(download){
@@ -1665,7 +1674,11 @@ export async function sidecRoutes(app:FastifyInstance){
     ts.signature AS "timestampSignature",ts.public_key AS "timestampPublicKey",ts.public_key_fingerprint AS "timestampFingerprint",
     (wr.export_id IS NOT NULL) AS "archiveCreated",wr.object_lock_mode AS "archiveLockMode",
     wr.retain_until AS "archiveRetainUntil",wr.legal_hold AS "archiveLegalHold",wr.archived_at AS "archivedAt",
-    wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",wv.verified_at AS "archiveVerifiedAt"
+    wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",
+    wv.observed_hash AS "archiveObservedHash",wv.verified_at AS "archiveVerifiedAt",
+    (rp.export_id IS NOT NULL) AS "replicaCreated",rp.retain_until AS "replicaRetainUntil",
+    rp.legal_hold AS "replicaLegalHold",rv.exists_remote AS "replicaExistsRemote",
+    rv.hash_valid AS "replicaHashValid",rv.observed_hash AS "replicaObservedHash",rv.verified_at AS "replicaVerifiedAt"
    FROM sidec_export_artifacts a
    JOIN sidec_exports e ON e.id=a.export_id
    JOIN incidents i ON i.id=e.incident_id
@@ -1673,9 +1686,14 @@ export async function sidecRoutes(app:FastifyInstance){
    LEFT JOIN sidec_integrity_timestamps ts ON ts.export_id=a.export_id
    LEFT JOIN sidec_archive_receipts wr ON wr.export_id=a.export_id
    LEFT JOIN LATERAL (
-    SELECT exists_remote,hash_valid,verified_at FROM sidec_archive_verifications av
+    SELECT exists_remote,hash_valid,observed_hash,verified_at FROM sidec_archive_verifications av
     WHERE av.export_id=a.export_id ORDER BY verified_at DESC LIMIT 1
    ) wv ON true
+   LEFT JOIN sidec_archive_replicas rp ON rp.export_id=a.export_id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid,observed_hash,verified_at FROM sidec_archive_replica_verifications av
+    WHERE av.export_id=a.export_id ORDER BY verified_at DESC LIMIT 1
+   ) rv ON true
    WHERE a.content_hash=$1 LIMIT 1`,[artifactHash]);
   const row=r.rows[0] as any;
   if(!row||!row.ed25519Signature)return reply.code(404).send({error:"PUBLIC_INTEGRITY_NOT_AVAILABLE"});
@@ -1712,7 +1730,16 @@ export async function sidecRoutes(app:FastifyInstance){
    archive:row.archiveCreated?{
     preserved:true,lockMode:row.archiveLockMode,retainUntil:row.archiveRetainUntil,legalHold:Boolean(row.archiveLegalHold),
     archivedAt:row.archivedAt,existsRemote:row.archiveExistsRemote,hashValid:row.archiveHashValid,verifiedAt:row.archiveVerifiedAt
-   }:{preserved:false}
+   }:{preserved:false},
+   replication:{
+    enabled:wormReplicaEnabled(),created:Boolean(row.replicaCreated),
+    primaryHashValid:row.archiveHashValid??null,replicaHashValid:row.replicaHashValid??null,
+    crossHashValid:row.archiveObservedHash&&row.replicaObservedHash?row.archiveObservedHash===row.replicaObservedHash:null,
+    policyAligned:Boolean(row.replicaCreated)&&
+      (!row.archiveLegalHold||Boolean(row.replicaLegalHold))&&
+      (!row.archiveRetainUntil||Boolean(row.replicaRetainUntil&&new Date(row.replicaRetainUntil).getTime()>=new Date(row.archiveRetainUntil).getTime())),
+    verifiedAt:row.replicaVerifiedAt??null
+   }
   };
  });
 
