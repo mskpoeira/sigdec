@@ -25,6 +25,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0032_sidec_continuity_objectives.sql"));
  assert.ok(files.includes("0033_sidec_continuity_runbook.sql"));
  assert.ok(files.includes("0034_sidec_continuity_evidence_aar.sql"));
+ assert.ok(files.includes("0035_sidec_continuity_schedule_escalation_lessons.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -297,6 +298,25 @@ test("SIDEC v1.23 possui retry drills e condicoes de resiliencia",async()=>{
  const replicatedBy=await db.query(`SELECT is_nullable FROM information_schema.columns
   WHERE table_schema='public' AND table_name='sidec_archive_replicas' AND column_name='replicated_by'`);
  assert.equal(replicatedBy.rows[0]?.is_nullable,"YES");
+});
+
+test("SIDEC v1.28 possui agenda escalonamento alertas e licoes de continuidade",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_schedules','sidec_continuity_contacts','sidec_continuity_action_alerts','sidec_continuity_lessons'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_action_alerts","sidec_continuity_contacts","sidec_continuity_lessons","sidec_continuity_schedules"
+ ]);
+ const contactDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_contacts'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(contactDefs,/INTERNAL/);assert.match(contactDefs,/EXTERNAL/);assert.match(contactDefs,/RADIO/);
+ const lessonDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_lessons'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(lessonDefs,/CONNECTIVITY/);assert.match(lessonDefs,/CRITICAL/);
+ const alertDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_action_alerts'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(alertDefs,/DUE_SOON/);assert.match(alertDefs,/OVERDUE/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
