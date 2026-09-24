@@ -989,7 +989,15 @@ export async function sidecRoutes(app:FastifyInstance){
     (wr.export_id IS NOT NULL) AS "archiveCreated",wr.bucket AS "archiveBucket",wr.object_key AS "archiveObjectKey",
     wr.object_lock_mode AS "archiveLockMode",wr.retain_until AS "archiveRetainUntil",wr.legal_hold AS "archiveLegalHold",
     wr.archived_at AS "archivedAt",wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",
-    wv.verified_at AS "archiveVerifiedAt",wv.error_message AS "archiveVerificationError",
+    wv.observed_hash AS "archiveObservedHash",wv.verified_at AS "archiveVerifiedAt",wv.error_message AS "archiveVerificationError",
+    (rp.export_id IS NOT NULL) AS "archiveReplicaCreated",rp.bucket AS "archiveReplicaBucket",rp.object_key AS "archiveReplicaObjectKey",
+    rp.object_lock_mode AS "archiveReplicaLockMode",rp.retain_until AS "archiveReplicaRetainUntil",
+    rp.legal_hold AS "archiveReplicaLegalHold",rp.replicated_at AS "archiveReplicatedAt",
+    rv.exists_remote AS "archiveReplicaExistsRemote",rv.hash_valid AS "archiveReplicaHashValid",
+    rv.observed_hash AS "archiveReplicaObservedHash",rv.verified_at AS "archiveReplicaVerifiedAt",
+    rv.error_message AS "archiveReplicaVerificationError",
+    CASE WHEN wv.observed_hash IS NOT NULL AND rv.observed_hash IS NOT NULL
+      THEN wv.observed_hash=rv.observed_hash ELSE NULL END AS "archiveCrossHashValid",
     COALESCE((SELECT json_agg(json_build_object(
       'eventType',pe.event_type,'previousRetainUntil',pe.previous_retain_until,'newRetainUntil',pe.new_retain_until,
       'previousLegalHold',pe.previous_legal_hold,'newLegalHold',pe.new_legal_hold,'reason',pe.reason,'createdAt',pe.created_at
@@ -1004,10 +1012,16 @@ export async function sidecRoutes(app:FastifyInstance){
     LEFT JOIN sidec_artifact_retention ar ON ar.export_id=e.id
     LEFT JOIN sidec_archive_receipts wr ON wr.export_id=e.id
     LEFT JOIN LATERAL (
-      SELECT exists_remote,hash_valid,verified_at,error_message
+      SELECT exists_remote,hash_valid,observed_hash,verified_at,error_message
       FROM sidec_archive_verifications av WHERE av.export_id=e.id
       ORDER BY verified_at DESC LIMIT 1
     ) wv ON true
+    LEFT JOIN sidec_archive_replicas rp ON rp.export_id=e.id
+    LEFT JOIN LATERAL (
+      SELECT exists_remote,hash_valid,observed_hash,verified_at,error_message
+      FROM sidec_archive_replica_verifications av WHERE av.export_id=e.id
+      ORDER BY verified_at DESC LIMIT 1
+    ) rv ON true
     WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
   return {items:r.rows};
  });
