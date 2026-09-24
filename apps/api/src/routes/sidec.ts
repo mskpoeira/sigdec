@@ -910,6 +910,67 @@ export async function sidecRoutes(app:FastifyInstance){
   return {current:{id:current.id,revision:current.revision},against:{id:previous.id,revision:previous.revision},category,categories:["all",...sidecDiffCategories],count:filtered.length,totalCount:differences.length,differences:filtered.slice(0,500)};
  });
 
+ app.get("/api/v1/sidec-exports/:id/integrity-proof",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const proof=await buildSidecIntegrityProof(org,id,auth.userId);
+  const download=String((request.query as {download?:string})?.download??"").trim()==="1";
+  if(download){
+   const safeProtocol=proof.export.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
+   reply.header("Content-Type","application/json; charset=utf-8");
+   reply.header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${proof.export.revision}-integridade.json"`);
+  }
+  return proof;
+ });
+
+ app.get("/api/v1/sidec-exports/:id/integrity-verifications",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const exists=await db.query(`SELECT 1 FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
+  if(!exists.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`SELECT id,proof_version AS "proofVersion",artifact_hash AS "artifactHash",manifest_hash AS "manifestHash",
+    hmac_valid AS "hmacValid",asymmetric_valid AS "asymmetricValid",overall_valid AS "overallValid",
+    verification_source AS "verificationSource",verified_at AS "verifiedAt"
+    FROM sidec_integrity_verifications
+    WHERE export_id=$1 AND organization_id=$2
+    ORDER BY verified_at DESC LIMIT 200`,[id,org]);
+  return {items:r.rows};
+ });
+
+ app.post("/api/v1/sidec/verify-integrity-proof",async(request,reply)=>{
+  const parsed=integrityProofSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INTEGRITY_PROOF",details:parsed.error.flatten()});
+  const proof=parsed.data;
+  const asymmetricValid=verifySidecIntegrity({
+   manifestHash:proof.manifest.sha256,
+   artifactHash:proof.artifact.sha256,
+   signature:proof.ed25519.signature,
+   publicKey:proof.ed25519.publicKey,
+   publicKeyFingerprint:proof.ed25519.publicKeyFingerprint
+  });
+  let hmacValid:boolean|null=null;
+  try{hmacValid=verifySidecManifestSignature(proof.manifest.sha256,proof.hmac.signature,proof.hmac.keyId)}catch{hmacValid=null}
+
+  const registered=await db.query(`SELECT e.organization_id AS "organizationId"
+    FROM sidec_exports e JOIN sidec_export_artifacts a ON a.export_id=e.id
+    WHERE e.id=$1 AND a.content_hash=$2 AND a.manifest_hash=$3`,
+   [proof.export.id,proof.artifact.sha256,proof.manifest.sha256]);
+  const organizationIdValue=registered.rows[0]?.organizationId??null;
+  const overallValid=asymmetricValid;
+  await db.query(`INSERT INTO sidec_integrity_verifications(
+    export_id,organization_id,proof_version,artifact_hash,manifest_hash,hmac_valid,asymmetric_valid,overall_valid,
+    verification_source,ip,user_agent
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'EXTERNAL',$9,$10)`,
+   [organizationIdValue?proof.export.id:null,organizationIdValue,proof.proofVersion,proof.artifact.sha256,proof.manifest.sha256,
+    hmacValid,asymmetricValid,overallValid,request.ip,request.headers["user-agent"]??null]);
+  return {
+   valid:overallValid,
+   asymmetricValid,
+   hmacValid,
+   registeredArtifact:Boolean(organizationIdValue),
+   proofVersion:proof.proofVersion,
+   publicKeyFingerprint:proof.ed25519.publicKeyFingerprint
+  };
+ });
+
  app.get("/api/v1/sidec-exports/:id/download",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const format=String((request.query as {format?:string})?.format??"json").toLowerCase();
