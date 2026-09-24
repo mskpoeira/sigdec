@@ -10,7 +10,8 @@ import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, v
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
 import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js";
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
-import { archiveSidecArtifact, archiveSidecReplica, enableSidecArchiveLegalHold, enableSidecReplicaLegalHold, extendSidecArchiveRetention, extendSidecReplicaRetention, verifySidecArchive, verifySidecReplica, wormMode, wormReplicaEnabled, wormReplicaMode } from "../lib/sidec-worm.js";
+import { archiveSidecArtifact, archiveSidecReplica, enableSidecArchiveLegalHold, enableSidecReplicaLegalHold, extendSidecArchiveRetention, extendSidecReplicaRetention, restoreSidecArchiveObject, restoreSidecReplicaObject, verifySidecArchive, verifySidecReplica, wormMode, wormReplicaEnabled, wormReplicaMode } from "../lib/sidec-worm.js";
+import { hasZipSignature, nextResilienceRetryAt, shouldAlertResilience } from "../lib/sidec-resilience.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -466,7 +467,7 @@ async function recordReplicaVerification(input:{
  return verification;
 }
 
-async function createSidecArchiveReplica(org:string,id:string,userId:string){
+async function createSidecArchiveReplica(org:string,id:string,userId:string|null){
  if(!wormReplicaEnabled())return {enabled:false,created:false,error:"WORM_REPLICA_DISABLED"};
  const existing=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",version_id AS "versionId",
   content_hash AS "contentHash",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
@@ -509,8 +510,8 @@ async function createSidecArchiveReplica(org:string,id:string,userId:string){
  });
  await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
   VALUES($1,'sidec_archive.replica_created',$2,$3,$4::jsonb)`,[
-  item.incidentId,userId,`Réplica WORM secundária criada para a revisão ${item.revision}.`,
-  JSON.stringify({exportId:id,destination:"SECONDARY",hashValid:verification.hashValid})
+  item.incidentId,userId,`Réplica WORM secundária criada para a revisão ${item.revision}${userId?"":" por retry automático"}.`,
+  JSON.stringify({exportId:id,destination:"SECONDARY",hashValid:verification.hashValid,automatic:userId===null})
  ]);
  return {enabled:true,created:true,receipt,verification};
 }
