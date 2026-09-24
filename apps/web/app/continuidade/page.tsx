@@ -10,7 +10,7 @@ type RunbookPlan={id:string;version:number;title:string;status:"DRAFT"|"ACTIVE"|
 type RunbookData={active:RunbookPlan|null;draft:RunbookPlan|null;revisions:Array<{id:string;version:number;title:string;status:string;updatedAt:string}>;operators:Operator[]};
 type Evidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
 type ExerciseStep={stepId:string;phase:string;title:string;instructions:string;expectedMinutes:number;required:boolean;ownerName?:string|null;status:"PENDING"|"COMPLETED"|"SKIPPED"|"FAILED";notes?:string|null;evidence:Evidence[]};
-type AarAction={id:string;title:string;description?:string|null;priority:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";ownerUserId?:string|null;ownerName?:string|null;dueAt?:string|null;status:"OPEN"|"IN_PROGRESS"|"DONE"|"CANCELLED";completedAt?:string|null;riskId?:string|null;riskCode?:string|null;riskTitle?:string|null;recoveryActionId?:string|null;recoveryActionTitle?:string|null;recoveryActionStatus?:string|null;effectiveness:"NOT_EVALUATED"|"EFFECTIVE"|"PARTIAL"|"INEFFECTIVE";effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null;effectivenessEvaluatedByName?:string|null};
+type AarAction={id:string;title:string;description?:string|null;priority:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";ownerUserId?:string|null;ownerName?:string|null;dueAt?:string|null;status:"OPEN"|"IN_PROGRESS"|"DONE"|"CANCELLED";completedAt?:string|null;riskId?:string|null;riskCode?:string|null;riskTitle?:string|null;recoveryActionId?:string|null;recoveryActionTitle?:string|null;recoveryActionStatus?:string|null;recurrenceKey?:string|null;effectiveness:"NOT_EVALUATED"|"EFFECTIVE"|"PARTIAL"|"INEFFECTIVE";effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null;effectivenessEvaluatedByName?:string|null};
 type Aar={id:string;status:"DRAFT"|"FINAL";executiveSummary:string;strengths:string;gaps:string;recommendations:string;finalizedAt?:string|null;finalizedByName?:string|null;actions:AarAction[];lessons?:Array<{id:string;category:string;recurrenceKey:string;title:string;observation:string;severity:string;createdAt:string}>};
 type Exercise={id:string;planVersion:number;planTitle:string;scenario:string;status:"IN_PROGRESS"|"COMPLETED"|"CANCELLED";result?:"PASS"|"PARTIAL"|"FAIL"|null;notes?:string|null;startedAt:string;completedAt?:string|null;summary:{total:number;completed:number;skipped:number;failed:number;pending:number;requiredPending:number;progressPct:number};steps:ExerciseStep[];aar?:Aar|null};
 type ContinuitySchedule={id:string;name:string;intervalDays:number;nextDueAt:string;defaultScenario:string;ownerUserId?:string|null;ownerName?:string|null;enabled:boolean;lastExerciseId?:string|null;dueState:"SCHEDULED"|"DUE_SOON"|"OVERDUE"|"DISABLED"};
@@ -20,7 +20,9 @@ type LessonSummary={recurrenceKey:string;category:string;occurrences:number;last
 type LessonRecent={id:string;category:string;recurrenceKey:string;title:string;observation:string;severity:string;createdAt:string;exerciseId:string;planVersion:number};
 type RiskReference={id:string;code:string;title:string;category:string;status:string;probability:number;impact:number};
 type RecoveryReference={id:string;title:string;category:string;status:string;responsible?:string|null;dueAt?:string|null};
-type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks:number;linkedRecoveryActions:number;avgCompletionHours?:number|null;onTimePct?:number|null;effective:number;partial:number;ineffective:number;awaitingEffectiveness:number};byPriority:Array<{priority:string;total:number;done:number;avgCompletionHours?:number|null}>};
+type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks:number;linkedRecoveryActions:number;avgCompletionHours?:number|null;onTimePct?:number|null;effective:number;partial:number;ineffective:number;awaitingEffectiveness:number};byPriority:Array<{priority:string;total:number;done:number;avgCompletionHours?:number|null}>;byRecurrenceKey:Array<{recurrenceKey:string;actions:number;exercises:number;effective:number;partial:number;ineffective:number;awaitingEffectiveness:number;firstExerciseAt:string;lastExerciseAt:string}>};
+type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
+type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -36,6 +38,8 @@ export default function ContinuidadePage(){
  const [riskReferences,setRiskReferences]=useState<RiskReference[]>([]);
  const [recoveryReferences,setRecoveryReferences]=useState<RecoveryReference[]>([]);
  const [actionMetrics,setActionMetrics]=useState<ActionMetrics|null>(null);
+ const [runbookRecommendations,setRunbookRecommendations]=useState<RunbookRecommendation[]>([]);
+ const [effectivenessHistory,setEffectivenessHistory]=useState<EffectivenessHistory[]>([]);
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
  const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
@@ -45,7 +49,7 @@ export default function ContinuidadePage(){
  const [evidenceDrafts,setEvidenceDrafts]=useState<Record<string,{evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash:string}>>({});
  const [selectedExerciseId,setSelectedExerciseId]=useState<string|null>(null);
  const [aarDraft,setAarDraft]=useState({executiveSummary:"",strengths:"",gaps:"",recommendations:""});
- const [actionDraft,setActionDraft]=useState({title:"",description:"",priority:"MEDIUM",ownerUserId:"",dueAt:"",riskId:"",recoveryActionId:""});
+ const [actionDraft,setActionDraft]=useState({title:"",description:"",priority:"MEDIUM",ownerUserId:"",dueAt:"",riskId:"",recoveryActionId:"",recurrenceKey:""});
  const [effectivenessDrafts,setEffectivenessDrafts]=useState<Record<string,{effectiveness:"EFFECTIVE"|"PARTIAL"|"INEFFECTIVE";notes:string}>>({});
  const [message,setMessage]=useState("");
  const [error,setError]=useState("");
@@ -64,7 +68,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -72,7 +76,9 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/action-alerts"),
     request("/api/v1/sidec/continuity/lessons"),
     request("/api/v1/sidec/continuity/action-references"),
-    request("/api/v1/sidec/continuity/actions/metrics")
+    request("/api/v1/sidec/continuity/actions/metrics"),
+    request("/api/v1/sidec/continuity/runbook/recommendations"),
+    request("/api/v1/sidec/continuity/actions/effectiveness-history")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -82,6 +88,8 @@ export default function ContinuidadePage(){
    if(ls){setLessonSummary(ls.summary??[]);setLessonRecent(ls.recent??[]);}
    if(refs){setRiskReferences(refs.risks??[]);setRecoveryReferences(refs.recoveryActions??[]);}
    if(metrics)setActionMetrics(metrics);
+   if(recommendations)setRunbookRecommendations(recommendations.items??[]);
+   if(history)setEffectivenessHistory(history.items??[]);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -200,9 +208,9 @@ export default function ContinuidadePage(){
   await request(`/api/v1/sidec/continuity/exercises/${selectedExerciseId}/aar/actions`,{method:"POST",body:JSON.stringify({
    title:actionDraft.title,description:actionDraft.description,priority:actionDraft.priority,
    ownerUserId:actionDraft.ownerUserId||null,dueAt:actionDraft.dueAt||null,
-   riskId:actionDraft.riskId||null,recoveryActionId:actionDraft.recoveryActionId||null
+   riskId:actionDraft.riskId||null,recoveryActionId:actionDraft.recoveryActionId||null,recurrenceKey:actionDraft.recurrenceKey||null
   })});
-  setActionDraft({title:"",description:"",priority:"MEDIUM",ownerUserId:"",dueAt:"",riskId:"",recoveryActionId:""});
+  setActionDraft({title:"",description:"",priority:"MEDIUM",ownerUserId:"",dueAt:"",riskId:"",recoveryActionId:"",recurrenceKey:""});
   setMessage("Ação corretiva adicionada.");
  });
 
@@ -226,6 +234,22 @@ export default function ContinuidadePage(){
   setMessage("Eficácia da ação corretiva registrada.");
  });
 
+ const promoteRecovery=(exerciseId:string,action:AarAction)=>act(async()=>{
+  if(!window.confirm(`Criar uma ação de recuperação a partir de "${action.title}"? Esta operação cria um novo registro e mantém o vínculo de origem.`))return;
+  await request(`/api/v1/sidec/continuity/exercises/${exerciseId}/aar/actions/${action.id}/promote-recovery`,{
+   method:"POST",
+   body:JSON.stringify({confirm:true,category:"CONTINUIDADE_SIDEC",responsible:action.ownerName??null,dueAt:action.dueAt??null,notes:"Promoção confirmada pelo operador no Centro de Continuidade."})
+  });
+  setMessage("Ação de recuperação criada e vinculada à ação corretiva.");
+ });
+
+ const updateRecommendation=(item:RunbookRecommendation,status:"ACCEPTED"|"IMPLEMENTED"|"DISMISSED")=>act(async()=>{
+  const defaultNote=status==="ACCEPTED"?"Recomendação aceita para análise na próxima revisão do runbook.":status==="IMPLEMENTED"?"Recomendação implementada em revisão controlada do runbook.":"Recomendação descartada após análise humana.";
+  const notes=window.prompt("Fundamentação da decisão:",defaultNote);
+  if(notes===null||notes.trim().length<5)throw new Error("Informe uma fundamentação com pelo menos 5 caracteres.");
+  await request(`/api/v1/sidec/continuity/runbook/recommendations/${item.id}`,{method:"PATCH",body:JSON.stringify({status,notes})});
+  setMessage("Recomendação de runbook atualizada.");
+ });
  const finishExercise=(id:string)=>act(async()=>{
   await request("/api/v1/sidec/continuity/exercises/"+id+"/finish",{method:"POST",body:JSON.stringify({notes:finishNotes||null})});
   setFinishNotes("");setMessage("Exercício encerrado e resultado calculado.");
