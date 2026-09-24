@@ -10,7 +10,7 @@ import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, v
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
 import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js";
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
-import { archiveSidecArtifact, enableSidecArchiveLegalHold, extendSidecArchiveRetention, verifySidecArchive, wormMode } from "../lib/sidec-worm.js";
+import { archiveSidecArtifact, archiveSidecReplica, enableSidecArchiveLegalHold, enableSidecReplicaLegalHold, extendSidecArchiveRetention, extendSidecReplicaRetention, verifySidecArchive, verifySidecReplica, wormMode, wormReplicaEnabled, wormReplicaMode } from "../lib/sidec-worm.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -449,6 +449,100 @@ async function recordArchiveVerification(input:{
   verification.objectLockMode,verification.retainUntil,verification.legalHold,input.source,verification.errorMessage
  ]);
  return verification;
+}
+
+async function recordReplicaVerification(input:{
+ org:string;exportId:string;source:"SCHEDULED"|"MANUAL"|"REPLICATION";
+ bucket:string;key:string;versionId?:string|null;expectedHash:string;
+}){
+ const verification=await verifySidecReplica({bucket:input.bucket,key:input.key,versionId:input.versionId,expectedHash:input.expectedHash});
+ await db.query(`INSERT INTO sidec_archive_replica_verifications(
+  export_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,retain_until,legal_hold,
+  verification_source,error_message
+ ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[
+  input.exportId,input.org,input.expectedHash,verification.observedHash,verification.existsRemote,verification.hashValid,
+  verification.objectLockMode,verification.retainUntil,verification.legalHold,input.source,verification.errorMessage
+ ]);
+ return verification;
+}
+
+async function createSidecArchiveReplica(org:string,id:string,userId:string){
+ if(!wormReplicaEnabled())return {enabled:false,created:false,error:"WORM_REPLICA_DISABLED"};
+ const existing=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",version_id AS "versionId",
+  content_hash AS "contentHash",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
+  legal_hold AS "legalHold",replicated_at AS "replicatedAt"
+  FROM sidec_archive_replicas WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ if(existing.rows[0]){
+  const row=existing.rows[0] as any;
+  const verification=await recordReplicaVerification({
+   org,exportId:id,source:"MANUAL",bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null,expectedHash:row.contentHash
+  });
+  return {enabled:true,created:false,receipt:row,verification};
+ }
+ const source=await db.query(`SELECT a.file_name AS "fileName",a.content_hash AS "contentHash",a.manifest_hash AS "manifestHash",a.content,
+   p.retain_until AS "retainUntil",p.legal_hold AS "legalHold",p.object_lock_mode AS "objectLockMode",
+   e.incident_id AS "incidentId",e.revision
+  FROM sidec_export_artifacts a
+  JOIN sidec_archive_receipts p ON p.export_id=a.export_id
+  JOIN sidec_exports e ON e.id=a.export_id
+  WHERE a.export_id=$1 AND a.organization_id=$2`,[id,org]);
+ const item=source.rows[0] as any;
+ if(!item)throw Object.assign(new Error("Arquivo WORM principal não encontrado."),{statusCode:409,code:"PRIMARY_ARCHIVE_REQUIRED"});
+ const archived=await archiveSidecReplica({
+  content:item.content,artifactHash:item.contentHash,manifestHash:item.manifestHash,fileName:item.fileName,
+  retention:{retainUntil:item.retainUntil?new Date(item.retainUntil):null,legalHold:Boolean(item.legalHold)}
+ });
+ const inserted=await db.query(`INSERT INTO sidec_archive_replicas(
+   export_id,organization_id,destination_code,bucket,object_key,version_id,etag,storage_class,object_lock_mode,retain_until,
+   legal_hold,content_hash,replicated_by
+  ) VALUES($1,$2,'SECONDARY',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  ON CONFLICT(export_id) DO NOTHING
+  RETURNING export_id AS "exportId",destination_code AS "destinationCode",bucket,object_key AS "objectKey",
+   version_id AS "versionId",etag,storage_class AS "storageClass",object_lock_mode AS "objectLockMode",
+   retain_until AS "retainUntil",legal_hold AS "legalHold",content_hash AS "contentHash",replicated_at AS "replicatedAt"`,[
+  id,org,archived.bucket,archived.key,archived.versionId,archived.etag,archived.storageClass,
+  archived.objectLockMode,archived.retainUntil,archived.legalHold,item.contentHash,userId
+ ]);
+ const receipt=inserted.rows[0] as any;
+ const verification=await recordReplicaVerification({
+  org,exportId:id,source:"REPLICATION",bucket:receipt.bucket,key:receipt.objectKey,versionId:receipt.versionId??null,expectedHash:item.contentHash
+ });
+ await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+  VALUES($1,'sidec_archive.replica_created',$2,$3,$4::jsonb)`,[
+  item.incidentId,userId,`Réplica WORM secundária criada para a revisão ${item.revision}.`,
+  JSON.stringify({exportId:id,destination:"SECONDARY",hashValid:verification.hashValid})
+ ]);
+ return {enabled:true,created:true,receipt,verification};
+}
+
+async function syncSidecReplicaPolicy(org:string,id:string){
+ if(!wormReplicaEnabled())return {enabled:false,synced:false,error:"WORM_REPLICA_DISABLED"};
+ const r=await db.query(`SELECT p.retain_until AS "primaryRetainUntil",p.legal_hold AS "primaryLegalHold",
+   s.bucket,s.object_key AS "objectKey",s.version_id AS "versionId",s.object_lock_mode AS "objectLockMode",
+   s.retain_until AS "replicaRetainUntil",s.legal_hold AS "replicaLegalHold",s.content_hash AS "contentHash"
+  FROM sidec_archive_receipts p JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+  WHERE p.export_id=$1 AND p.organization_id=$2`,[id,org]);
+ const row=r.rows[0] as any;
+ if(!row)return {enabled:true,synced:false,error:"REPLICA_NOT_FOUND"};
+ const primaryUntil=row.primaryRetainUntil?new Date(row.primaryRetainUntil):null;
+ const replicaUntil=row.replicaRetainUntil?new Date(row.replicaRetainUntil):null;
+ if(primaryUntil&&(!replicaUntil||primaryUntil.getTime()>replicaUntil.getTime())){
+  await extendSidecReplicaRetention({
+   bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null,
+   mode:(row.objectLockMode??wormReplicaMode()) as "GOVERNANCE"|"COMPLIANCE",retainUntil:primaryUntil
+  });
+ }
+ if(row.primaryLegalHold&&!row.replicaLegalHold){
+  await enableSidecReplicaLegalHold({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null});
+ }
+ const verification=await recordReplicaVerification({
+  org,exportId:id,source:"MANUAL",bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null,expectedHash:row.contentHash
+ });
+ await db.query(`UPDATE sidec_archive_replicas SET retain_until=$1,
+   legal_hold=$2 WHERE export_id=$3 AND organization_id=$4`,[
+  verification.retainUntil??row.replicaRetainUntil,Boolean(verification.legalHold),id,org
+ ]);
+ return {enabled:true,synced:verification.existsRemote&&verification.hashValid===true,verification};
 }
 
 export async function evaluateSidecArchiveVerifications(organizationId?:string){
