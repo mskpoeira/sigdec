@@ -69,7 +69,8 @@ const aarActionCreateSchema=z.object({
  ownerUserId:z.string().uuid().nullable().optional(),
  dueAt:z.coerce.date().nullable().optional(),
  riskId:z.string().uuid().nullable().optional(),
- recoveryActionId:z.string().uuid().nullable().optional()
+ recoveryActionId:z.string().uuid().nullable().optional(),
+ recurrenceKey:z.string().trim().min(2).max(100).regex(/^[a-z0-9][a-z0-9._-]*$/).nullable().optional()
 });
 
 const aarActionUpdateSchema=z.object({
@@ -80,11 +81,26 @@ const aarActionUpdateSchema=z.object({
  dueAt:z.coerce.date().nullable().optional(),
  riskId:z.string().uuid().nullable().optional(),
  recoveryActionId:z.string().uuid().nullable().optional(),
+ recurrenceKey:z.string().trim().min(2).max(100).regex(/^[a-z0-9][a-z0-9._-]*$/).nullable().optional(),
  status:z.enum(["OPEN","IN_PROGRESS","DONE","CANCELLED"]).optional()
 });
 
 const aarActionEffectivenessSchema=z.object({
  effectiveness:z.enum(["EFFECTIVE","PARTIAL","INEFFECTIVE"]),
+ notes:z.string().trim().min(5).max(8000)
+});
+
+const promoteRecoverySchema=z.object({
+ confirm:z.literal(true),
+ title:z.string().trim().min(3).max(240).optional(),
+ category:z.string().trim().min(2).max(100).default("CONTINUIDADE_SIDEC"),
+ responsible:z.string().trim().max(200).nullable().optional(),
+ dueAt:z.coerce.date().nullable().optional(),
+ notes:z.string().trim().max(5000).nullable().optional()
+});
+
+const recommendationUpdateSchema=z.object({
+ status:z.enum(["ACCEPTED","IMPLEMENTED","DISMISSED"]),
  notes:z.string().trim().min(5).max(8000)
 });
 
@@ -168,6 +184,49 @@ async function validateActionReferences(org:string,input:{riskId?:string|null;re
   const recovery=await db.query(`SELECT id FROM recovery_actions WHERE id=$1 AND organization_id=$2`,[input.recoveryActionId,org]);
   if(!recovery.rows[0])throw Object.assign(new Error("Ação de recuperação fora da organização ou inexistente."),{statusCode:400,code:"INVALID_RECOVERY_REFERENCE"});
  }
+}
+
+async function refreshRunbookRecommendations(org:string){
+ const recurring=await db.query(`SELECT l.recurrence_key AS "recurrenceKey",
+   count(*)::int AS occurrences,min(l.created_at) AS "firstSeenAt",max(l.created_at) AS "lastSeenAt",
+   (array_agg(l.category ORDER BY l.created_at DESC))[1] AS category,
+   (array_agg(l.title ORDER BY l.created_at DESC))[1] AS "latestTitle",
+   (array_agg(l.id ORDER BY l.created_at DESC))[1] AS "latestLessonId",
+   max(CASE l.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END)::int AS "severityRank"
+  FROM sidec_continuity_lessons l
+  JOIN sidec_continuity_aars a ON a.id=l.aar_id
+  WHERE a.organization_id=$1 AND a.status='FINAL'
+  GROUP BY l.recurrence_key
+  HAVING count(*)>=2`,[org]);
+ const severity=(rank:number)=>rank>=4?"CRITICAL":rank===3?"HIGH":rank===2?"MEDIUM":"LOW";
+ for(const row of recurring.rows as Array<any>){
+  const active=await db.query(`SELECT id FROM sidec_continuity_runbook_recommendations
+    WHERE organization_id=$1 AND recurrence_key=$2 AND status IN ('OPEN','ACCEPTED')
+    ORDER BY created_at DESC LIMIT 1`,[org,row.recurrenceKey]);
+  const rationale=`A lição ${row.recurrenceKey} apareceu ${row.occurrences} vezes em AARs finalizados. Recomenda-se revisão humana do runbook para verificar controles, responsáveis e instruções relacionados.`;
+  if(active.rows[0]){
+   await db.query(`UPDATE sidec_continuity_runbook_recommendations
+     SET category=$1,severity=$2,title=$3,rationale=$4,occurrences=$5,first_seen_at=$6,last_seen_at=$7,
+       latest_lesson_id=$8,updated_at=now()
+     WHERE id=$9`,[
+      row.category,severity(Number(row.severityRank)),`Revisar runbook: ${row.latestTitle}`,rationale,
+      row.occurrences,row.firstSeenAt,row.lastSeenAt,row.latestLessonId,active.rows[0].id
+    ]);
+   continue;
+  }
+  const resolved=await db.query(`SELECT last_seen_at AS "lastSeenAt" FROM sidec_continuity_runbook_recommendations
+    WHERE organization_id=$1 AND recurrence_key=$2 AND status IN ('IMPLEMENTED','DISMISSED')
+    ORDER BY created_at DESC LIMIT 1`,[org,row.recurrenceKey]);
+  const resolvedSeen=resolved.rows[0]?.lastSeenAt?new Date(resolved.rows[0].lastSeenAt).getTime():0;
+  if(resolvedSeen>=new Date(row.lastSeenAt).getTime())continue;
+  await db.query(`INSERT INTO sidec_continuity_runbook_recommendations(
+    organization_id,recurrence_key,category,severity,title,rationale,occurrences,first_seen_at,last_seen_at,latest_lesson_id
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[
+    org,row.recurrenceKey,row.category,severity(Number(row.severityRank)),`Revisar runbook: ${row.latestTitle}`,
+    rationale,row.occurrences,row.firstSeenAt,row.lastSeenAt,row.latestLessonId
+   ]);
+ }
+ return {evaluated:recurring.rows.length};
 }
 
 async function loadExercise(org:string,id:string){
