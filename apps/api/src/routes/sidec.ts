@@ -8,6 +8,7 @@ import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type Sidec
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
 import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, verifySidecManifestSignature } from "../lib/sidec-signature.js";
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
+import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js";
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
@@ -1038,6 +1039,38 @@ export async function sidecRoutes(app:FastifyInstance){
    reply.header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${proof.export.revision}-evidencias.json"`);
   }
   return evidence;
+ });
+
+ app.get("/api/v1/sidec-exports/:id/custody-pdf",{preHandler:requirePermission("sidec_custody.read")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const proof=await buildSidecIntegrityProof(org,id,auth.userId);
+  const base=await db.query(`SELECT i.id AS "incidentId",i.protocol,o.name AS "organizationName"
+    FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id JOIN organizations o ON o.id=e.organization_id
+    WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
+  const row=base.rows[0] as {incidentId:string;protocol:string;organizationName:string}|undefined;
+  if(!row)return reply.code(404).send({error:"NOT_FOUND"});
+  const [timeline,audits,verifications]=await Promise.all([
+   db.query(`SELECT occurred_at AS "occurredAt",event_type AS "eventType",COALESCE(note,'Evento SIDEC') AS description
+     FROM incident_timeline WHERE incident_id=$1 AND event_type LIKE 'sidec_%' ORDER BY occurred_at`,[row.incidentId]),
+   db.query(`SELECT occurred_at AS "occurredAt",action AS "eventType",
+     COALESCE(action,'Auditoria SIDEC') || CASE WHEN entity_type IS NOT NULL THEN ' · '||entity_type ELSE '' END AS description
+     FROM audit_logs WHERE entity_id=$1 OR metadata->>'exportId'=$1 ORDER BY occurred_at`,[id]),
+   db.query(`SELECT verified_at AS "occurredAt",'integrity.'||verification_source AS "eventType",
+     'Verificação de integridade: '||CASE WHEN overall_valid THEN 'válida' ELSE 'inválida' END AS description
+     FROM sidec_integrity_verifications WHERE export_id=$1 AND organization_id=$2 ORDER BY verified_at`,[id,org])
+  ]);
+  const events=[...timeline.rows,...audits.rows,...verifications.rows]
+   .map((x:any)=>({occurredAt:x.occurredAt,eventType:String(x.eventType),description:String(x.description)}) satisfies CustodyEvent)
+   .sort((a,b)=>new Date(a.occurredAt).getTime()-new Date(b.occurredAt).getTime());
+  const pdf=await buildSidecCustodyPdf({
+   organizationName:row.organizationName,protocol:row.protocol,revision:proof.export.revision,
+   proof,publicUrl:proof.publicVerificationUrl,events
+  });
+  const safe=row.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
+  return reply.type("application/pdf")
+   .header("Content-Disposition",`attachment; filename="SIDEC-${safe}-R${proof.export.revision}-cadeia-custodia.pdf"`)
+   .header("Content-Length",String(pdf.length))
+   .send(pdf);
  });
 
  app.get("/api/v1/sidec-exports/:id/integrity-verifications",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
