@@ -10,7 +10,7 @@ type ExportDocument={id:string;number?:string|null;title:string;documentType:str
 type SidecExport={
  id:string;revision:number;schemaVersion:string;status:string;snapshotHash:string;manifestHash?:string|null;
  externalProtocol?:string|null;externalNotes?:string|null;exportedAt?:string|null;submittedAt?:string|null;
- acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];artifactSealed:boolean;artifactHash?:string|null;manifestSignature?:string|null;artifactSignedAt?:string|null;
+ acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];artifactSealed:boolean;artifactHash?:string|null;manifestSignature?:string|null;signingKeyId?:string|null;artifactSignedAt?:string|null;retentionClass?:string|null;retainUntil?:string|null;legalHold?:boolean|null;retentionNotes?:string|null;
 };
 type Mapping={sourcePath:string;targetField:string;required:boolean;enabled:boolean;sortOrder:number};
 type Check={code:string;label:string;required:boolean;ok:boolean;detail?:string};
@@ -219,6 +219,22 @@ export default function SidecExportsPage(){
   finally{setBusy(false)}
  }
 
+ async function saveRetention(item:SidecExport,event:FormEvent<HTMLFormElement>){
+  event.preventDefault();setBusy(true);setMessage("");
+  const form=new FormData(event.currentTarget);
+  try{
+   await request(`/api/v1/sidec-exports/${item.id}/retention`,{method:"PATCH",body:JSON.stringify({
+    retentionClass:String(form.get("retentionClass")||"UNSPECIFIED"),
+    retainUntil:String(form.get("retainUntil")||"")||null,
+    legalHold:form.get("legalHold")==="on",
+    notes:String(form.get("retentionNotes")||"")||null
+   })});
+   setMessage("Metadados de retenção atualizados sem alterar o ZIP selado.");
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao atualizar retenção.");}
+  finally{setBusy(false)}
+ }
+
  async function changeStatus(id:string,status:string){
   setBusy(true);setMessage("");
   try{
@@ -338,7 +354,7 @@ export default function SidecExportsPage(){
      <p><strong>{statusLabels[item.status]??item.status}</strong> · schema {item.schemaVersion}</p>
      <p>Gerado em {new Date(item.createdAt).toLocaleString("pt-BR")}</p>
      <p style={{overflowWrap:"anywhere"}}><strong>Snapshot SHA-256:</strong> {item.snapshotHash}</p>{item.manifestHash&&<p style={{overflowWrap:"anywhere"}}><strong>Manifesto SHA-256:</strong> {item.manifestHash}</p>}
-     {item.artifactSealed&&<><p style={{overflowWrap:"anywhere"}}><strong>ZIP selado SHA-256:</strong> {item.artifactHash}</p><p style={{overflowWrap:"anywhere"}}><strong>Assinatura interna HMAC-SHA256:</strong> {item.manifestSignature}</p>{item.artifactSignedAt&&<p>Selado em {new Date(item.artifactSignedAt).toLocaleString("pt-BR")}</p>}</>}{item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
+     {item.artifactSealed&&<><p style={{overflowWrap:"anywhere"}}><strong>ZIP selado SHA-256:</strong> {item.artifactHash}</p><p style={{overflowWrap:"anywhere"}}><strong>Assinatura interna HMAC-SHA256:</strong> {item.manifestSignature}</p><p><strong>Chave HMAC:</strong> {item.signingKeyId??"legacy-v1"}</p>{item.artifactSignedAt&&<p>Selado em {new Date(item.artifactSignedAt).toLocaleString("pt-BR")}</p>}<form className="incidentForm compactForm" style={{marginTop:10}} onSubmit={e=>void saveRetention(item,e)}><strong>Retenção do artefato</strong><label>Classe<select name="retentionClass" defaultValue={item.retentionClass??"UNSPECIFIED"}><option value="UNSPECIFIED">Não definida</option><option value="OPERATIONAL">Operacional</option><option value="ARCHIVAL">Arquivística</option><option value="LEGAL_HOLD">Preservação / legal hold</option></select></label><label>Reter até<input type="date" name="retainUntil" defaultValue={item.retainUntil?String(item.retainUntil).slice(0,10):""}/></label><label><input type="checkbox" name="legalHold" defaultChecked={Boolean(item.legalHold)}/> Legal hold</label><label>Observação<textarea name="retentionNotes" defaultValue={item.retentionNotes??""}/></label><button className="secondaryLink" disabled={busy}>Salvar retenção</button></form></>}{item.externalProtocol&&<p><strong>Protocolo externo:</strong> {item.externalProtocol}</p>}
      {item.externalNotes&&<p>{item.externalNotes}</p>}
 
      {item.documents?.length>0&&<div><strong>Documentos do pacote</strong><ul>{item.documents.map(doc=><li key={doc.id}><a href={documentPdfUrl(doc.id)} target="_blank" rel="noreferrer">{doc.number??"Documento"} · {doc.title} · R{doc.revision}</a></li>)}</ul></div>}
