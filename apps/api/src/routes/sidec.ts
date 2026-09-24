@@ -210,6 +210,63 @@ export async function sidecRoutes(app:FastifyInstance){
   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
  });
 
+ app.get("/api/v1/sidec/document-requirements",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const query=request.query as {scopeType?:string;scopeValue?:string};
+  const params:[string,...unknown[]]=[org];
+  let where="organization_id=$1";
+  if(query.scopeType){params.push(query.scopeType);where+=` AND scope_type=${params.length}`;}
+  if(query.scopeValue){params.push(query.scopeValue);where+=` AND scope_value=${params.length}`;}
+  const r=await db.query(`SELECT id,scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
+    label,min_count AS "minCount",required,enabled,created_at AS "createdAt",updated_at AS "updatedAt"
+    FROM sidec_document_requirements WHERE ${where}
+    ORDER BY scope_type,scope_value,document_type`,params);
+  return {items:r.rows};
+ });
+
+ app.put("/api/v1/sidec/document-requirements",{preHandler:requirePermission("sidec_document_requirements.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=documentRequirementsUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const scopeType=parsed.data.scopeType;
+  const scopeValue=scopeType==="DEFAULT"?"*":parsed.data.scopeValue;
+  const seen=new Set<string>();
+  for(const item of parsed.data.items){
+   if(seen.has(item.documentType))return reply.code(400).send({error:"DUPLICATE_DOCUMENT_TYPE",documentType:item.documentType});
+   seen.add(item.documentType);
+  }
+  if(scopeType==="COBRADE"){
+   const catalogCount=await db.query(`SELECT count(*)::int AS count FROM cobrade_catalog WHERE organization_id=$1 AND active=true`,[org]);
+   if(Number(catalogCount.rows[0]?.count??0)>0){
+    const valid=await db.query(`SELECT 1 FROM cobrade_catalog WHERE organization_id=$1 AND code=$2 AND active=true`,[org,scopeValue]);
+    if(!valid.rows[0])return reply.code(400).send({error:"COBRADE_NOT_IN_CATALOG"});
+   }
+  }
+  if(scopeType==="INCIDENT_TYPE"){
+   const valid=await db.query(`SELECT 1 FROM incident_types WHERE code=$1 AND active=true`,[scopeValue]);
+   if(!valid.rows[0])return reply.code(400).send({error:"INCIDENT_TYPE_NOT_FOUND"});
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const before=await client.query(`SELECT scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
+     label,min_count AS "minCount",required,enabled FROM sidec_document_requirements
+     WHERE organization_id=$1 AND scope_type=$2 AND scope_value=$3 ORDER BY document_type`,[org,scopeType,scopeValue]);
+   await client.query(`DELETE FROM sidec_document_requirements WHERE organization_id=$1 AND scope_type=$2 AND scope_value=$3`,[org,scopeType,scopeValue]);
+   for(const item of parsed.data.items){
+    await client.query(`INSERT INTO sidec_document_requirements(
+      organization_id,scope_type,scope_value,document_type,label,min_count,required,enabled,created_by
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [org,scopeType,scopeValue,item.documentType,item.label,item.minCount,item.required,item.enabled,auth.userId]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,ip,user_agent,before_data,after_data,metadata)
+     VALUES($1,'sidec_document_requirements.replace','sidec_document_requirements',$2,$3,$4::jsonb,$5::jsonb,$6::jsonb)`,
+    [auth.userId,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows),JSON.stringify(parsed.data.items),JSON.stringify({scopeType,scopeValue})]);
+   await client.query("COMMIT");
+   return {scopeType,scopeValue,items:parsed.data.items};
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
+
  app.get("/api/v1/incidents/:id/sidec-readiness",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
   const incident=await db.query(`SELECT i.id,i.protocol,i.status,i.priority,i.risk_to_life AS "riskToLife",i.summary,i.description,i.source,
