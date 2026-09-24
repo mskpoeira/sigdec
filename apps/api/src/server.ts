@@ -11,7 +11,7 @@ import { fieldRoutes } from "./routes/field.js";
 import { commandRoutes } from "./routes/command.js";
 import { planningRoutes } from "./routes/planning.js";
 import { documentRoutes } from "./routes/documents.js";
-import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, sidecRoutes } from "./routes/sidec.js";
+import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 const app=Fastify({logger:true,trustProxy:true});
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
@@ -29,3 +29,9 @@ const evaluateArchives=()=>evaluateSidecArchiveVerifications().catch(error=>app.
 void evaluateArchives();
 const sidecArchiveTimer=setInterval(evaluateArchives,sidecArchiveVerificationMinutes*60*1000);
 sidecArchiveTimer.unref();
+
+const sidecResilienceMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_RESILIENCE_EVALUATION_MINUTES??15)));
+const evaluateResilience=()=>evaluateSidecResilience().catch(error=>app.log.error({err:error},"Falha ao avaliar resiliência WORM SIDEC."));
+void evaluateResilience();
+const sidecResilienceTimer=setInterval(evaluateResilience,sidecResilienceMinutes*60*1000);
+sidecResilienceTimer.unref();
