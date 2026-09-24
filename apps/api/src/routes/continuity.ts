@@ -281,7 +281,7 @@ async function loadExercise(org:string,id:string){
      ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt",
      ai.risk_id AS "riskId",r.code AS "riskCode",r.title AS "riskTitle",
      ai.recovery_action_id AS "recoveryActionId",ra.title AS "recoveryActionTitle",ra.status AS "recoveryActionStatus",
-     ai.effectiveness,ai.effectiveness_notes AS "effectivenessNotes",
+     ai.recurrence_key AS "recurrenceKey",ai.effectiveness,ai.effectiveness_notes AS "effectivenessNotes",
      ai.effectiveness_evaluated_at AS "effectivenessEvaluatedAt",evaluator.display_name AS "effectivenessEvaluatedByName"
     FROM sidec_continuity_action_items ai
     LEFT JOIN users owner ON owner.id=ai.owner_user_id
@@ -853,12 +853,12 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!aar.rows[0])return reply.code(409).send({error:"AAR_DRAFT_REQUIRED"});
   if(aar.rows[0].status!=="DRAFT")return reply.code(409).send({error:"AAR_IMMUTABLE"});
   const created=await db.query(`INSERT INTO sidec_continuity_action_items(
-    aar_id,title,description,priority,owner_user_id,due_at,risk_id,recovery_action_id
-   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+    aar_id,title,description,priority,owner_user_id,due_at,risk_id,recovery_action_id,recurrence_key
+   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
    RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",status,
-    risk_id AS "riskId",recovery_action_id AS "recoveryActionId",effectiveness,created_at AS "createdAt"`,[
+    risk_id AS "riskId",recovery_action_id AS "recoveryActionId",recurrence_key AS "recurrenceKey",effectiveness,created_at AS "createdAt"`,[
     aar.rows[0].id,parsed.data.title,parsed.data.description,parsed.data.priority,parsed.data.ownerUserId??null,
-    parsed.data.dueAt??null,parsed.data.riskId??null,parsed.data.recoveryActionId??null
+    parsed.data.dueAt??null,parsed.data.riskId??null,parsed.data.recoveryActionId??null,parsed.data.recurrenceKey??null
   ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_create','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),JSON.stringify({exerciseId:id})]);
   return reply.code(201).send(created.rows[0]);
@@ -871,21 +871,22 @@ export async function continuityRoutes(app:FastifyInstance){
   await validateActionReferences(org,{riskId:parsed.data.riskId,recoveryActionId:parsed.data.recoveryActionId});
   const current=await db.query(`SELECT ai.*,a.status AS aar_status FROM sidec_continuity_action_items ai JOIN sidec_continuity_aars a ON a.id=ai.aar_id WHERE ai.id=$1 AND a.exercise_id=$2 AND a.organization_id=$3`,[actionId,exerciseId,org]);
   const row=current.rows[0] as any;if(!row)return reply.code(404).send({error:"ACTION_NOT_FOUND"});
-  const contentChange=parsed.data.title!==undefined||parsed.data.description!==undefined||parsed.data.priority!==undefined||parsed.data.ownerUserId!==undefined||parsed.data.dueAt!==undefined||parsed.data.riskId!==undefined||parsed.data.recoveryActionId!==undefined;
+  const contentChange=parsed.data.title!==undefined||parsed.data.description!==undefined||parsed.data.priority!==undefined||parsed.data.ownerUserId!==undefined||parsed.data.dueAt!==undefined||parsed.data.riskId!==undefined||parsed.data.recoveryActionId!==undefined||parsed.data.recurrenceKey!==undefined;
   if(row.aar_status==="FINAL"&&contentChange)return reply.code(409).send({error:"AAR_ACTION_CONTENT_IMMUTABLE"});
   const nextStatus=parsed.data.status??row.status;const completedAt=nextStatus==="DONE"?(row.completed_at??new Date()):null;
   const updated=await db.query(`UPDATE sidec_continuity_action_items SET
     title=$1,description=$2,priority=$3,owner_user_id=$4,due_at=$5,risk_id=$6,recovery_action_id=$7,
-    status=$8,completed_at=$9,updated_at=now()
-    WHERE id=$10
+    recurrence_key=$8,status=$9,completed_at=$10,updated_at=now()
+    WHERE id=$11
     RETURNING id,title,description,priority,owner_user_id AS "ownerUserId",due_at AS "dueAt",
-      risk_id AS "riskId",recovery_action_id AS "recoveryActionId",status,completed_at AS "completedAt",
-      effectiveness,updated_at AS "updatedAt"`,[
+      risk_id AS "riskId",recovery_action_id AS "recoveryActionId",recurrence_key AS "recurrenceKey",
+      status,completed_at AS "completedAt",effectiveness,updated_at AS "updatedAt"`,[
     parsed.data.title??row.title,parsed.data.description??row.description,parsed.data.priority??row.priority,
     parsed.data.ownerUserId===undefined?row.owner_user_id:parsed.data.ownerUserId,
     parsed.data.dueAt===undefined?row.due_at:parsed.data.dueAt,
     parsed.data.riskId===undefined?row.risk_id:parsed.data.riskId,
     parsed.data.recoveryActionId===undefined?row.recovery_action_id:parsed.data.recoveryActionId,
+    parsed.data.recurrenceKey===undefined?row.recurrence_key:parsed.data.recurrenceKey,
     nextStatus,completedAt,actionId
   ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata) VALUES($1,'sidec_continuity.aar_action_update','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(updated.rows[0]),JSON.stringify({exerciseId})]);
@@ -921,13 +922,133 @@ export async function continuityRoutes(app:FastifyInstance){
    FROM sidec_continuity_action_items ai
    JOIN sidec_continuity_aars a ON a.id=ai.aar_id
    WHERE a.organization_id=$1`,[org]);
-  const byPriority=await db.query(`SELECT ai.priority,count(*)::int AS total,
+  const [byPriority,byRecurrenceKey]=await Promise.all([
+   db.query(`SELECT ai.priority,count(*)::int AS total,
     count(*) FILTER(WHERE ai.status='DONE')::int AS done,
     round(avg(EXTRACT(EPOCH FROM (ai.completed_at-ai.created_at))/3600.0) FILTER(WHERE ai.completed_at IS NOT NULL)::numeric,1) AS "avgCompletionHours"
    FROM sidec_continuity_action_items ai JOIN sidec_continuity_aars a ON a.id=ai.aar_id
    WHERE a.organization_id=$1 GROUP BY ai.priority
-   ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`,[org]);
-  return {summary:summary.rows[0],byPriority:byPriority.rows};
+   ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`,[org]),
+   db.query(`SELECT ai.recurrence_key AS "recurrenceKey",count(*)::int AS actions,
+    count(DISTINCT a.exercise_id)::int AS exercises,
+    count(*) FILTER(WHERE ai.effectiveness='EFFECTIVE')::int AS effective,
+    count(*) FILTER(WHERE ai.effectiveness='PARTIAL')::int AS partial,
+    count(*) FILTER(WHERE ai.effectiveness='INEFFECTIVE')::int AS ineffective,
+    count(*) FILTER(WHERE ai.status='DONE' AND ai.effectiveness='NOT_EVALUATED')::int AS "awaitingEffectiveness",
+    min(e.started_at) AS "firstExerciseAt",max(e.started_at) AS "lastExerciseAt"
+   FROM sidec_continuity_action_items ai
+   JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+   JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+   WHERE a.organization_id=$1 AND ai.recurrence_key IS NOT NULL
+   GROUP BY ai.recurrence_key
+   ORDER BY count(DISTINCT a.exercise_id) DESC,max(e.started_at) DESC`,[org])
+  ]);
+  return {summary:summary.rows[0],byPriority:byPriority.rows,byRecurrenceKey:byRecurrenceKey.rows};
+ });
+
+ app.get("/api/v1/sidec/continuity/actions/effectiveness-history",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const r=await db.query(`SELECT ai.recurrence_key AS "recurrenceKey",e.id AS "exerciseId",p.version AS "planVersion",
+    e.started_at AS "startedAt",e.completed_at AS "completedAt",ai.id AS "actionId",ai.title,ai.status,ai.effectiveness,
+    ai.effectiveness_notes AS "effectivenessNotes",ai.effectiveness_evaluated_at AS "effectivenessEvaluatedAt"
+   FROM sidec_continuity_action_items ai
+   JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+   JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+   JOIN sidec_continuity_plans p ON p.id=e.plan_id
+   WHERE a.organization_id=$1 AND ai.recurrence_key IS NOT NULL
+   ORDER BY ai.recurrence_key,e.started_at,ai.created_at`,[org]);
+  const groups=new Map<string,any[]>();
+  for(const row of r.rows as Array<any>){
+   const key=String(row.recurrenceKey),list=groups.get(key)??[];list.push(row);groups.set(key,list);
+  }
+  return {items:[...groups.entries()].map(([recurrenceKey,history])=>({recurrenceKey,history}))};
+ });
+
+ app.get("/api/v1/sidec/continuity/runbook/recommendations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  await refreshRunbookRecommendations(org);
+  const r=await db.query(`SELECT rr.id,rr.recurrence_key AS "recurrenceKey",rr.category,rr.severity,rr.title,rr.rationale,
+    rr.occurrences,rr.first_seen_at AS "firstSeenAt",rr.last_seen_at AS "lastSeenAt",rr.status,
+    rr.resolution_notes AS "resolutionNotes",rr.created_at AS "createdAt",rr.updated_at AS "updatedAt",
+    u.display_name AS "resolvedByName"
+   FROM sidec_continuity_runbook_recommendations rr
+   LEFT JOIN users u ON u.id=rr.resolved_by
+   WHERE rr.organization_id=$1
+   ORDER BY CASE rr.status WHEN 'OPEN' THEN 1 WHEN 'ACCEPTED' THEN 2 ELSE 3 END,
+    CASE rr.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
+    rr.last_seen_at DESC`,[org]);
+  return {items:r.rows};
+ });
+
+ app.patch("/api/v1/sidec/continuity/runbook/recommendations/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=recommendationUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const before=await db.query(`SELECT * FROM sidec_continuity_runbook_recommendations WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const row=before.rows[0] as any;if(!row)return reply.code(404).send({error:"NOT_FOUND"});
+  if(row.status==="IMPLEMENTED"||row.status==="DISMISSED")return reply.code(409).send({error:"RECOMMENDATION_ALREADY_RESOLVED"});
+  if(row.status==="OPEN"&&parsed.data.status==="IMPLEMENTED")return reply.code(409).send({error:"ACCEPT_RECOMMENDATION_FIRST"});
+  const resolved=parsed.data.status==="IMPLEMENTED"||parsed.data.status==="DISMISSED";
+  const updated=await db.query(`UPDATE sidec_continuity_runbook_recommendations SET status=$1,resolution_notes=$2,
+    resolved_by=CASE WHEN $3 THEN $4 ELSE NULL END,resolved_at=CASE WHEN $3 THEN now() ELSE NULL END,updated_at=now()
+    WHERE id=$5 AND organization_id=$6
+    RETURNING id,recurrence_key AS "recurrenceKey",status,resolution_notes AS "resolutionNotes",resolved_at AS "resolvedAt"`,[
+    parsed.data.status,parsed.data.notes,resolved,auth.userId,id,org
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.runbook_recommendation_update','sidec_continuity_runbook_recommendation',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(updated.rows[0])
+  ]);
+  return updated.rows[0];
+ });
+
+ app.post("/api/v1/sidec/continuity/exercises/:exerciseId/aar/actions/:actionId/promote-recovery",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{exerciseId,actionId}=request.params as {exerciseId:string;actionId:string};
+  const parsed=promoteRecoverySchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const current=await db.query(`SELECT ai.*,a.status AS aar_status,a.id AS aar_id,e.plan_id,
+    owner.display_name AS "ownerName",p.version AS "planVersion"
+   FROM sidec_continuity_action_items ai
+   JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+   JOIN sidec_continuity_exercises e ON e.id=a.exercise_id
+   JOIN sidec_continuity_plans p ON p.id=e.plan_id
+   LEFT JOIN users owner ON owner.id=ai.owner_user_id
+   WHERE ai.id=$1 AND a.exercise_id=$2 AND a.organization_id=$3`,[actionId,exerciseId,org]);
+  const row=current.rows[0] as any;if(!row)return reply.code(404).send({error:"ACTION_NOT_FOUND"});
+  if(row.aar_status!=="FINAL")return reply.code(409).send({error:"FINAL_AAR_REQUIRED"});
+  if(row.status==="CANCELLED")return reply.code(409).send({error:"CANCELLED_ACTION_NOT_PROMOTABLE"});
+  if(row.recovery_action_id)return reply.code(409).send({error:"RECOVERY_ALREADY_LINKED",recoveryActionId:row.recovery_action_id});
+  const existing=await db.query(`SELECT id FROM recovery_actions WHERE source_continuity_action_id=$1 AND organization_id=$2`,[actionId,org]);
+  if(existing.rows[0]){
+   await db.query(`UPDATE sidec_continuity_action_items SET recovery_action_id=$1,updated_at=now() WHERE id=$2`,[existing.rows[0].id,actionId]);
+   return {recoveryActionId:existing.rows[0].id,reused:true};
+  }
+  const responsible=parsed.data.responsible??row.ownerName??null;
+  const dueAt=parsed.data.dueAt??row.due_at??null;
+  const notes=[
+   `Origem: ação corretiva do AAR de continuidade SIDEC, runbook v${row.planVersion}.`,
+   row.description?String(row.description):null,
+   parsed.data.notes??null
+  ].filter(Boolean).join("\n\n").slice(0,5000);
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const created=await client.query(`INSERT INTO recovery_actions(
+      organization_id,title,category,status,responsible,due_at,notes,source_continuity_action_id
+     ) VALUES($1,$2,$3,'PLANNED',$4,$5,$6,$7)
+     RETURNING id,title,category,status,responsible,due_at AS "dueAt"`,[
+      org,parsed.data.title??row.title,parsed.data.category,responsible,dueAt,notes,actionId
+    ]);
+   const recovery=created.rows[0];
+   await client.query(`UPDATE sidec_continuity_action_items SET recovery_action_id=$1,updated_at=now() WHERE id=$2`,[recovery.id,actionId]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+     VALUES($1,'sidec_continuity.action_promote_recovery','sidec_continuity_action_item',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+      auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify(row),JSON.stringify(recovery),
+      JSON.stringify({exerciseId,confirmed:true})
+    ]);
+   await client.query("COMMIT");
+   return reply.code(201).send({recoveryAction:recovery,reused:false});
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
  });
 
  app.patch("/api/v1/sidec/continuity/exercises/:exerciseId/aar/actions/:actionId/effectiveness",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
@@ -963,6 +1084,7 @@ export async function continuityRoutes(app:FastifyInstance){
   if(incomplete.length)return reply.code(409).send({error:"AAR_ACTIONS_INCOMPLETE",actionIds:incomplete.map((action:any)=>action.id)});
   await db.query(`UPDATE sidec_continuity_aars SET status='FINAL',finalized_by=$1,finalized_at=now(),updated_at=now() WHERE id=$2 AND organization_id=$3 AND status='DRAFT'`,[auth.userId,aar.id,org]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,'sidec_continuity.aar_finalize','sidec_continuity_aar',$2,$3,$4,$5::jsonb)`,[auth.userId,aar.id,request.ip,request.headers["user-agent"]??null,JSON.stringify({exerciseId:id,actions:(aar.actions??[]).length})]);
+  await refreshRunbookRecommendations(org);
   return loadExercise(org,id);
  });
 
