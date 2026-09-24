@@ -13,6 +13,11 @@ type ExerciseStep={stepId:string;phase:string;title:string;instructions:string;e
 type AarAction={id:string;title:string;description?:string|null;priority:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";ownerUserId?:string|null;ownerName?:string|null;dueAt?:string|null;status:"OPEN"|"IN_PROGRESS"|"DONE"|"CANCELLED"};
 type Aar={id:string;status:"DRAFT"|"FINAL";executiveSummary:string;strengths:string;gaps:string;recommendations:string;finalizedAt?:string|null;finalizedByName?:string|null;actions:AarAction[]};
 type Exercise={id:string;planVersion:number;planTitle:string;scenario:string;status:"IN_PROGRESS"|"COMPLETED"|"CANCELLED";result?:"PASS"|"PARTIAL"|"FAIL"|null;notes?:string|null;startedAt:string;completedAt?:string|null;summary:{total:number;completed:number;skipped:number;failed:number;pending:number;requiredPending:number;progressPct:number};steps:ExerciseStep[];aar?:Aar|null};
+type ContinuitySchedule={id:string;name:string;intervalDays:number;nextDueAt:string;defaultScenario:string;ownerUserId?:string|null;ownerName?:string|null;enabled:boolean;lastExerciseId?:string|null;dueState:"SCHEDULED"|"DUE_SOON"|"OVERDUE"|"DISABLED"};
+type ContinuityContact={id:string;contactScope:"INTERNAL"|"EXTERNAL";escalationLevel:number;name:string;roleTitle?:string|null;organizationName?:string|null;channelType:"PHONE"|"EMAIL"|"RADIO"|"OTHER";channelValue:string;notes?:string|null;active:boolean};
+type ActionAlert={id:string;actionId:string;alertType:"DUE_SOON"|"OVERDUE";dueAt:string;detectedAt:string;title:string;priority:string;status:string;ownerName?:string|null;exerciseId:string;scenario:string;planVersion:number};
+type LessonSummary={recurrenceKey:string;category:string;occurrences:number;lastSeenAt:string;titles:string[]};
+type LessonRecent={id:string;category:string;recurrenceKey:string;title:string;observation:string;severity:string;createdAt:string;exerciseId:string;planVersion:number};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -20,6 +25,14 @@ const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL
 export default function ContinuidadePage(){
  const [runbook,setRunbook]=useState<RunbookData|null>(null);
  const [exercises,setExercises]=useState<Exercise[]>([]);
+ const [schedules,setSchedules]=useState<ContinuitySchedule[]>([]);
+ const [contacts,setContacts]=useState<ContinuityContact[]>([]);
+ const [actionAlerts,setActionAlerts]=useState<ActionAlert[]>([]);
+ const [lessonSummary,setLessonSummary]=useState<LessonSummary[]>([]);
+ const [lessonRecent,setLessonRecent]=useState<LessonRecent[]>([]);
+ const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
+ const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
+ const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
  const [scenario,setScenario]=useState("Exercício de mesa para validar o Plano de Continuidade SIDEC, responsáveis, preservação, recuperação, validação e retorno à normalidade.");
  const [finishNotes,setFinishNotes]=useState("");
  const [stepNotes,setStepNotes]=useState<Record<string,string>>({});
@@ -44,9 +57,20 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e]=await Promise.all([request("/api/v1/sidec/continuity/runbook"),request("/api/v1/sidec/continuity/exercises")]);
+   const [r,e,s,cnt,aa,ls]=await Promise.all([
+    request("/api/v1/sidec/continuity/runbook"),
+    request("/api/v1/sidec/continuity/exercises"),
+    request("/api/v1/sidec/continuity/schedules"),
+    request("/api/v1/sidec/continuity/contacts"),
+    request("/api/v1/sidec/continuity/action-alerts"),
+    request("/api/v1/sidec/continuity/lessons")
+   ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
+   if(s)setSchedules(s.items??[]);
+   if(cnt)setContacts(cnt.items??[]);
+   if(aa)setActionAlerts(aa.items??[]);
+   if(ls){setLessonSummary(ls.summary??[]);setLessonRecent(ls.recent??[]);}
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -68,6 +92,45 @@ export default function ContinuidadePage(){
   if(!runbook?.draft)return;
   patchDraft({steps:runbook.draft.steps.map((step,i)=>i===index?{...step,...patch}:step)});
  }
+
+ const createSchedule=()=>act(async()=>{
+  await request("/api/v1/sidec/continuity/schedules",{method:"POST",body:JSON.stringify({
+   name:scheduleDraft.name,intervalDays:scheduleDraft.intervalDays,nextDueAt:scheduleDraft.nextDueAt,
+   defaultScenario:scheduleDraft.defaultScenario,ownerUserId:scheduleDraft.ownerUserId||null,enabled:true
+  })});
+  setMessage("Agenda periódica criada.");
+ });
+ const toggleSchedule=(item:ContinuitySchedule)=>act(async()=>{
+  await request("/api/v1/sidec/continuity/schedules/"+item.id,{method:"PATCH",body:JSON.stringify({enabled:!item.enabled})});
+  setMessage(item.enabled?"Agenda pausada.":"Agenda reativada.");
+ });
+ const startScheduledExercise=(item:ContinuitySchedule)=>act(async()=>{
+  await request("/api/v1/sidec/continuity/exercises",{method:"POST",body:JSON.stringify({scheduleId:item.id})});
+  setMessage("Exercício agendado iniciado de forma controlada.");
+ });
+ const createContact=()=>act(async()=>{
+  await request("/api/v1/sidec/continuity/contacts",{method:"POST",body:JSON.stringify({
+   contactScope:contactDraft.contactScope,escalationLevel:contactDraft.escalationLevel,name:contactDraft.name,
+   roleTitle:contactDraft.roleTitle||null,organizationName:contactDraft.organizationName||null,
+   channelType:contactDraft.channelType,channelValue:contactDraft.channelValue,notes:contactDraft.notes||null,active:true
+  })});
+  setContactDraft({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
+  setMessage("Contato incluído na matriz de escalonamento.");
+ });
+ const toggleContact=(item:ContinuityContact)=>act(async()=>{
+  await request("/api/v1/sidec/continuity/contacts/"+item.id,{method:"PATCH",body:JSON.stringify({active:!item.active})});
+  setMessage(item.active?"Contato desativado.":"Contato reativado.");
+ });
+ const acknowledgeActionAlert=(id:string)=>act(async()=>{
+  await request("/api/v1/sidec/continuity/action-alerts/"+id+"/ack",{method:"PATCH",body:"{}"});
+  setMessage("Alerta da ação corretiva reconhecido.");
+ });
+ const addLesson=()=>act(async()=>{
+  if(!selectedExerciseId)return;
+  await request(`/api/v1/sidec/continuity/exercises/${selectedExerciseId}/aar/lessons`,{method:"POST",body:JSON.stringify(lessonDraft)});
+  setLessonDraft({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
+  setMessage("Lição aprendida estruturada adicionada ao AAR.");
+ });
 
  const createRevision=()=>act(async()=>{
   await request("/api/v1/sidec/continuity/runbook/revisions",{method:"POST",body:JSON.stringify({cloneActive:true})});
