@@ -468,6 +468,106 @@ export async function sidecRoutes(app:FastifyInstance){
       e.updated_at DESC LIMIT 300`,[org]);
   return {items:r.rows};
  });
+ app.get("/api/v1/sidec/deadline-policies",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  return {items:await effectiveDeadlinePolicies(org)};
+ });
+
+ app.put("/api/v1/sidec/deadline-policies",{preHandler:requirePermission("sidec_deadlines.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=deadlinePoliciesUpdateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const seen=new Set<string>();
+  for(const item of parsed.data.items){
+   if(seen.has(item.pendingStatus))return reply.code(400).send({error:"DUPLICATE_PENDING_STATUS",pendingStatus:item.pendingStatus});
+   seen.add(item.pendingStatus);
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   const before=await client.query(`SELECT pending_status AS "pendingStatus",warning_after_hours AS "warningAfterHours",severity,enabled
+     FROM sidec_deadline_policies WHERE organization_id=$1 ORDER BY pending_status`,[org]);
+   await client.query("DELETE FROM sidec_deadline_policies WHERE organization_id=$1",[org]);
+   for(const item of parsed.data.items){
+    await client.query(`INSERT INTO sidec_deadline_policies(
+      organization_id,pending_status,warning_after_hours,severity,enabled,created_by
+    ) VALUES($1,$2,$3,$4,$5,$6)`,[org,item.pendingStatus,item.warningAfterHours,item.severity,item.enabled,auth.userId]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,ip,user_agent,before_data,after_data)
+     VALUES($1,'sidec_deadline_policies.replace','sidec_deadline_policies',$2,$3,$4::jsonb,$5::jsonb)`,
+    [auth.userId,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows),JSON.stringify(parsed.data.items)]);
+   await client.query("COMMIT");
+   await evaluateSidecDeadlineAlerts(org);
+   return {items:await effectiveDeadlinePolicies(org)};
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
+
+ app.get("/api/v1/sidec/deadline-alerts",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  await evaluateSidecDeadlineAlerts(org);
+  const open=String((request.query as {open?:string})?.open??"true")!=="false";
+  const r=await db.query(`SELECT a.id,a.incident_id AS "incidentId",a.export_id AS "exportId",i.protocol,i.summary,
+    e.revision,a.pending_status AS "pendingStatus",a.severity,a.due_at AS "dueAt",a.detected_at AS "detectedAt",
+    a.acknowledged_at AS "acknowledgedAt",u.display_name AS "acknowledgedByName"
+    FROM sidec_deadline_alerts a
+    JOIN incidents i ON i.id=a.incident_id
+    JOIN sidec_exports e ON e.id=a.export_id
+    LEFT JOIN users u ON u.id=a.acknowledged_by
+    WHERE a.organization_id=$1 AND ($2::boolean=false OR a.acknowledged_at IS NULL)
+    ORDER BY (a.acknowledged_at IS NULL) DESC,a.due_at ASC,a.detected_at DESC LIMIT 300`,[org,open]);
+  return {items:r.rows};
+ });
+
+ app.patch("/api/v1/sidec/deadline-alerts/:id/ack",{preHandler:requirePermission("sidec_deadlines.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const before=await db.query(`SELECT id,acknowledged_at AS "acknowledgedAt" FROM sidec_deadline_alerts WHERE id=$1 AND organization_id=$2`,[id,org]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`UPDATE sidec_deadline_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),
+    acknowledged_by=CASE WHEN acknowledged_at IS NULL THEN $1 ELSE acknowledged_by END
+    WHERE id=$2 AND organization_id=$3 RETURNING id,acknowledged_at AS "acknowledgedAt"`,[auth.userId,id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_deadline_alert.ack','sidec_deadline_alert',$2,$3,$4,$5::jsonb,$6::jsonb)`,
+   [auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
+  return r.rows[0];
+ });
+
+ app.get("/api/v1/sidec-exports/:id/retention",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const r=await db.query(`SELECT r.export_id AS "exportId",r.retention_class AS "retentionClass",r.retain_until AS "retainUntil",
+    r.legal_hold AS "legalHold",r.notes,r.created_at AS "createdAt",r.updated_at AS "updatedAt",
+    a.file_name AS "fileName",a.content_hash AS "contentHash",a.signing_key_id AS "signingKeyId",a.signed_at AS "signedAt"
+    FROM sidec_artifact_retention r JOIN sidec_export_artifacts a ON a.export_id=r.export_id
+    WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  if(!r.rows[0])return reply.code(404).send({error:"SEALED_ARTIFACT_NOT_FOUND"});
+  return r.rows[0];
+ });
+
+ app.patch("/api/v1/sidec-exports/:id/retention",{preHandler:requirePermission("sidec_retention.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=retentionSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const before=await db.query(`SELECT r.export_id AS "exportId",r.retention_class AS "retentionClass",r.retain_until AS "retainUntil",
+    r.legal_hold AS "legalHold",r.notes,a.signed_at AS "signedAt"
+    FROM sidec_artifact_retention r JOIN sidec_export_artifacts a ON a.export_id=r.export_id
+    WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  const current=before.rows[0] as {signedAt:string}|undefined;
+  if(!current)return reply.code(404).send({error:"SEALED_ARTIFACT_NOT_FOUND"});
+  if(parsed.data.retainUntil&&parsed.data.retainUntil.getTime()<new Date(current.signedAt).getTime()){
+   return reply.code(400).send({error:"RETENTION_BEFORE_SEAL"});
+  }
+  const legalHold=parsed.data.retentionClass==="LEGAL_HOLD"?true:parsed.data.legalHold;
+  const r=await db.query(`UPDATE sidec_artifact_retention SET retention_class=$1,retain_until=$2,legal_hold=$3,
+    notes=$4,updated_by=$5,updated_at=now()
+    WHERE export_id=$6 AND organization_id=$7
+    RETURNING export_id AS "exportId",retention_class AS "retentionClass",retain_until AS "retainUntil",
+      legal_hold AS "legalHold",notes,updated_at AS "updatedAt"`,
+    [parsed.data.retentionClass,parsed.data.retainUntil??null,legalHold,parsed.data.notes??null,auth.userId,id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_artifact_retention.update','sidec_artifact_retention',$2,$3,$4,$5::jsonb,$6::jsonb)`,
+   [auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
+  return r.rows[0];
+ });
+
  app.get("/api/v1/sidec/pending",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const incidents=await db.query(`SELECT i.id AS "incidentId",i.protocol,i.summary,i.status AS "incidentStatus",i.priority,
