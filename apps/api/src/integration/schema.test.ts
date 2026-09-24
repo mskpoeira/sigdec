@@ -22,6 +22,21 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0029_sidec_worm_governance.sql"));
  assert.ok(files.includes("0030_sidec_worm_replication.sql"));
  assert.ok(files.includes("0031_sidec_resilience_operations.sql"));
+ assert.ok(files.includes("0032_sidec_continuity_objectives.sql"));
+});
+
+test("política de continuidade SIDEC possui objetivos administrativos válidos",async()=>{
+ const cols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_resilience_policies'
+    AND column_name IN ('rpo_minutes','rto_minutes','drill_max_age_hours','enabled')
+  ORDER BY column_name`);
+ assert.deepEqual(cols.rows.map(x=>x.column_name),["drill_max_age_hours","enabled","rpo_minutes","rto_minutes"]);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_resilience_policies'::regclass AND contype='c'`);
+ const definitions=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(definitions,/rpo_minutes/);
+ assert.match(definitions,/rto_minutes/);
+ assert.match(definitions,/drill_max_age_hours/);
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
