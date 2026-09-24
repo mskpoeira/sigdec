@@ -579,6 +579,213 @@ export async function evaluateSidecArchiveVerifications(organizationId?:string){
  return {checked,failed,replicaChecked,replicaFailed};
 }
 
+
+async function runSidecRestoreDrill(input:{
+ org:string;exportId:string;destination:"PRIMARY"|"REPLICA";trigger:"SCHEDULED"|"MANUAL";userId?:string|null;
+}){
+ const started=Date.now();
+ const source=input.destination==="PRIMARY"
+  ? await db.query(`SELECT a.content_hash AS "expectedHash",a.byte_size AS "expectedSize",
+      r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId"
+     FROM sidec_export_artifacts a JOIN sidec_archive_receipts r ON r.export_id=a.export_id
+     WHERE a.export_id=$1 AND a.organization_id=$2`,[input.exportId,input.org])
+  : await db.query(`SELECT a.content_hash AS "expectedHash",a.byte_size AS "expectedSize",
+      r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId"
+     FROM sidec_export_artifacts a JOIN sidec_archive_replicas r ON r.export_id=a.export_id
+     WHERE a.export_id=$1 AND a.organization_id=$2`,[input.exportId,input.org]);
+ const row=source.rows[0] as any;
+ if(!row)throw Object.assign(new Error(`Destino ${input.destination} não disponível para drill.`),{statusCode:404,code:"RESTORE_SOURCE_NOT_FOUND"});
+ let observedHash:string|null=null,observedSize:number|null=null,zipHeaderValid:boolean|null=null,errorMessage:string|null=null;
+ try{
+  const restored=input.destination==="PRIMARY"
+   ? await restoreSidecArchiveObject({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null})
+   : await restoreSidecReplicaObject({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null});
+  observedHash=hashBinary(restored.bytes);
+  observedSize=restored.bytes.length;
+  zipHeaderValid=hasZipSignature(restored.bytes);
+ }catch(error){
+  errorMessage=error instanceof Error?error.message:String(error);
+ }
+ const success=observedHash===String(row.expectedHash)&&observedSize===Number(row.expectedSize)&&zipHeaderValid===true;
+ const durationMs=Math.max(0,Date.now()-started);
+ const inserted=await db.query(`INSERT INTO sidec_restore_drills(
+   export_id,organization_id,destination,expected_hash,observed_hash,expected_size,observed_size,zip_header_valid,
+   success,duration_ms,trigger_source,error_message,performed_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+  RETURNING id,destination,expected_hash AS "expectedHash",observed_hash AS "observedHash",
+   expected_size AS "expectedSize",observed_size AS "observedSize",zip_header_valid AS "zipHeaderValid",
+   success,duration_ms AS "durationMs",trigger_source AS "triggerSource",error_message AS "errorMessage",
+   performed_at AS "performedAt"`,[
+  input.exportId,input.org,input.destination,row.expectedHash,observedHash,Number(row.expectedSize),observedSize,
+  zipHeaderValid,success,durationMs,input.trigger,errorMessage,input.userId??null
+ ]);
+ return inserted.rows[0];
+}
+
+async function queueSidecReplicaRetry(org:string,exportId:string,operation:"REPLICATE"|"SYNC_POLICY",lastError?:string|null){
+ await db.query(`INSERT INTO sidec_replica_retry_jobs(
+   export_id,organization_id,operation,attempts,next_retry_at,last_error,succeeded_at
+  ) VALUES($1,$2,$3,0,now(),$4,NULL)
+  ON CONFLICT(export_id,operation) DO UPDATE SET
+   succeeded_at=NULL,
+   next_retry_at=CASE WHEN sidec_replica_retry_jobs.succeeded_at IS NOT NULL THEN now()
+     ELSE LEAST(sidec_replica_retry_jobs.next_retry_at,now()) END,
+   last_error=COALESCE(EXCLUDED.last_error,sidec_replica_retry_jobs.last_error),
+   updated_at=now()`,[exportId,org,operation,lastError??null]);
+}
+
+async function processSidecReplicaRetries(organizationId?:string){
+ const baseMinutes=Math.max(1,Math.min(1440,Number(process.env.SIDEC_REPLICA_RETRY_BASE_MINUTES??15)));
+ const maxMinutes=Math.max(baseMinutes,Math.min(10080,Number(process.env.SIDEC_REPLICA_RETRY_MAX_MINUTES??1440)));
+ const params:unknown[]=[];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=` AND organization_id=${params.length}`;}
+ const jobs=await db.query(`SELECT id,export_id AS "exportId",organization_id AS "organizationId",operation,attempts
+   FROM sidec_replica_retry_jobs
+   WHERE succeeded_at IS NULL AND next_retry_at<=now()${orgFilter}
+   ORDER BY next_retry_at LIMIT 50`,params);
+ let attempted=0,succeeded=0,failed=0;
+ for(const job of jobs.rows as Array<any>){
+  attempted++;
+  try{
+   const org=String(job.organizationId),exportId=String(job.exportId);
+   if(job.operation==="REPLICATE"){
+    const result=await createSidecArchiveReplica(org,exportId,null) as any;
+    if(result.enabled!==true||result.verification?.hashValid!==true)throw new Error(result.error??"Réplica não confirmada.");
+   }else{
+    const result=await syncSidecReplicaPolicy(org,exportId) as any;
+    if(result.synced!==true)throw new Error(result.error??"Política da réplica não sincronizada.");
+   }
+   await db.query(`UPDATE sidec_replica_retry_jobs SET succeeded_at=now(),last_attempt_at=now(),
+     last_error=NULL,updated_at=now() WHERE id=$1`,[job.id]);
+   succeeded++;
+  }catch(error){
+   const attempts=Number(job.attempts??0);
+   const next=nextResilienceRetryAt(attempts,new Date(),baseMinutes,maxMinutes);
+   await db.query(`UPDATE sidec_replica_retry_jobs SET attempts=attempts+1,last_attempt_at=now(),
+     next_retry_at=$1,last_error=$2,updated_at=now() WHERE id=$3`,
+    [next,error instanceof Error?error.message:String(error),job.id]);
+   failed++;
+  }
+ }
+ return {attempted,succeeded,failed};
+}
+
+async function currentSidecResilienceHealth(organizationId?:string){
+ const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
+ const params:unknown[]=[staleHours];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=` AND p.organization_id=$2`;}
+ const r=await db.query(`SELECT p.export_id AS "exportId",p.organization_id AS "organizationId",
+   (s.export_id IS NOT NULL) AS "replicaCreated",
+   p.retain_until AS "primaryRetainUntil",p.legal_hold AS "primaryLegalHold",
+   s.retain_until AS "replicaRetainUntil",s.legal_hold AS "replicaLegalHold",
+   pv.exists_remote AS "primaryExistsRemote",pv.hash_valid AS "primaryHashValid",pv.observed_hash AS "primaryObservedHash",
+   pv.verified_at AS "primaryVerifiedAt",
+   rv.exists_remote AS "replicaExistsRemote",rv.hash_valid AS "replicaHashValid",rv.observed_hash AS "replicaObservedHash",
+   rv.verified_at AS "replicaVerifiedAt",
+   CASE
+    WHEN pv.exists_remote=false OR pv.hash_valid=false OR rv.exists_remote=false OR rv.hash_valid=false
+      OR (pv.observed_hash IS NOT NULL AND rv.observed_hash IS NOT NULL AND pv.observed_hash<>rv.observed_hash) THEN 'CRITICAL'
+    WHEN s.export_id IS NULL THEN 'MISSING_REPLICA'
+    WHEN (p.legal_hold=true AND COALESCE(s.legal_hold,false)=false)
+      OR (p.retain_until IS NOT NULL AND (s.retain_until IS NULL OR s.retain_until<p.retain_until)) THEN 'POLICY_DRIFT'
+    WHEN pv.id IS NULL OR rv.id IS NULL
+      OR pv.verified_at<now()-($1::text||' hours')::interval
+      OR rv.verified_at<now()-($1::text||' hours')::interval THEN 'STALE'
+    ELSE 'HEALTHY'
+   END AS health
+  FROM sidec_archive_receipts p
+  LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+  LEFT JOIN LATERAL (
+   SELECT id,exists_remote,hash_valid,observed_hash,verified_at
+   FROM sidec_archive_verifications x WHERE x.export_id=p.export_id ORDER BY verified_at DESC LIMIT 1
+  ) pv ON true
+  LEFT JOIN LATERAL (
+   SELECT id,exists_remote,hash_valid,observed_hash,verified_at
+   FROM sidec_archive_replica_verifications x WHERE x.export_id=p.export_id ORDER BY verified_at DESC LIMIT 1
+  ) rv ON true
+  WHERE true${orgFilter}
+  ORDER BY p.archived_at`,params);
+ return r.rows as Array<any>;
+}
+
+async function updateSidecResilienceConditions(organizationId?:string){
+ const thresholdHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_RESILIENCE_ALERT_AFTER_HOURS??6)));
+ const rows=await currentSidecResilienceHealth(organizationId);
+ let opened=0,alerted=0,resolved=0;
+ for(const row of rows){
+  const org=String(row.organizationId),exportId=String(row.exportId),health=String(row.health);
+  if(health==="HEALTHY"){
+   const rr=await db.query(`UPDATE sidec_resilience_conditions SET resolved_at=now(),last_detected_at=now()
+     WHERE export_id=$1 AND organization_id=$2 AND resolved_at IS NULL RETURNING id`,[exportId,org]);
+   resolved+=rr.rowCount??0;
+   continue;
+  }
+  const resolvedOther=await db.query(`UPDATE sidec_resilience_conditions SET resolved_at=now()
+    WHERE export_id=$1 AND organization_id=$2 AND resolved_at IS NULL AND condition<>$3 RETURNING id`,[exportId,org,health]);
+  resolved+=resolvedOther.rowCount??0;
+  const before=await db.query(`SELECT id,first_detected_at AS "firstDetectedAt",alerted_at AS "alertedAt"
+    FROM sidec_resilience_conditions WHERE export_id=$1 AND organization_id=$2 AND condition=$3 AND resolved_at IS NULL`,
+   [exportId,org,health]);
+  if(!before.rows[0]){
+   await db.query(`INSERT INTO sidec_resilience_conditions(export_id,organization_id,condition,details)
+    VALUES($1,$2,$3,$4::jsonb)`,[exportId,org,health,JSON.stringify(row)]);
+   opened++;
+  }else{
+   await db.query(`UPDATE sidec_resilience_conditions SET last_detected_at=now(),details=$1::jsonb
+    WHERE id=$2`,[JSON.stringify(row),before.rows[0].id]);
+  }
+  const current=(before.rows[0]??(await db.query(`SELECT id,first_detected_at AS "firstDetectedAt",alerted_at AS "alertedAt"
+    FROM sidec_resilience_conditions WHERE export_id=$1 AND organization_id=$2 AND condition=$3 AND resolved_at IS NULL`,
+   [exportId,org,health])).rows[0]) as any;
+  if(current&&!current.alertedAt&&shouldAlertResilience(new Date(current.firstDetectedAt),thresholdHours)){
+   await db.query("UPDATE sidec_resilience_conditions SET alerted_at=now() WHERE id=$1",[current.id]);
+   alerted++;
+  }
+  if(health==="MISSING_REPLICA")await queueSidecReplicaRetry(org,exportId,"REPLICATE");
+  if(health==="POLICY_DRIFT")await queueSidecReplicaRetry(org,exportId,"SYNC_POLICY");
+ }
+ return {opened,alerted,resolved,thresholdHours,items:rows};
+}
+
+async function runScheduledSidecRestoreDrills(organizationId?:string){
+ const drillHours=Math.max(24,Math.min(8760,Number(process.env.SIDEC_RESTORE_DRILL_HOURS??168)));
+ const params:unknown[]=[drillHours];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=" AND p.organization_id=$2";}
+ const due=await db.query(`SELECT p.export_id AS "exportId",p.organization_id AS "organizationId",
+   (s.export_id IS NOT NULL) AS "replicaCreated",
+   pd.performed_at AS "primaryLastDrill",rd.performed_at AS "replicaLastDrill"
+  FROM sidec_archive_receipts p
+  LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+  LEFT JOIN LATERAL (SELECT performed_at FROM sidec_restore_drills d WHERE d.export_id=p.export_id AND d.destination='PRIMARY' ORDER BY performed_at DESC LIMIT 1) pd ON true
+  LEFT JOIN LATERAL (SELECT performed_at FROM sidec_restore_drills d WHERE d.export_id=p.export_id AND d.destination='REPLICA' ORDER BY performed_at DESC LIMIT 1) rd ON true
+  WHERE (pd.performed_at IS NULL OR pd.performed_at<now()-($1::text||' hours')::interval
+    OR (s.export_id IS NOT NULL AND (rd.performed_at IS NULL OR rd.performed_at<now()-($1::text||' hours')::interval)) )${orgFilter}
+  ORDER BY p.archived_at LIMIT 25`,params);
+ let performed=0,failed=0;
+ for(const row of due.rows as Array<any>){
+  const org=String(row.organizationId),exportId=String(row.exportId);
+  if(!row.primaryLastDrill||new Date(row.primaryLastDrill).getTime()<Date.now()-drillHours*3600000){
+   const result=await runSidecRestoreDrill({org,exportId,destination:"PRIMARY",trigger:"SCHEDULED"});
+   performed++;if(!result.success)failed++;
+  }
+  if(row.replicaCreated&&(!row.replicaLastDrill||new Date(row.replicaLastDrill).getTime()<Date.now()-drillHours*3600000)){
+   const result=await runSidecRestoreDrill({org,exportId,destination:"REPLICA",trigger:"SCHEDULED"});
+   performed++;if(!result.success)failed++;
+  }
+ }
+ return {performed,failed,drillHours};
+}
+
+export async function evaluateSidecResilience(organizationId?:string){
+ const conditions=await updateSidecResilienceConditions(organizationId);
+ const retries=await processSidecReplicaRetries(organizationId);
+ const drills=await runScheduledSidecRestoreDrills(organizationId);
+ return {conditions,retries,drills};
+}
+
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
  const r=await db.query(`SELECT DISTINCT ON (target_field)
    source_path AS "sourcePath",target_field AS "targetField",required,enabled,sort_order AS "sortOrder"
