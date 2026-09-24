@@ -10,13 +10,14 @@ type ExportDocument={id:string;number?:string|null;title:string;documentType:str
 type SidecExport={
  id:string;revision:number;schemaVersion:string;status:string;snapshotHash:string;manifestHash?:string|null;
  externalProtocol?:string|null;externalNotes?:string|null;exportedAt?:string|null;submittedAt?:string|null;
- acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];
+ acknowledgedAt?:string|null;rejectedAt?:string|null;createdAt:string;updatedAt:string;documents:ExportDocument[];artifactSealed:boolean;artifactHash?:string|null;manifestSignature?:string|null;artifactSignedAt?:string|null;
 };
 type Mapping={sourcePath:string;targetField:string;required:boolean;enabled:boolean;sortOrder:number};
 type Check={code:string;label:string;required:boolean;ok:boolean;detail?:string};
 type AvailableDocument={id:string;number?:string|null;title:string;documentType:string;revision:number;contentHash?:string|null;issuedAt:string};
 type CobradeRequirement={sourcePath:string;label:string;required:boolean;enabled:boolean;sortOrder:number};
-type Readiness={ready:boolean;checks:Check[];mappings:Mapping[];cobradeCode?:string|null;cobradeRequirements:CobradeRequirement[];availableDocuments:AvailableDocument[];mappedFields:Record<string,unknown>};
+type DocumentRequirement={scopeType:"DEFAULT"|"COBRADE"|"INCIDENT_TYPE";scopeValue:string;documentType:"REPORT"|"OPINION"|"INTERDICTION"|"DECLARATION"|"FORM"|"OTHER";label:string;minCount:number;required:boolean;enabled:boolean};
+type Readiness={ready:boolean;checks:Check[];mappings:Mapping[];cobradeCode?:string|null;typeCode?:string|null;cobradeRequirements:CobradeRequirement[];documentRequirements:DocumentRequirement[];requiredDocumentIds:string[];availableDocuments:AvailableDocument[];mappedFields:Record<string,unknown>};
 type Diff={path:string;before:unknown;after:unknown};
 type CompareResult={current:{id:string;revision:number};against:{id:string;revision:number}|null;category?:string;categories?:string[];count?:number;totalCount?:number;differences:Diff[]};
 
@@ -37,6 +38,8 @@ export default function SidecExportsPage(){
  const [readiness,setReadiness]=useState<Readiness|null>(null);
  const [mappingRows,setMappingRows]=useState<Mapping[]>([]);
  const [cobradeRows,setCobradeRows]=useState<CobradeRequirement[]>([]);
+ const [documentScope,setDocumentScope]=useState<"DEFAULT"|"COBRADE"|"INCIDENT_TYPE">("DEFAULT");
+ const [documentRuleRows,setDocumentRuleRows]=useState<DocumentRequirement[]>([]);
  const [sourceOptions,setSourceOptions]=useState<string[]>([]);
  const [selectedDocuments,setSelectedDocuments]=useState<string[]>([]);
  const [comparisons,setComparisons]=useState<Record<string,CompareResult>>({});
@@ -70,7 +73,17 @@ export default function SidecExportsPage(){
    setMappingRows((mappingBody?.items??readinessBody?.mappings??[]).map((x:Mapping)=>({...x})));
    setSourceOptions(mappingBody?.sourceOptions??[]);
    setCobradeRows((readinessBody?.cobradeRequirements??[]).map((x:CobradeRequirement)=>({...x})));
-   setSelectedDocuments(current=>current.filter(id=>(readinessBody?.availableDocuments??[]).some((d:AvailableDocument)=>d.id===id)));
+   const nextScope:("DEFAULT"|"COBRADE"|"INCIDENT_TYPE")=readinessBody?.cobradeCode?"COBRADE":readinessBody?.typeCode?"INCIDENT_TYPE":"DEFAULT";
+   const nextScopeValue=nextScope==="COBRADE"?readinessBody?.cobradeCode:nextScope==="INCIDENT_TYPE"?readinessBody?.typeCode:"*";
+   setDocumentScope(nextScope);
+   if(nextScopeValue){
+    const rulesBody=await request(`/api/v1/sidec/document-requirements?scopeType=${nextScope}&scopeValue=${encodeURIComponent(String(nextScopeValue))}`);
+    setDocumentRuleRows((rulesBody?.items??[]).map((x:DocumentRequirement)=>({...x})));
+   }else setDocumentRuleRows([]);
+   setSelectedDocuments(current=>{
+    const valid=current.filter(id=>(readinessBody?.availableDocuments??[]).some((d:AvailableDocument)=>d.id===id));
+    return [...new Set([...valid,...(readinessBody?.requiredDocumentIds??[])])];
+   });
    setMessage("");
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar interoperabilidade SIDEC.");}
  },[incidentId,request]);
@@ -90,6 +103,7 @@ export default function SidecExportsPage(){
   }catch(error){
    const typed=error as Error&{body?:any};
    if(typed.body?.error==="NOT_READY")setMessage("Pacote não gerado: complete os campos obrigatórios indicados no checklist.");
+   else if(typed.body?.error==="DOCUMENT_REQUIREMENTS_NOT_MET")setMessage("Pacote não gerado: selecione os documentos oficiais obrigatórios indicados.");
    else setMessage(error instanceof Error?error.message:"Falha ao gerar pacote SIDEC.");
    await load();
   }finally{setBusy(false)}
@@ -134,6 +148,41 @@ export default function SidecExportsPage(){
   setCobradeRows(rows=>[...rows,{sourcePath:source,label:"Novo requisito",required:true,enabled:true,sortOrder:(rows.length+1)*10}]);
  }
  function removeCobradeRequirement(index:number){setCobradeRows(rows=>rows.filter((_,i)=>i!==index))}
+
+ async function changeDocumentScope(scope:"DEFAULT"|"COBRADE"|"INCIDENT_TYPE"){
+  const scopeValue=scope==="COBRADE"?readiness?.cobradeCode:scope==="INCIDENT_TYPE"?readiness?.typeCode:"*";
+  if(!scopeValue){setMessage("Este escopo não está disponível para a ocorrência.");return}
+  setDocumentScope(scope);setBusy(true);setMessage("");
+  try{
+   const body=await request(`/api/v1/sidec/document-requirements?scopeType=${scope}&scopeValue=${encodeURIComponent(String(scopeValue))}`);
+   setDocumentRuleRows((body?.items??[]).map((x:DocumentRequirement)=>({...x})));
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar regras documentais.");}
+  finally{setBusy(false)}
+ }
+ function addDocumentRule(){
+  const used=new Set(documentRuleRows.map(x=>x.documentType));
+  const types=["REPORT","OPINION","INTERDICTION","DECLARATION","FORM","OTHER"] as const;
+  const documentType=types.find(x=>!used.has(x))??"REPORT";
+  const scopeValue=documentScope==="COBRADE"?String(readiness?.cobradeCode??""):documentScope==="INCIDENT_TYPE"?String(readiness?.typeCode??""):"*";
+  setDocumentRuleRows(rows=>[...rows,{scopeType:documentScope,scopeValue,documentType,label:"Documento obrigatório",minCount:1,required:true,enabled:true}]);
+ }
+ function updateDocumentRule(index:number,patch:Partial<DocumentRequirement>){
+  setDocumentRuleRows(rows=>rows.map((row,i)=>i===index?{...row,...patch}:row));
+ }
+ function removeDocumentRule(index:number){setDocumentRuleRows(rows=>rows.filter((_,i)=>i!==index))}
+ async function saveDocumentRules(){
+  const scopeValue=documentScope==="COBRADE"?readiness?.cobradeCode:documentScope==="INCIDENT_TYPE"?readiness?.typeCode:"*";
+  if(!scopeValue){setMessage("Escopo documental indisponível.");return}
+  setBusy(true);setMessage("");
+  try{
+   await request("/api/v1/sidec/document-requirements",{method:"PUT",body:JSON.stringify({
+    scopeType:documentScope,scopeValue,items:documentRuleRows.map(({documentType,label,minCount,required,enabled})=>({documentType,label,minCount,required,enabled}))
+   })});
+   setMessage("Requisitos documentais salvos. O checklist foi recalculado.");
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao salvar requisitos documentais.");}
+  finally{setBusy(false)}
+ }
 
  async function importStructuredReturn(item:SidecExport){
   const raw=returnPayloads[item.id]?.trim();
