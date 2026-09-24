@@ -109,11 +109,17 @@ export async function evaluateSidecDeadlineAlerts(organizationId?:string){
  let created=0;
  for(const org of organizations){
   const policies=await effectiveDeadlinePolicies(org);
-  const exports=await db.query(`SELECT e.id AS "exportId",e.incident_id AS "incidentId",e.status,
-    e.created_at AS "createdAt",e.updated_at AS "updatedAt",e.exported_at AS "exportedAt",
-    e.submitted_at AS "submittedAt",e.rejected_at AS "rejectedAt"
-    FROM sidec_exports e
-    WHERE e.organization_id=$1 AND e.status IN ('READY','EXPORTED','SUBMITTED','REJECTED')`,[org]);
+  const exports=await db.query(`SELECT latest.*
+    FROM (
+      SELECT DISTINCT ON (e.incident_id)
+        e.id AS "exportId",e.incident_id AS "incidentId",e.status,
+        e.created_at AS "createdAt",e.updated_at AS "updatedAt",e.exported_at AS "exportedAt",
+        e.submitted_at AS "submittedAt",e.rejected_at AS "rejectedAt"
+      FROM sidec_exports e
+      WHERE e.organization_id=$1
+      ORDER BY e.incident_id,e.revision DESC
+    ) latest
+    WHERE latest.status IN ('READY','EXPORTED','SUBMITTED','REJECTED')`,[org]);
   for(const row of exports.rows as Array<any>){
    const deadline=sidecDueAt(row,policies);
    if(!deadline||!isSidecDeadlineOverdue(deadline.dueAt))continue;
@@ -513,7 +519,16 @@ export async function sidecRoutes(app:FastifyInstance){
     JOIN incidents i ON i.id=a.incident_id
     JOIN sidec_exports e ON e.id=a.export_id
     LEFT JOIN users u ON u.id=a.acknowledged_by
-    WHERE a.organization_id=$1 AND ($2::boolean=false OR a.acknowledged_at IS NULL)
+    WHERE a.organization_id=$1 AND (
+      $2::boolean=false OR (
+       a.acknowledged_at IS NULL AND (
+        (a.pending_status='PACKAGE_READY' AND e.status='READY') OR
+        (a.pending_status='AWAITING_PROTOCOL' AND e.status='EXPORTED') OR
+        (a.pending_status='AWAITING_RETURN' AND e.status='SUBMITTED') OR
+        (a.pending_status='REJECTED' AND e.status='REJECTED')
+       ) AND e.revision=(SELECT max(e2.revision) FROM sidec_exports e2 WHERE e2.incident_id=e.incident_id AND e2.organization_id=a.organization_id)
+      )
+    )
     ORDER BY (a.acknowledged_at IS NULL) DESC,a.due_at ASC,a.detected_at DESC LIMIT 300`,[org,open]);
   return {items:r.rows};
  });
