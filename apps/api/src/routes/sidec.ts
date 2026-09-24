@@ -280,13 +280,29 @@ export async function sidecRoutes(app:FastifyInstance){
   const mappings=await effectiveMappings(org);
   const root=incidentRoot(row);
   const cobradeCode=String(row.cobradeCode??"").trim()||null;
-  const cobradeRequirements=await effectiveCobradeRequirements(org,cobradeCode);
-  const checks=[...evaluateSidecReadiness(root,mappings),...evaluateCobradeRequirements(root,cobradeRequirements)];
-  const documents=await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
-    FROM technical_documents
-    WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED'
-    ORDER BY issued_at DESC,created_at DESC`,[org,id]);
-  return {ready:isSidecReady(checks),checks,mappings,cobradeCode,cobradeRequirements,availableDocuments:documents.rows,mappedFields:buildMappedFields(root,mappings)};
+  const typeCode=String(row.typeCode??"").trim()||null;
+  const [cobradeRequirements,documentRequirements,documents]=await Promise.all([
+   effectiveCobradeRequirements(org,cobradeCode),
+   effectiveDocumentRequirements(org,cobradeCode,typeCode),
+   db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
+     FROM technical_documents
+     WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED'
+     ORDER BY issued_at DESC,created_at DESC`,[org,id])
+  ]);
+  const availableDocuments=documents.rows as Array<Record<string,unknown>&SidecAvailableDocument>;
+  const effectiveDocs=mergeDocumentRequirements(documentRequirements);
+  const checks=[
+   ...evaluateSidecReadiness(root,mappings),
+   ...evaluateCobradeRequirements(root,cobradeRequirements),
+   ...evaluateDocumentRequirements(availableDocuments,effectiveDocs)
+  ];
+  return {
+   ready:isSidecReady(checks),checks,mappings,cobradeCode,typeCode,cobradeRequirements,
+   documentRequirements:effectiveDocs,
+   requiredDocumentIds:chooseRequiredDocumentIds(availableDocuments,effectiveDocs),
+   availableDocuments:documents.rows,
+   mappedFields:buildMappedFields(root,mappings)
+  };
  });
 
  app.get("/api/v1/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
