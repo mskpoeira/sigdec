@@ -402,8 +402,10 @@ export async function sidecRoutes(app:FastifyInstance){
   const r=await db.query(`SELECT e.id,e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,e.schema_version AS "schemaVersion",e.status,
     e.snapshot_hash AS "snapshotHash",e.manifest_hash AS "manifestHash",e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",
     e.exported_at AS "exportedAt",e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",
-    e.rejected_at AS "rejectedAt",e.created_at AS "createdAt",e.updated_at AS "updatedAt"
+    e.rejected_at AS "rejectedAt",e.created_at AS "createdAt",e.updated_at AS "updatedAt",
+    (a.export_id IS NOT NULL) AS "artifactSealed",a.content_hash AS "artifactHash",a.manifest_signature AS "manifestSignature",a.signed_at AS "artifactSignedAt"
     FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
+    LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id
     WHERE e.organization_id=$1 ORDER BY
       CASE e.status WHEN 'SUBMITTED' THEN 1 WHEN 'READY' THEN 2 WHEN 'EXPORTED' THEN 3 WHEN 'REJECTED' THEN 4 ELSE 5 END,
       e.updated_at DESC LIMIT 300`,[org]);
@@ -417,11 +419,12 @@ export async function sidecRoutes(app:FastifyInstance){
     e.external_protocol AS "externalProtocol",e.external_notes AS "externalNotes",e.exported_at AS "exportedAt",
     e.submitted_at AS "submittedAt",e.acknowledged_at AS "acknowledgedAt",e.rejected_at AS "rejectedAt",
     e.created_at AS "createdAt",e.updated_at AS "updatedAt",
+    (a.export_id IS NOT NULL) AS "artifactSealed",a.content_hash AS "artifactHash",a.manifest_signature AS "manifestSignature",a.signed_at AS "artifactSignedAt",
     COALESCE((SELECT json_agg(json_build_object(
       'id',d.document_id,'number',d.document_number,'title',d.document_title,'documentType',d.document_type,
       'revision',d.document_revision,'contentHash',d.content_hash
     ) ORDER BY d.document_title) FROM sidec_export_documents d WHERE d.export_id=e.id),'[]'::json) AS documents
-    FROM sidec_exports e WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
+    FROM sidec_exports e LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
   return {items:r.rows};
  });
 
@@ -708,6 +711,7 @@ export async function sidecRoutes(app:FastifyInstance){
   const next=parsed.data.status;
   if(!(transitions[current.status]??[]).includes(next))return reply.code(409).send({error:"INVALID_TRANSITION",from:current.status,to:next});
   if(next==="SUBMITTED"&&!parsed.data.externalProtocol&&!current.externalProtocol)return reply.code(400).send({error:"EXTERNAL_PROTOCOL_REQUIRED"});
+  const sealedArtifact=next==="EXPORTED"?await sealSidecExportArtifact(org,id,auth.userId):null;
   const r=await db.query(`UPDATE sidec_exports SET status=$1,
     external_protocol=COALESCE($2,external_protocol),external_notes=COALESCE($3,external_notes),
     exported_at=CASE WHEN $1='EXPORTED' THEN COALESCE(exported_at,now()) ELSE exported_at END,
@@ -719,9 +723,9 @@ export async function sidecRoutes(app:FastifyInstance){
     RETURNING id,status,external_protocol AS "externalProtocol",external_notes AS "externalNotes",updated_at AS "updatedAt"`,
     [next,parsed.data.externalProtocol??null,parsed.data.externalNotes??null,id,org]);
   await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
-    VALUES($1,'sidec_export.status_changed',$2,$3,$4::jsonb)`,[current.incidentId,auth.userId,`Pacote SIDEC revisão ${current.revision}: ${current.status} → ${next}.`,JSON.stringify({exportId:id,externalProtocol:parsed.data.externalProtocol??current.externalProtocol??null})]);
+    VALUES($1,'sidec_export.status_changed',$2,$3,$4::jsonb)`,[current.incidentId,auth.userId,`Pacote SIDEC revisão ${current.revision}: ${current.status} → ${next}.`,JSON.stringify({exportId:id,externalProtocol:parsed.data.externalProtocol??current.externalProtocol??null,artifactHash:sealedArtifact?.contentHash??null,manifestSignature:sealedArtifact?.manifestSignature??null})]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
     VALUES($1,'sidec_export.status','sidec_export',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
-  return r.rows[0];
+  return {...r.rows[0],artifact:sealedArtifact??undefined};
  });
 }
