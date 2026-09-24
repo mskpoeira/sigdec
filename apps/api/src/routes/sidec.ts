@@ -884,6 +884,10 @@ export async function sidecRoutes(app:FastifyInstance){
     wr.archived_at AS "archivedAt",wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",
     wv.verified_at AS "archiveVerifiedAt",wv.error_message AS "archiveVerificationError",
     COALESCE((SELECT json_agg(json_build_object(
+      'eventType',pe.event_type,'previousRetainUntil',pe.previous_retain_until,'newRetainUntil',pe.new_retain_until,
+      'previousLegalHold',pe.previous_legal_hold,'newLegalHold',pe.new_legal_hold,'reason',pe.reason,'createdAt',pe.created_at
+    ) ORDER BY pe.created_at DESC) FROM sidec_archive_policy_events pe WHERE pe.export_id=e.id),'[]'::json) AS "archivePolicyEvents",
+    COALESCE((SELECT json_agg(json_build_object(
       'id',d.document_id,'number',d.document_number,'title',d.document_title,'documentType',d.document_type,
       'revision',d.document_revision,'contentHash',d.content_hash
     ) ORDER BY d.document_title) FROM sidec_export_documents d WHERE d.export_id=e.id),'[]'::json) AS documents
@@ -1316,7 +1320,11 @@ export async function sidecRoutes(app:FastifyInstance){
        'objectLockMode',v.object_lock_mode,'retainUntil',v.retain_until,'legalHold',v.legal_hold,
        'source',v.verification_source,'error',v.error_message,'verifiedAt',v.verified_at
      ) ORDER BY v.verified_at) FROM sidec_archive_verifications v WHERE v.export_id=r.export_id),'[]'::json) AS verifications
-     FROM sidec_archive_receipts r WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org])).rows[0]??null
+     FROM sidec_archive_receipts r WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org])).rows[0]??null,
+   archivePolicyEvents:(await db.query(`SELECT event_type AS "eventType",previous_retain_until AS "previousRetainUntil",
+     new_retain_until AS "newRetainUntil",previous_legal_hold AS "previousLegalHold",new_legal_hold AS "newLegalHold",
+     reason,created_at AS "createdAt"
+     FROM sidec_archive_policy_events WHERE export_id=$1 AND organization_id=$2 ORDER BY created_at`,[id,org])).rows
   };
   const download=String((request.query as {download?:string})?.download??"").trim()==="1";
   if(download){
