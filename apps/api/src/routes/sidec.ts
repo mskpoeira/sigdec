@@ -81,8 +81,7 @@ const returnEnvelopeSchema=z.object({
  notes:z.string().trim().max(8000).optional()
 });
 
-const integrityProofSchema=z.object({
- proofVersion:z.literal("sigdec-sidec-integrity-proof/1.0"),
+const integrityProofBase={
  export:z.object({
   id:z.string().uuid(),
   protocol:z.string().min(1).max(200),
@@ -109,7 +108,28 @@ const integrityProofSchema=z.object({
   publicKeyFingerprint:z.string().regex(/^[a-f0-9]{64}$/),
   attestedAt:z.string().min(1)
  })
-});
+};
+
+const integrityProofSchema=z.union([
+ z.object({
+  proofVersion:z.literal("sigdec-sidec-integrity-proof/1.0"),
+  ...integrityProofBase
+ }),
+ z.object({
+  proofVersion:z.literal("sigdec-sidec-integrity-proof/1.1"),
+  ...integrityProofBase,
+  publicVerificationUrl:z.string().url().max(2000),
+  timestamp:z.object({
+   algorithm:z.literal("Ed25519"),
+   keyId:z.string().min(1).max(80),
+   statementHash:z.string().regex(/^[a-f0-9]{64}$/),
+   timestampedAt:z.string().min(1),
+   signature:z.string().min(40).max(300),
+   publicKey:z.string().min(40).max(4000),
+   publicKeyFingerprint:z.string().regex(/^[a-f0-9]{64}$/)
+  })
+ })
+]);
 
 const statusSchema=z.object({
  status:z.enum(["EXPORTED","SUBMITTED","ACKNOWLEDGED","REJECTED","CANCELLED"]),
