@@ -200,7 +200,7 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{
   {name:"resumo.csv",data:"\uFEFF"+sidecPackageSummaryCsv(item.snapshot)},
   {name:"manifesto.json",data:JSON.stringify({
    manifestHash:computedManifestHash,
-   signature:manifestSignature?{algorithm:"HMAC-SHA256",value:manifestSignature,scope:"assinatura interna SIGDEC; não ICP-Brasil"}:null,
+   signature:manifestSignature?{algorithm:"HMAC-SHA256",keyId:signingKeyId,value:manifestSignature,scope:"assinatura interna SIGDEC; não ICP-Brasil"}:null,
    ...manifest
   },null,2)}
  ];
