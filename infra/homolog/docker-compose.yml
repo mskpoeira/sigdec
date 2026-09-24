@@ -52,9 +52,9 @@ services:
     entrypoint: ["/bin/sh","-c"]
     command:
       - >
-        until mc alias set sigdec http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 2; done;
-        mc mb --ignore-existing --with-lock "sigdec/$SIDEC_WORM_BUCKET";
-        mc version info "sigdec/$SIDEC_WORM_BUCKET";
+        until mc alias set sigdec http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done;
+        mc mb --ignore-existing --with-lock "sigdec/$$SIDEC_WORM_BUCKET";
+        mc version info "sigdec/$$SIDEC_WORM_BUCKET";
     networks: [sigdec]
 
   api:
