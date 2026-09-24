@@ -569,10 +569,10 @@ export async function sidecRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const format=String((request.query as {format?:string})?.format??"json").toLowerCase();
   const r=await db.query(`SELECT e.revision,e.schema_version AS "schemaVersion",e.snapshot,e.snapshot_hash AS "snapshotHash",
-      e.manifest_hash AS "manifestHash",i.protocol
+      e.manifest_hash AS "manifestHash",e.status,i.protocol
     FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
     WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
-  const item=r.rows[0] as {revision:number;schemaVersion:string;snapshot:SidecPackage;snapshotHash:string;manifestHash?:string|null;protocol:string}|undefined;
+  const item=r.rows[0] as SidecZipSource|undefined;
   if(!item)return reply.code(404).send({error:"NOT_FOUND"});
   const safeProtocol=item.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
 
@@ -583,53 +583,44 @@ export async function sidecRoutes(app:FastifyInstance){
   }
 
   if(format==="zip"){
-   const docs=await db.query(`SELECT d.document_id AS id,d.document_number AS number,d.document_title AS title,
-      d.document_type AS "documentType",d.document_revision AS revision,d.content_hash AS "contentHash"
-      FROM sidec_export_documents d WHERE d.export_id=$1 ORDER BY d.document_title,d.document_id`,[id]);
-   const manifest=buildSidecManifest({
-    packageSchemaVersion:item.schemaVersion,
-    revision:item.revision,
-    snapshotHash:item.snapshotHash,
-    documents:docs.rows as SidecManifestDocument[]
-   });
-   const computedManifestHash=hashSidecManifest(manifest);
-   if(item.manifestHash&&item.manifestHash!==computedManifestHash){
-    return reply.code(409).send({error:"MANIFEST_INTEGRITY_ERROR",expected:item.manifestHash,computed:computedManifestHash});
+   let artifactResult=await db.query(`SELECT file_name AS "fileName",byte_size AS "byteSize",content_hash AS "contentHash",
+     content,manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
+     manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+     FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+
+   if(!artifactResult.rows[0]&&item.status&&item.status!=="READY"&&item.status!=="CANCELLED"){
+    await sealSidecExportArtifact(org,id,auth.userId);
+    artifactResult=await db.query(`SELECT file_name AS "fileName",byte_size AS "byteSize",content_hash AS "contentHash",
+      content,manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
+      manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+      FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
    }
 
-   const entries:Array<{name:string;data:Buffer|string}>=[
-    {name:"pacote.json",data:JSON.stringify({snapshotHash:item.snapshotHash,manifestHash:computedManifestHash,...item.snapshot},null,2)},
-    {name:"resumo.csv",data:"\uFEFF"+sidecPackageSummaryCsv(item.snapshot)},
-    {name:"manifesto.json",data:JSON.stringify({manifestHash:computedManifestHash,...manifest},null,2)}
-   ];
-
-   for(const documentRef of docs.rows as SidecManifestDocument[]){
-    const documentResult=await db.query<Record<string,any>>(`SELECT d.id,d.document_type AS "documentType",d.number,d.title,
-      d.subject,d.status,d.revision,d.content->>'text' AS "contentText",d.legal_basis AS "legalBasis",d.recipient,
-      d.valid_until AS "validUntil",d.content_hash AS "contentHash",o.name AS "organizationName",i.protocol
-      FROM technical_documents d
-      JOIN organizations o ON o.id=d.organization_id
-      LEFT JOIN incidents i ON i.id=d.incident_id
-      WHERE d.id=$1 AND d.organization_id=$2 AND d.status='ISSUED'`,[documentRef.id,org]);
-    const document=documentResult.rows[0];
-    if(!document)return reply.code(409).send({error:"DOCUMENT_NOT_AVAILABLE",documentId:documentRef.id});
-    if(documentRef.contentHash&&document.contentHash!==documentRef.contentHash){
-     return reply.code(409).send({error:"DOCUMENT_INTEGRITY_ERROR",documentId:documentRef.id});
+   const artifact=artifactResult.rows[0] as {fileName:string;byteSize:number;contentHash:string;content:Buffer;manifestHash:string;signatureAlgorithm:string;manifestSignature:string;signedAt:string}|undefined;
+   if(artifact){
+    const computedZipHash=hashBinary(artifact.content);
+    if(computedZipHash!==artifact.contentHash)return reply.code(409).send({error:"SEALED_ZIP_INTEGRITY_ERROR",expected:artifact.contentHash,computed:computedZipHash});
+    if(!verifySidecManifestSignature(artifact.manifestHash,artifact.manifestSignature)){
+     return reply.code(409).send({error:"MANIFEST_SIGNATURE_INVALID"});
     }
-    const signatures=await db.query<Record<string,any>>(`SELECT s.signature_type AS "signatureType",s.signed_at AS "signedAt",
-      u.display_name AS "displayName",u.matricula
-      FROM technical_document_signatures s JOIN users u ON u.id=s.signed_by
-      WHERE s.document_id=$1 ORDER BY s.signed_at`,[documentRef.id]);
-    const pdf=await buildPdf(document,signatures.rows);
-    const safeDocument=String(documentRef.number??documentRef.id).replace(/[^0-9A-Za-z_-]/g,"_");
-    entries.push({name:`documentos/${safeDocument}.pdf`,data:pdf});
+    return reply.type("application/zip")
+     .header("Content-Disposition",`attachment; filename="${artifact.fileName}"`)
+     .header("Content-Length",String(artifact.content.length))
+     .header("X-SIGDEC-Artifact-Mode","sealed")
+     .header("X-SIGDEC-Content-SHA256",artifact.contentHash)
+     .header("X-SIGDEC-Manifest-SHA256",artifact.manifestHash)
+     .header("X-SIGDEC-Manifest-Signature",artifact.manifestSignature)
+     .send(artifact.content);
    }
 
-   const zip=await zipBuffer(entries);
+   const preview=await buildSidecZip(org,id,item,null);
    return reply.type("application/zip")
-    .header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${item.revision}.zip"`)
-    .header("Content-Length",String(zip.length))
-    .send(zip);
+    .header("Content-Disposition",`attachment; filename="PREVIEW-${preview.fileName}"`)
+    .header("Content-Length",String(preview.zip.length))
+    .header("X-SIGDEC-Artifact-Mode","preview")
+    .header("X-SIGDEC-Content-SHA256",hashBinary(preview.zip))
+    .header("X-SIGDEC-Manifest-SHA256",preview.manifestHash)
+    .send(preview.zip);
   }
 
   if(format!=="json")return reply.code(400).send({error:"UNSUPPORTED_FORMAT"});
