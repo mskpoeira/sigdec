@@ -1369,6 +1369,96 @@ export async function sidecRoutes(app:FastifyInstance){
   return {staleHours,summary,items};
  });
 
+ app.post("/api/v1/sidec-exports/:id/archive/replicate",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  try{
+   const result=await createSidecArchiveReplica(org,id,auth.userId);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_archive.replica_create','sidec_archive_replica',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   return result;
+  }catch(error){
+   return reply.code((error as any)?.statusCode??502).send({error:(error as any)?.code??"REPLICA_ARCHIVE_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.post("/api/v1/sidec-exports/:id/archive/replica/verify",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const r=await db.query(`SELECT bucket,object_key AS "objectKey",version_id AS "versionId",content_hash AS "contentHash"
+   FROM sidec_archive_replicas WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+  const item=r.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"REPLICA_NOT_FOUND"});
+  const verification=await recordReplicaVerification({
+   org,exportId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,versionId:item.versionId??null,expectedHash:item.contentHash
+  });
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+   VALUES($1,'sidec_archive.replica_verify','sidec_archive_replica',$2,$3,$4,$5::jsonb)`,[
+   auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification)
+  ]);
+  return verification;
+ });
+
+ app.post("/api/v1/sidec-exports/:id/archive/replica/sync-policy",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  try{
+   const result=await syncSidecReplicaPolicy(org,id);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_archive.replica_sync_policy','sidec_archive_replica',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   return result;
+  }catch(error){
+   return reply.code(502).send({error:"REPLICA_POLICY_SYNC_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.get("/api/v1/sidec/archive-replication-health",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
+  const r=await db.query(`SELECT p.export_id AS "exportId",e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,
+    p.retain_until AS "primaryRetainUntil",p.legal_hold AS "primaryLegalHold",
+    pv.exists_remote AS "primaryExistsRemote",pv.hash_valid AS "primaryHashValid",pv.observed_hash AS "primaryObservedHash",
+    pv.verified_at AS "primaryVerifiedAt",pv.error_message AS "primaryError",
+    (s.export_id IS NOT NULL) AS "replicaCreated",s.retain_until AS "replicaRetainUntil",s.legal_hold AS "replicaLegalHold",
+    rv.exists_remote AS "replicaExistsRemote",rv.hash_valid AS "replicaHashValid",rv.observed_hash AS "replicaObservedHash",
+    rv.verified_at AS "replicaVerifiedAt",rv.error_message AS "replicaError",
+    CASE
+      WHEN pv.exists_remote=false OR pv.hash_valid=false OR rv.exists_remote=false OR rv.hash_valid=false
+        OR (pv.observed_hash IS NOT NULL AND rv.observed_hash IS NOT NULL AND pv.observed_hash<>rv.observed_hash) THEN 'CRITICAL'
+      WHEN s.export_id IS NULL THEN 'MISSING_REPLICA'
+      WHEN (p.legal_hold=true AND COALESCE(s.legal_hold,false)=false)
+        OR (p.retain_until IS NOT NULL AND (s.retain_until IS NULL OR s.retain_until<p.retain_until)) THEN 'POLICY_DRIFT'
+      WHEN pv.id IS NULL OR rv.id IS NULL
+        OR pv.verified_at<now()-($2::text||' hours')::interval
+        OR rv.verified_at<now()-($2::text||' hours')::interval THEN 'STALE'
+      ELSE 'HEALTHY'
+    END AS health
+   FROM sidec_archive_receipts p
+   JOIN sidec_exports e ON e.id=p.export_id
+   JOIN incidents i ON i.id=e.incident_id
+   LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+   LEFT JOIN LATERAL (
+    SELECT id,exists_remote,hash_valid,observed_hash,verified_at,error_message
+    FROM sidec_archive_verifications x WHERE x.export_id=p.export_id ORDER BY verified_at DESC LIMIT 1
+   ) pv ON true
+   LEFT JOIN LATERAL (
+    SELECT id,exists_remote,hash_valid,observed_hash,verified_at,error_message
+    FROM sidec_archive_replica_verifications x WHERE x.export_id=p.export_id ORDER BY verified_at DESC LIMIT 1
+   ) rv ON true
+   WHERE p.organization_id=$1
+   ORDER BY CASE
+      WHEN pv.exists_remote=false OR pv.hash_valid=false OR rv.exists_remote=false OR rv.hash_valid=false THEN 1
+      WHEN s.export_id IS NULL THEN 2
+      WHEN (p.legal_hold=true AND COALESCE(s.legal_hold,false)=false)
+        OR (p.retain_until IS NOT NULL AND (s.retain_until IS NULL OR s.retain_until<p.retain_until)) THEN 3
+      ELSE 4
+    END,p.archived_at DESC`,[org,staleHours]);
+  const items=r.rows;
+  const summary=items.reduce<Record<string,number>>((acc:any,row:any)=>{acc[row.health]=(acc[row.health]??0)+1;return acc;},{});
+  return {enabled:wormReplicaEnabled(),staleHours,summary,items};
+ });
+
  app.get("/api/v1/sidec-exports/:id/integrity-proof",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const proof=await buildSidecIntegrityProof(org,id,auth.userId);
