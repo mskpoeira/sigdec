@@ -31,7 +31,14 @@ export async function buildContinuityExerciseReportPdf(input:any){
    p(`Status: ${input.aar.status}`);pdf.font("Helvetica-Bold").fontSize(8.5).text("Resumo executivo");p(input.aar.executiveSummary);pdf.font("Helvetica-Bold").fontSize(8.5).text("Pontos fortes");p(input.aar.strengths);pdf.font("Helvetica-Bold").fontSize(8.5).text("Lacunas");p(input.aar.gaps);pdf.font("Helvetica-Bold").fontSize(8.5).text("Recomendações");p(input.aar.recommendations);
    pdf.font("Helvetica-Bold").fontSize(9).fillColor("#173f69").text("Plano de ações corretivas");
    if(!(input.aar.actions??[]).length)p("Nenhuma ação corretiva registrada.");
-   for(const a of input.aar.actions??[]){pdf.font("Helvetica-Bold").fontSize(8).text(`• [${a.priority}] ${a.title}`);pdf.font("Helvetica").fontSize(7.6).text(`Status: ${a.status} · Responsável: ${a.ownerName??"—"} · Prazo: ${when(a.dueAt)}`,{indent:10});if(a.description)p(a.description)}
+   for(const a of input.aar.actions??[]){
+    pdf.font("Helvetica-Bold").fontSize(8).text(`• [${a.priority}] ${a.title}`);
+    pdf.font("Helvetica").fontSize(7.6).text(`Status: ${a.status} · Responsável: ${a.ownerName??"—"} · Prazo: ${when(a.dueAt)}`,{indent:10});
+    if(a.description)p(a.description);
+    if(a.riskId)pdf.font("Helvetica").fontSize(7.5).text(`Risco: ${a.riskCode??""} · ${a.riskTitle??a.riskId}`,{indent:10});
+    if(a.recoveryActionId)pdf.font("Helvetica").fontSize(7.5).text(`Recuperação: ${a.recoveryActionTitle??a.recoveryActionId} · ${a.recoveryActionStatus??"—"}`,{indent:10});
+    if(a.status==="DONE")pdf.font("Helvetica").fontSize(7.5).text(`Eficácia: ${a.effectiveness??"NOT_EVALUATED"}${a.effectivenessNotes?" · "+a.effectivenessNotes:""}`,{indent:10});
+   }
    pdf.font("Helvetica-Bold").fontSize(9).fillColor("#173f69").text("Lições aprendidas estruturadas");
    if(!(input.aar.lessons??[]).length)p("Nenhuma lição estruturada registrada.");
    for(const l of input.aar.lessons??[]){pdf.font("Helvetica-Bold").fontSize(8).text(`• [${l.severity}] ${l.title}`);pdf.font("Helvetica").fontSize(7.6).text(`${l.category} · chave: ${l.recurrenceKey}`,{indent:10});p(l.observation)}
