@@ -21,6 +21,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0028_sidec_worm_archive.sql"));
  assert.ok(files.includes("0029_sidec_worm_governance.sql"));
  assert.ok(files.includes("0030_sidec_worm_replication.sql"));
+ assert.ok(files.includes("0031_sidec_resilience_operations.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -202,6 +203,29 @@ test("SIDEC v1.22 possui replica WORM e verificacao independente",async()=>{
   WHERE table_schema='public' AND table_name='sidec_archive_replicas'
     AND column_name IN ('destination_code','version_id','content_hash','retain_until','legal_hold') ORDER BY column_name`);
  assert.deepEqual(columns.rows.map(x=>x.column_name),["content_hash","destination_code","legal_hold","retain_until","version_id"]);
+});
+
+test("SIDEC v1.23 possui retry drills e condicoes de resiliencia",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_replica_retry_jobs','sidec_restore_drills','sidec_resilience_conditions') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_replica_retry_jobs","sidec_resilience_conditions","sidec_restore_drills"]);
+ const retryDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_replica_retry_jobs'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(retryDefs,/REPLICATE/);
+ assert.match(retryDefs,/SYNC_POLICY/);
+ const drillDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_restore_drills'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(drillDefs,/PRIMARY/);
+ assert.match(drillDefs,/REPLICA/);
+ assert.match(drillDefs,/SCHEDULED/);
+ assert.match(drillDefs,/MANUAL/);
+ const conditions=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_resilience_conditions'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(conditions,/CRITICAL/);
+ assert.match(conditions,/MISSING_REPLICA/);
+ const replicatedBy=await db.query(`SELECT is_nullable FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_archive_replicas' AND column_name='replicated_by'`);
+ assert.equal(replicatedBy.rows[0]?.is_nullable,"YES");
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
