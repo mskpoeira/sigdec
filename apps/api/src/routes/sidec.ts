@@ -83,6 +83,11 @@ const archiveLegalHoldEnableSchema=z.object({
  reason:z.string().trim().min(5).max(4000)
 });
 
+const restoreDrillSchema=z.object({
+ destination:z.enum(["PRIMARY","REPLICA"])
+});
+
+
 
 const returnEnvelopeSchema=z.object({
  schemaVersion:z.literal("sigdec-sidec-return/1.0"),
@@ -1694,6 +1699,106 @@ export async function sidecRoutes(app:FastifyInstance){
   const items=r.rows;
   const summary=items.reduce<Record<string,number>>((acc:any,row:any)=>{acc[row.health]=(acc[row.health]??0)+1;return acc;},{});
   return {enabled:wormReplicaEnabled(),staleHours,summary,items};
+ });
+
+ app.post("/api/v1/sidec-exports/:id/resilience/drill",{preHandler:requirePermission("sidec_resilience.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=restoreDrillSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  try{
+   const result=await runSidecRestoreDrill({
+    org,exportId:id,destination:parsed.data.destination,trigger:"MANUAL",userId:auth.userId
+   });
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_resilience.restore_drill','sidec_restore_drill',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   return result;
+  }catch(error){
+   return reply.code((error as any)?.statusCode??502).send({
+    error:(error as any)?.code??"RESTORE_DRILL_FAILED",message:error instanceof Error?error.message:String(error)
+   });
+  }
+ });
+
+ app.get("/api/v1/sidec/resilience/alerts",{preHandler:requirePermission("sidec_resilience.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const open=String((request.query as {open?:string})?.open??"true")!=="false";
+  const r=await db.query(`SELECT c.id,c.export_id AS "exportId",e.incident_id AS "incidentId",i.protocol,i.summary,e.revision,
+    c.condition,c.first_detected_at AS "firstDetectedAt",c.last_detected_at AS "lastDetectedAt",
+    c.alerted_at AS "alertedAt",c.resolved_at AS "resolvedAt",c.details
+   FROM sidec_resilience_conditions c
+   JOIN sidec_exports e ON e.id=c.export_id
+   JOIN incidents i ON i.id=e.incident_id
+   WHERE c.organization_id=$1 AND ($2::boolean=false OR (c.alerted_at IS NOT NULL AND c.resolved_at IS NULL))
+   ORDER BY (c.resolved_at IS NULL) DESC,c.alerted_at DESC NULLS LAST,c.first_detected_at DESC LIMIT 300`,[org,open]);
+  return {items:r.rows};
+ });
+
+ app.get("/api/v1/sidec/resilience/report",{preHandler:requirePermission("sidec_resilience.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const query=request.query as {days?:string;download?:string};
+  const days=Math.max(1,Math.min(365,Number(query.days??30)||30));
+  const from=new Date(Date.now()-days*24*60*60*1000);
+  const [coverage,primary,replica,drills,conditions,retries]=await Promise.all([
+   db.query(`SELECT count(*)::int AS archives,
+      count(s.export_id)::int AS replicas
+     FROM sidec_archive_receipts p LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
+     WHERE p.organization_id=$1`,[org]),
+   db.query(`SELECT count(*)::int AS checks,
+      count(*) FILTER(WHERE exists_remote=true)::int AS available,
+      count(*) FILTER(WHERE hash_valid=true)::int AS "hashValid"
+     FROM sidec_archive_verifications WHERE organization_id=$1 AND verified_at>=$2`,[org,from]),
+   db.query(`SELECT count(*)::int AS checks,
+      count(*) FILTER(WHERE exists_remote=true)::int AS available,
+      count(*) FILTER(WHERE hash_valid=true)::int AS "hashValid"
+     FROM sidec_archive_replica_verifications WHERE organization_id=$1 AND verified_at>=$2`,[org,from]),
+   db.query(`SELECT destination,count(*)::int AS drills,
+      count(*) FILTER(WHERE success=true)::int AS successful,
+      round(avg(duration_ms))::int AS "averageDurationMs"
+     FROM sidec_restore_drills WHERE organization_id=$1 AND performed_at>=$2
+     GROUP BY destination ORDER BY destination`,[org,from]),
+   db.query(`SELECT
+      count(*) FILTER(WHERE first_detected_at>=$2)::int AS detected,
+      count(*) FILTER(WHERE alerted_at>=$2)::int AS alerted,
+      count(*) FILTER(WHERE resolved_at>=$2)::int AS resolved,
+      count(*) FILTER(WHERE alerted_at IS NOT NULL AND resolved_at IS NULL)::int AS "openAlerts"
+     FROM sidec_resilience_conditions WHERE organization_id=$1`,[org,from]),
+   db.query(`SELECT count(*)::int AS jobs,
+      count(*) FILTER(WHERE succeeded_at IS NULL)::int AS pending,
+      count(*) FILTER(WHERE succeeded_at IS NOT NULL)::int AS succeeded,
+      COALESCE(sum(attempts),0)::int AS attempts
+     FROM sidec_replica_retry_jobs WHERE organization_id=$1 AND created_at>=$2`,[org,from])
+  ]);
+  const pct=(value:number,total:number)=>total?Math.round((value/total)*10000)/100:null;
+  const p=primary.rows[0]??{},r=replica.rows[0]??{},cv=coverage.rows[0]??{};
+  const report={
+   reportVersion:"sigdec-sidec-resilience-report/1.0",
+   generatedAt:new Date().toISOString(),period:{days,from:from.toISOString(),to:new Date().toISOString()},
+   redundancy:{
+    archives:Number(cv.archives??0),replicas:Number(cv.replicas??0),
+    coveragePct:pct(Number(cv.replicas??0),Number(cv.archives??0))
+   },
+   primary:{
+    checks:Number(p.checks??0),availabilityCheckPct:pct(Number(p.available??0),Number(p.checks??0)),
+    integrityCheckPct:pct(Number(p.hashValid??0),Number(p.checks??0))
+   },
+   replica:{
+    checks:Number(r.checks??0),availabilityCheckPct:pct(Number(r.available??0),Number(r.checks??0)),
+    integrityCheckPct:pct(Number(r.hashValid??0),Number(r.checks??0))
+   },
+   restoreDrills:drills.rows.map((x:any)=>({
+    destination:x.destination,drills:Number(x.drills),successful:Number(x.successful),
+    successPct:pct(Number(x.successful),Number(x.drills)),averageDurationMs:x.averageDurationMs===null?null:Number(x.averageDurationMs)
+   })),
+   conditions:conditions.rows[0]??{},
+   retries:retries.rows[0]??{}
+  };
+  if(String(query.download??"")==="1"){
+   reply.header("Content-Type","application/json; charset=utf-8");
+   reply.header("Content-Disposition",`attachment; filename="SIGDEC-resiliencia-SIDEC-${days}d.json"`);
+  }
+  return report;
  });
 
  app.get("/api/v1/sidec-exports/:id/integrity-proof",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
