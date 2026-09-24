@@ -67,7 +67,9 @@ const aarActionCreateSchema=z.object({
  description:z.string().trim().max(8000).default(""),
  priority:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]).default("MEDIUM"),
  ownerUserId:z.string().uuid().nullable().optional(),
- dueAt:z.coerce.date().nullable().optional()
+ dueAt:z.coerce.date().nullable().optional(),
+ riskId:z.string().uuid().nullable().optional(),
+ recoveryActionId:z.string().uuid().nullable().optional()
 });
 
 const aarActionUpdateSchema=z.object({
@@ -76,7 +78,14 @@ const aarActionUpdateSchema=z.object({
  priority:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]).optional(),
  ownerUserId:z.string().uuid().nullable().optional(),
  dueAt:z.coerce.date().nullable().optional(),
+ riskId:z.string().uuid().nullable().optional(),
+ recoveryActionId:z.string().uuid().nullable().optional(),
  status:z.enum(["OPEN","IN_PROGRESS","DONE","CANCELLED"]).optional()
+});
+
+const aarActionEffectivenessSchema=z.object({
+ effectiveness:z.enum(["EFFECTIVE","PARTIAL","INEFFECTIVE"]),
+ notes:z.string().trim().min(5).max(8000)
 });
 
 const scheduleCreateSchema=z.object({
@@ -150,6 +159,17 @@ async function operators(org:string){
  return r.rows;
 }
 
+async function validateActionReferences(org:string,input:{riskId?:string|null;recoveryActionId?:string|null}){
+ if(input.riskId){
+  const risk=await db.query(`SELECT id FROM risk_registers WHERE id=$1 AND organization_id=$2`,[input.riskId,org]);
+  if(!risk.rows[0])throw Object.assign(new Error("Risco fora da organização ou inexistente."),{statusCode:400,code:"INVALID_RISK_REFERENCE"});
+ }
+ if(input.recoveryActionId){
+  const recovery=await db.query(`SELECT id FROM recovery_actions WHERE id=$1 AND organization_id=$2`,[input.recoveryActionId,org]);
+  if(!recovery.rows[0])throw Object.assign(new Error("Ação de recuperação fora da organização ou inexistente."),{statusCode:400,code:"INVALID_RECOVERY_REFERENCE"});
+ }
+}
+
 async function loadExercise(org:string,id:string){
  const exerciseResult=await db.query(`SELECT e.id,e.plan_id AS "planId",p.version AS "planVersion",p.title AS "planTitle",
    e.scenario,e.status,e.result,e.notes,e.started_at AS "startedAt",e.completed_at AS "completedAt",
@@ -199,9 +219,16 @@ async function loadExercise(org:string,id:string){
   const [actions,lessons]=await Promise.all([
    db.query(`SELECT ai.id,ai.title,ai.description,ai.priority,ai.owner_user_id AS "ownerUserId",
      owner.display_name AS "ownerName",owner.matricula AS "ownerMatricula",ai.due_at AS "dueAt",ai.status,
-     ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt"
+     ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt",
+     ai.risk_id AS "riskId",r.code AS "riskCode",r.title AS "riskTitle",
+     ai.recovery_action_id AS "recoveryActionId",ra.title AS "recoveryActionTitle",ra.status AS "recoveryActionStatus",
+     ai.effectiveness,ai.effectiveness_notes AS "effectivenessNotes",
+     ai.effectiveness_evaluated_at AS "effectivenessEvaluatedAt",evaluator.display_name AS "effectivenessEvaluatedByName"
     FROM sidec_continuity_action_items ai
     LEFT JOIN users owner ON owner.id=ai.owner_user_id
+    LEFT JOIN risk_registers r ON r.id=ai.risk_id
+    LEFT JOIN recovery_actions ra ON ra.id=ai.recovery_action_id
+    LEFT JOIN users evaluator ON evaluator.id=ai.effectiveness_evaluated_by
     WHERE ai.aar_id=$1
     ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
      ai.due_at NULLS LAST,ai.created_at`,[aarRow.id]),
