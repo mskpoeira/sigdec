@@ -761,12 +761,13 @@ export async function sidecRoutes(app:FastifyInstance){
     e.created_at AS "createdAt",e.updated_at AS "updatedAt",
     (a.export_id IS NOT NULL) AS "artifactSealed",a.content_hash AS "artifactHash",a.manifest_signature AS "manifestSignature",
     a.signing_key_id AS "signingKeyId",a.signed_at AS "artifactSignedAt",
+    t.key_id AS "ed25519KeyId",t.public_key_fingerprint AS "ed25519Fingerprint",t.attested_at AS "ed25519AttestedAt",
     ar.retention_class AS "retentionClass",ar.retain_until AS "retainUntil",ar.legal_hold AS "legalHold",ar.notes AS "retentionNotes",
     COALESCE((SELECT json_agg(json_build_object(
       'id',d.document_id,'number',d.document_number,'title',d.document_title,'documentType',d.document_type,
       'revision',d.document_revision,'contentHash',d.content_hash
     ) ORDER BY d.document_title) FROM sidec_export_documents d WHERE d.export_id=e.id),'[]'::json) AS documents
-    FROM sidec_exports e LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id LEFT JOIN sidec_artifact_retention ar ON ar.export_id=e.id WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
+    FROM sidec_exports e LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id LEFT JOIN sidec_artifact_attestations t ON t.export_id=e.id LEFT JOIN sidec_artifact_retention ar ON ar.export_id=e.id WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
   return {items:r.rows};
  });
 
