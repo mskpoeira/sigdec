@@ -56,6 +56,21 @@ const documentRequirementsUpdateSchema=z.object({
  items:z.array(documentRequirementSchema).max(20)
 });
 
+const deadlinePolicyItemSchema=z.object({
+ pendingStatus:z.enum(["PACKAGE_READY","AWAITING_PROTOCOL","AWAITING_RETURN","REJECTED"]),
+ warningAfterHours:z.number().int().min(1).max(8760),
+ severity:z.enum(["WATCH","WARNING","EMERGENCY"]),
+ enabled:z.boolean().default(true)
+});
+const deadlinePoliciesUpdateSchema=z.object({items:z.array(deadlinePolicyItemSchema).min(1).max(4)});
+
+const retentionSchema=z.object({
+ retentionClass:z.enum(["UNSPECIFIED","OPERATIONAL","ARCHIVAL","LEGAL_HOLD"]),
+ retainUntil:z.coerce.date().nullable().optional(),
+ legalHold:z.boolean().default(false),
+ notes:z.string().trim().max(4000).nullable().optional()
+});
+
 const returnEnvelopeSchema=z.object({
  schemaVersion:z.literal("sigdec-sidec-return/1.0"),
  externalProtocol:z.string().trim().min(1).max(200),
@@ -79,6 +94,39 @@ const transitions:Record<string,string[]>={
  REJECTED:[],
  CANCELLED:[]
 };
+
+async function effectiveDeadlinePolicies(org:string):Promise<SidecDeadlinePolicy[]>{
+ const r=await db.query(`SELECT DISTINCT ON (pending_status)
+   pending_status AS "pendingStatus",warning_after_hours AS "warningAfterHours",severity,enabled
+   FROM sidec_deadline_policies
+   WHERE organization_id IS NULL OR organization_id=$1
+   ORDER BY pending_status,(organization_id IS NOT NULL) DESC`,[org]);
+ return r.rows as SidecDeadlinePolicy[];
+}
+
+export async function evaluateSidecDeadlineAlerts(organizationId?:string){
+ const organizations=organizationId?[organizationId]:(await db.query(`SELECT DISTINCT organization_id AS id FROM sidec_exports`)).rows.map((row:any)=>String(row.id));
+ let created=0;
+ for(const org of organizations){
+  const policies=await effectiveDeadlinePolicies(org);
+  const exports=await db.query(`SELECT e.id AS "exportId",e.incident_id AS "incidentId",e.status,
+    e.created_at AS "createdAt",e.updated_at AS "updatedAt",e.exported_at AS "exportedAt",
+    e.submitted_at AS "submittedAt",e.rejected_at AS "rejectedAt"
+    FROM sidec_exports e
+    WHERE e.organization_id=$1 AND e.status IN ('READY','EXPORTED','SUBMITTED','REJECTED')`,[org]);
+  for(const row of exports.rows as Array<any>){
+   const deadline=sidecDueAt(row,policies);
+   if(!deadline||!isSidecDeadlineOverdue(deadline.dueAt))continue;
+   const inserted=await db.query(`INSERT INTO sidec_deadline_alerts(
+      organization_id,incident_id,export_id,pending_status,severity,due_at
+    ) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(organization_id,export_id,pending_status,due_at) DO NOTHING
+    RETURNING id`,[org,row.incidentId,row.exportId,deadline.pendingStatus,deadline.severity,deadline.dueAt]);
+   if(inserted.rows[0])created++;
+  }
+ }
+ return {created};
+}
 
 async function effectiveDocumentRequirements(org:string,cobradeCode:string|null|undefined,typeCode:string|null|undefined):Promise<SidecDocumentRequirement[]>{
  const r=await db.query(`SELECT scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
