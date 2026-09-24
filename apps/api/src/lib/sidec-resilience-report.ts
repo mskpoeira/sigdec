@@ -55,7 +55,7 @@ export async function buildSidecResiliencePdf(input:{organizationName:string;rep
     const redundancy=report.redundancy??{},primary=report.primary??{},replica=report.replica??{};
     pdf.font("Helvetica-Bold").fontSize(10).text("INDICADORES-CHAVE");
     pdf.moveDown(0.25);
-    const keyRows=[
+    const keyRows:Array<[string,string,string]>=[
       ["Cobertura da réplica",percent(redundancy.coveragePct),`${metric(redundancy.replicas)} de ${metric(redundancy.archives)} arquivos`],
       ["Integridade primária",percent(primary.integrityCheckPct),`${metric(primary.checks)} verificações`],
       ["Integridade da réplica",percent(replica.integrityCheckPct),`${metric(replica.checks)} verificações`],
