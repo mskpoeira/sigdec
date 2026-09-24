@@ -14,6 +14,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0021_sidec_interoperability.sql"));
  assert.ok(files.includes("0022_sidec_readiness_mapping_documents.sql"));
  assert.ok(files.includes("0023_sidec_manifest_cobrade_returns.sql"));
+ assert.ok(files.includes("0024_sidec_sealed_artifacts_document_requirements.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -89,6 +90,22 @@ test("SIDEC v1.15 possui manifesto requisitos COBRADE e retorno idempotente",asy
  assert.match(defs,/ACKNOWLEDGED/);
  assert.match(defs,/REJECTED/);
  assert.match(defs,/export_id, payload_hash/);
+});
+
+test("SIDEC v1.16 possui artefato selado imutavel e requisitos documentais",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_export_artifacts','sidec_document_requirements') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_document_requirements","sidec_export_artifacts"]);
+ const trigger=await db.query(`SELECT tgname FROM pg_trigger
+  WHERE tgrelid='sidec_export_artifacts'::regclass AND NOT tgisinternal AND tgname='sidec_export_artifacts_immutable'`);
+ assert.equal(trigger.rowCount,1);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_document_requirements'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/DEFAULT/);
+ assert.match(defs,/COBRADE/);
+ assert.match(defs,/INCIDENT_TYPE/);
+ assert.match(defs,/REPORT/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
