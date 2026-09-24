@@ -922,6 +922,55 @@ export async function sidecRoutes(app:FastifyInstance){
   return proof;
  });
 
+ app.get("/api/v1/sidec-exports/:id/integrity-evidence",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const proof=await buildSidecIntegrityProof(org,id,auth.userId);
+  const exportRow=await db.query(`SELECT e.incident_id AS "incidentId",i.protocol
+    FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
+    WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
+  const row=exportRow.rows[0] as {incidentId:string;protocol:string}|undefined;
+  if(!row)return reply.code(404).send({error:"NOT_FOUND"});
+  const [retention,returns,timeline,audits,verifications]=await Promise.all([
+   db.query(`SELECT retention_class AS "retentionClass",retain_until AS "retainUntil",legal_hold AS "legalHold",
+      notes,created_at AS "createdAt",updated_at AS "updatedAt"
+      FROM sidec_artifact_retention WHERE export_id=$1 AND organization_id=$2`,[id,org]),
+   db.query(`SELECT schema_version AS "schemaVersion",outcome,external_protocol AS "externalProtocol",
+      received_at AS "receivedAt",source_name AS "sourceName",notes,payload_hash AS "payloadHash",created_at AS "createdAt"
+      FROM sidec_return_records WHERE export_id=$1 AND organization_id=$2 ORDER BY created_at`,[id,org]),
+   db.query(`SELECT event_type AS "eventType",note,metadata,occurred_at AS "occurredAt"
+      FROM incident_timeline
+      WHERE incident_id=$1 AND event_type LIKE 'sidec_%'
+      ORDER BY occurred_at`,[row.incidentId]),
+   db.query(`SELECT action,entity_type AS "entityType",entity_id AS "entityId",before_data AS "beforeData",
+      after_data AS "afterData",metadata,occurred_at AS "occurredAt"
+      FROM audit_logs
+      WHERE (entity_id=$1 OR (entity_type LIKE 'sidec_%' AND (metadata->>'exportId'=$1 OR after_data->>'id'=$1)))
+      ORDER BY occurred_at`,[id]),
+   db.query(`SELECT proof_version AS "proofVersion",artifact_hash AS "artifactHash",manifest_hash AS "manifestHash",
+      hmac_valid AS "hmacValid",asymmetric_valid AS "asymmetricValid",overall_valid AS "overallValid",
+      verification_source AS "verificationSource",verified_at AS "verifiedAt"
+      FROM sidec_integrity_verifications
+      WHERE export_id=$1 AND organization_id=$2 ORDER BY verified_at`,[id,org])
+  ]);
+  const evidence={
+   evidenceVersion:"sigdec-sidec-integrity-evidence/1.0",
+   generatedAt:new Date().toISOString(),
+   proof,
+   retention:retention.rows[0]??null,
+   returns:returns.rows,
+   timeline:timeline.rows,
+   audits:audits.rows,
+   verifications:verifications.rows
+  };
+  const download=String((request.query as {download?:string})?.download??"").trim()==="1";
+  if(download){
+   const safeProtocol=row.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
+   reply.header("Content-Type","application/json; charset=utf-8");
+   reply.header("Content-Disposition",`attachment; filename="SIDEC-${safeProtocol}-R${proof.export.revision}-evidencias.json"`);
+  }
+  return evidence;
+ });
+
  app.get("/api/v1/sidec-exports/:id/integrity-verifications",{preHandler:requirePermission("sidec_integrity.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
   const exists=await db.query(`SELECT 1 FROM sidec_exports WHERE id=$1 AND organization_id=$2`,[id,org]);
