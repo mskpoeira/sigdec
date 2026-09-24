@@ -415,20 +415,39 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!plan)return reply.code(409).send({error:"ACTIVE_RUNBOOK_REQUIRED"});
   const open=await db.query(`SELECT id FROM sidec_continuity_exercises WHERE organization_id=$1 AND status='IN_PROGRESS'`,[org]);
   if(open.rows[0])return reply.code(409).send({error:"EXERCISE_ALREADY_IN_PROGRESS",exerciseId:open.rows[0].id});
+  let schedule:any=null;
+  if(parsed.data.scheduleId){
+   const scheduleResult=await db.query(`SELECT id,name,interval_days AS "intervalDays",next_due_at AS "nextDueAt",
+     default_scenario AS "defaultScenario",enabled
+     FROM sidec_continuity_schedules WHERE id=$1 AND organization_id=$2`,[parsed.data.scheduleId,org]);
+   schedule=scheduleResult.rows[0];
+   if(!schedule)return reply.code(404).send({error:"SCHEDULE_NOT_FOUND"});
+   if(!schedule.enabled)return reply.code(409).send({error:"SCHEDULE_DISABLED"});
+  }
+  const scenario=parsed.data.scenario??schedule?.defaultScenario;
+  if(!scenario)return reply.code(400).send({error:"SCENARIO_REQUIRED"});
   const client=await db.connect();
   try{
    await client.query("BEGIN");
    const created=await client.query(`INSERT INTO sidec_continuity_exercises(
       organization_id,plan_id,scenario,status,created_by
-     ) VALUES($1,$2,$3,'IN_PROGRESS',$4) RETURNING id`,[org,plan.id,parsed.data.scenario,auth.userId]);
+     ) VALUES($1,$2,$3,'IN_PROGRESS',$4) RETURNING id`,[org,plan.id,scenario,auth.userId]);
    const exerciseId=String(created.rows[0].id);
    await client.query(`INSERT INTO sidec_continuity_exercise_steps(exercise_id,step_id)
     SELECT $1,id FROM sidec_continuity_steps WHERE plan_id=$2 ORDER BY sort_order`,[exerciseId,plan.id]);
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
     VALUES($1,'sidec_continuity.exercise_start','sidec_continuity_exercise',$2,$3,$4,$5::jsonb)`,[
     auth.userId,exerciseId,request.ip,request.headers["user-agent"]??null,
-    JSON.stringify({planId:plan.id,planVersion:plan.version,scenario:parsed.data.scenario})
+    JSON.stringify({planId:plan.id,planVersion:plan.version,scenario,scheduleId:schedule?.id??null})
    ]);
+   if(schedule){
+    const base=new Date(schedule.nextDueAt);
+    const now=new Date();
+    while(base.getTime()<=now.getTime())base.setUTCDate(base.getUTCDate()+Number(schedule.intervalDays));
+    await client.query(`UPDATE sidec_continuity_schedules
+      SET last_exercise_id=$1,next_due_at=$2,updated_at=now()
+      WHERE id=$3 AND organization_id=$4`,[exerciseId,base,schedule.id,org]);
+   }
    await client.query("COMMIT");
    return reply.code(201).send(await loadExercise(org,exerciseId));
   }catch(error){
