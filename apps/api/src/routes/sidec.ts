@@ -755,6 +755,8 @@ export async function sidecRoutes(app:FastifyInstance){
     r.legal_hold AS "legalHold",r.notes,a.signed_at AS "signedAt"
     FROM sidec_artifact_retention r JOIN sidec_export_artifacts a ON a.export_id=r.export_id
     WHERE r.export_id=$1 AND r.organization_id=$2`,[id,org]);
+  const archived=await db.query("SELECT 1 FROM sidec_archive_receipts WHERE export_id=$1 AND organization_id=$2",[id,org]);
+  if(archived.rows[0])return reply.code(409).send({error:"ARCHIVE_RETENTION_LOCKED"});
   const current=before.rows[0] as {signedAt:string}|undefined;
   if(!current)return reply.code(404).send({error:"SEALED_ARTIFACT_NOT_FOUND"});
   if(parsed.data.retainUntil&&parsed.data.retainUntil.getTime()<new Date(current.signedAt).getTime()){
