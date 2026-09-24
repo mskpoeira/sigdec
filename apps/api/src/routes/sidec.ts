@@ -6,7 +6,8 @@ import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
-import { hashBinary, signSidecManifestHash, verifySidecManifestSignature } from "../lib/sidec-signature.js";
+import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, verifySidecManifestSignature } from "../lib/sidec-signature.js";
+import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -139,7 +140,9 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{
   documents:docs.rows as SidecManifestDocument[]
  });
  const computedManifestHash=hashSidecManifest(manifest);
- const manifestSignature=options?.signManifest?signSidecManifestHash(computedManifestHash):null;
+ const signedManifest=options?.signManifest?signSidecManifestHashVersioned(computedManifestHash):null;
+ const manifestSignature=signedManifest?.signature??null;
+ const signingKeyId=signedManifest?.keyId??null;
  if(item.manifestHash&&item.manifestHash!==computedManifestHash){
   throw Object.assign(new Error("Hash do manifesto divergente."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR",expected:item.manifestHash,computed:computedManifestHash});
  }
@@ -177,13 +180,13 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{
  }
  const zip=await zipBuffer(entries);
  const safeProtocol=item.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
- return {zip,manifest,manifestHash:computedManifestHash,manifestSignature,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
+ return {zip,manifest,manifestHash:computedManifestHash,manifestSignature,signingKeyId,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
 }
 
 async function sealSidecExportArtifact(org:string,id:string,userId:string){
  const existing=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
-   manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+   manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
    FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
  if(existing.rows[0])return existing.rows[0];
 
@@ -196,17 +199,21 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
  const built=await buildSidecZip(org,id,source,{signManifest:true});
  const manifestHash=built.manifestHash;
  const manifestSignature=built.manifestSignature;
+ const signingKeyId=built.signingKeyId??currentSidecSigningKeyId();
  if(!manifestSignature)throw Object.assign(new Error("Falha ao assinar manifesto."),{statusCode:500,code:"MANIFEST_SIGNATURE_ERROR"});
  if(source.manifestHash&&source.manifestHash!==manifestHash)throw Object.assign(new Error("Manifesto alterado antes da selagem."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR"});
  if(!source.manifestHash)await db.query("UPDATE sidec_exports SET manifest_hash=$1 WHERE id=$2 AND organization_id=$3 AND manifest_hash IS NULL",[manifestHash,id,org]);
  const contentHash=hashBinary(built.zip);
  await db.query(`INSERT INTO sidec_export_artifacts(
-   export_id,organization_id,file_name,byte_size,content_hash,content,manifest_hash,signature_algorithm,manifest_signature,signed_by
-  ) VALUES($1,$2,$3,$4,$5,$6,$7,'HMAC-SHA256',$8,$9)
-  ON CONFLICT(export_id) DO NOTHING`,[id,org,built.fileName,built.zip.length,contentHash,built.zip,manifestHash,manifestSignature,userId]);
+   export_id,organization_id,file_name,byte_size,content_hash,content,manifest_hash,signature_algorithm,manifest_signature,signing_key_id,signed_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,'HMAC-SHA256',$8,$9,$10)
+  ON CONFLICT(export_id) DO NOTHING`,[id,org,built.fileName,built.zip.length,contentHash,built.zip,manifestHash,manifestSignature,signingKeyId,userId]);
+ await db.query(`INSERT INTO sidec_artifact_retention(export_id,organization_id,retention_class,retain_until,updated_by)
+  VALUES($1,$2,'UNSPECIFIED',NULL,$3)
+  ON CONFLICT(export_id) DO NOTHING`,[id,org,userId]);
  const sealed=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
-   manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+   manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
    FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
  return sealed.rows[0];
 }
@@ -677,11 +684,11 @@ export async function sidecRoutes(app:FastifyInstance){
       FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
    }
 
-   const artifact=artifactResult.rows[0] as {fileName:string;byteSize:number;contentHash:string;content:Buffer;manifestHash:string;signatureAlgorithm:string;manifestSignature:string;signedAt:string}|undefined;
+   const artifact=artifactResult.rows[0] as {fileName:string;byteSize:number;contentHash:string;content:Buffer;manifestHash:string;signatureAlgorithm:string;manifestSignature:string;signingKeyId:string;signedAt:string}|undefined;
    if(artifact){
     const computedZipHash=hashBinary(artifact.content);
     if(computedZipHash!==artifact.contentHash)return reply.code(409).send({error:"SEALED_ZIP_INTEGRITY_ERROR",expected:artifact.contentHash,computed:computedZipHash});
-    if(!verifySidecManifestSignature(artifact.manifestHash,artifact.manifestSignature)){
+    if(!verifySidecManifestSignature(artifact.manifestHash,artifact.manifestSignature,artifact.signingKeyId)){
      return reply.code(409).send({error:"MANIFEST_SIGNATURE_INVALID"});
     }
     return reply.type("application/zip")
@@ -691,6 +698,7 @@ export async function sidecRoutes(app:FastifyInstance){
      .header("X-SIGDEC-Content-SHA256",artifact.contentHash)
      .header("X-SIGDEC-Manifest-SHA256",artifact.manifestHash)
      .header("X-SIGDEC-Manifest-Signature",artifact.manifestSignature)
+     .header("X-SIGDEC-Signing-Key-Id",artifact.signingKeyId)
      .send(artifact.content);
    }
 
