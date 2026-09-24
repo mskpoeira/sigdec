@@ -16,6 +16,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0023_sidec_manifest_cobrade_returns.sql"));
  assert.ok(files.includes("0024_sidec_sealed_artifacts_document_requirements.sql"));
  assert.ok(files.includes("0025_sidec_key_versions_deadlines_retention.sql"));
+ assert.ok(files.includes("0026_sidec_ed25519_integrity_proofs.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -123,6 +124,20 @@ test("SIDEC v1.17 possui keyId SLAs e retencao separada",async()=>{
   WHERE conrelid='sidec_artifact_retention'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
  assert.match(defs,/LEGAL_HOLD/);
  assert.match(defs,/ARCHIVAL/);
+});
+
+test("SIDEC v1.18 possui atestacao Ed25519 e historico de verificacoes",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_artifact_attestations','sidec_integrity_verifications') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_artifact_attestations","sidec_integrity_verifications"]);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_artifact_attestations'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/Ed25519/);
+ const columns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_integrity_verifications'
+    AND column_name IN ('hmac_valid','asymmetric_valid','overall_valid','verification_source') ORDER BY column_name`);
+ assert.deepEqual(columns.rows.map(x=>x.column_name),["asymmetric_valid","hmac_valid","overall_valid","verification_source"]);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
