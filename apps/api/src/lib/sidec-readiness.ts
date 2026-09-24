@@ -7,6 +7,16 @@ export type SidecMapping={
 };
 
 export type CobradeRequirement={sourcePath:string;label:string;required:boolean;enabled:boolean;sortOrder:number};
+export type SidecDocumentRequirement={
+ scopeType:"DEFAULT"|"COBRADE"|"INCIDENT_TYPE";
+ scopeValue:string;
+ documentType:"REPORT"|"OPINION"|"INTERDICTION"|"DECLARATION"|"FORM"|"OTHER";
+ label:string;
+ minCount:number;
+ required:boolean;
+ enabled:boolean;
+};
+export type SidecAvailableDocument={id:string;documentType:string;issuedAt?:string|null};
 
 export type ReadinessCheck={
  code:string;
@@ -77,6 +87,45 @@ export function evaluateCobradeRequirements(root:Record<string,unknown>,requirem
    detail:hasValue(value)?undefined:`Requisito COBRADE pendente: ${rule.sourcePath}`
   };
  });
+}
+
+export function mergeDocumentRequirements(requirements:SidecDocumentRequirement[]){
+ const grouped=new Map<string,SidecDocumentRequirement>();
+ for(const rule of requirements.filter(x=>x.enabled)){
+  const current=grouped.get(rule.documentType);
+  if(!current||rule.minCount>current.minCount||(!current.required&&rule.required)){
+   grouped.set(rule.documentType,{...rule});
+  }
+ }
+ return [...grouped.values()].sort((a,b)=>a.documentType.localeCompare(b.documentType));
+}
+
+export function evaluateDocumentRequirements(documents:SidecAvailableDocument[],requirements:SidecDocumentRequirement[],selectedIds?:string[]):ReadinessCheck[]{
+ const effective=mergeDocumentRequirements(requirements);
+ const selected=selectedIds?new Set(selectedIds):null;
+ return effective.map(rule=>{
+  const count=documents.filter(doc=>doc.documentType===rule.documentType&&(!selected||selected.has(doc.id))).length;
+  return {
+   code:"document:"+rule.documentType,
+   label:rule.label,
+   required:rule.required,
+   ok:count>=rule.minCount,
+   detail:count>=rule.minCount?undefined:`Exigidos ${rule.minCount} documento(s) ${rule.documentType}; disponível/selecionado: ${count}.`
+  };
+ });
+}
+
+export function chooseRequiredDocumentIds(documents:SidecAvailableDocument[],requirements:SidecDocumentRequirement[]){
+ const ids:string[]=[];
+ for(const rule of mergeDocumentRequirements(requirements)){
+  if(!rule.required)continue;
+  const matches=documents
+   .filter(doc=>doc.documentType===rule.documentType)
+   .sort((a,b)=>String(b.issuedAt??"").localeCompare(String(a.issuedAt??"")))
+   .slice(0,rule.minCount);
+  for(const doc of matches)if(!ids.includes(doc.id))ids.push(doc.id);
+ }
+ return ids;
 }
 
 export function isSidecReady(checks:ReadinessCheck[]){
