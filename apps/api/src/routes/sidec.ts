@@ -349,7 +349,7 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
    manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
    FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
- if(existing.rows[0]){await ensureSidecArtifactAttestation(org,id,userId);return existing.rows[0];}
+ if(existing.rows[0]){await ensureSidecArtifactAttestation(org,id,userId);await ensureSidecIntegrityTimestamp(org,id,userId);return existing.rows[0];}
 
  const sourceResult=await db.query(`SELECT e.revision,e.schema_version AS "schemaVersion",e.snapshot,e.snapshot_hash AS "snapshotHash",
    e.manifest_hash AS "manifestHash",e.status,i.protocol
@@ -373,6 +373,7 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
   VALUES($1,$2,'UNSPECIFIED',NULL,$3)
   ON CONFLICT(export_id) DO NOTHING`,[id,org,userId]);
  await ensureSidecArtifactAttestation(org,id,userId);
+ await ensureSidecIntegrityTimestamp(org,id,userId);
  const sealed=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
    content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
    manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
@@ -397,8 +398,15 @@ async function buildSidecIntegrityProof(org:string,id:string,userId:string){
   manifestHash:row.manifestHash,artifactHash:row.artifactHash,signature:attestation.signature,
   publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint
  }))throw Object.assign(new Error("Atestação Ed25519 inválida."),{statusCode:409,code:"ED25519_ATTESTATION_INVALID"});
+ const timestamp=await ensureSidecIntegrityTimestamp(org,id,userId) as any;
+ const timestampValid=verifySidecTimestamp({
+  manifestHash:row.manifestHash,artifactHash:row.artifactHash,attestationSignature:attestation.signature,
+  timestampedAt:new Date(timestamp.timestampedAt).toISOString(),statementHash:timestamp.statementHash,
+  signature:timestamp.signature,publicKey:timestamp.publicKey,publicKeyFingerprint:timestamp.publicKeyFingerprint
+ });
+ if(!timestampValid)throw Object.assign(new Error("Carimbo de tempo interno inválido."),{statusCode:409,code:"INTEGRITY_TIMESTAMP_INVALID"});
  return {
-  proofVersion:"sigdec-sidec-integrity-proof/1.0" as const,
+  proofVersion:"sigdec-sidec-integrity-proof/1.1" as const,
   export:{id:row.id,protocol:row.protocol,revision:Number(row.revision),schemaVersion:row.schemaVersion,sealedAt:new Date(row.sealedAt).toISOString()},
   artifact:{fileName:row.fileName,byteSize:Number(row.byteSize),sha256:row.artifactHash},
   manifest:{sha256:row.manifestHash},
@@ -407,6 +415,12 @@ async function buildSidecIntegrityProof(org:string,id:string,userId:string){
    algorithm:"Ed25519" as const,keyId:attestation.keyId,signature:attestation.signature,
    publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint,
    attestedAt:new Date(attestation.attestedAt).toISOString()
+  },
+  publicVerificationUrl:publicIntegrityUrl(row.artifactHash),
+  timestamp:{
+   algorithm:"Ed25519" as const,keyId:timestamp.keyId,statementHash:timestamp.statementHash,
+   timestampedAt:new Date(timestamp.timestampedAt).toISOString(),signature:timestamp.signature,
+   publicKey:timestamp.publicKey,publicKeyFingerprint:timestamp.publicKeyFingerprint
   }
  };
 }
