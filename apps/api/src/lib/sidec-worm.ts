@@ -174,3 +174,28 @@ export function verifySidecArchive(input:{bucket:string;key:string;versionId?:st
 export function verifySidecReplica(input:{bucket:string;key:string;versionId?:string|null;expectedHash:string}){
  return verifyAt("REPLICA",input);
 }
+
+
+async function restoreAt(destination:WormDestination,input:{bucket:string;key:string;versionId?:string|null}){
+ const result=await client(destination).send(new GetObjectCommand({
+  Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined
+ }));
+ if(!result.Body)throw new Error("Objeto WORM sem corpo para restauração.");
+ const bytes=Buffer.from(await result.Body.transformToByteArray());
+ return {
+  destination,
+  bytes,
+  versionId:result.VersionId??input.versionId??null,
+  contentLength:bytes.length,
+  etag:result.ETag??null,
+  lastModified:result.LastModified??null
+ };
+}
+
+export function restoreSidecArchiveObject(input:{bucket:string;key:string;versionId?:string|null}){
+ return restoreAt("PRIMARY",input);
+}
+
+export function restoreSidecReplicaObject(input:{bucket:string;key:string;versionId?:string|null}){
+ return restoreAt("REPLICA",input);
+}
