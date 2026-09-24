@@ -81,6 +81,36 @@ const returnEnvelopeSchema=z.object({
  notes:z.string().trim().max(8000).optional()
 });
 
+const integrityProofSchema=z.object({
+ proofVersion:z.literal("sigdec-sidec-integrity-proof/1.0"),
+ export:z.object({
+  id:z.string().uuid(),
+  protocol:z.string().min(1).max(200),
+  revision:z.number().int().positive(),
+  schemaVersion:z.string().min(1).max(40),
+  sealedAt:z.string().min(1)
+ }),
+ artifact:z.object({
+  fileName:z.string().min(1).max(300),
+  byteSize:z.number().int().nonnegative(),
+  sha256:z.string().regex(/^[a-f0-9]{64}$/)
+ }),
+ manifest:z.object({sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
+ hmac:z.object({
+  algorithm:z.literal("HMAC-SHA256"),
+  keyId:z.string().min(1).max(80),
+  signature:z.string().regex(/^[a-f0-9]{64}$/)
+ }),
+ ed25519:z.object({
+  algorithm:z.literal("Ed25519"),
+  keyId:z.string().min(1).max(80),
+  signature:z.string().min(40).max(300),
+  publicKey:z.string().min(40).max(4000),
+  publicKeyFingerprint:z.string().regex(/^[a-f0-9]{64}$/),
+  attestedAt:z.string().min(1)
+ })
+});
+
 const statusSchema=z.object({
  status:z.enum(["EXPORTED","SUBMITTED","ACKNOWLEDGED","REJECTED","CANCELLED"]),
  externalProtocol:z.string().trim().max(200).optional(),
@@ -294,6 +324,37 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
    manifest_signature AS "manifestSignature",signing_key_id AS "signingKeyId",signed_at AS "signedAt"
    FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
  return sealed.rows[0];
+}
+
+async function buildSidecIntegrityProof(org:string,id:string,userId:string){
+ const artifactResult=await db.query(`SELECT e.id,e.revision,e.schema_version AS "schemaVersion",i.protocol,
+   a.file_name AS "fileName",a.byte_size AS "byteSize",a.content_hash AS "artifactHash",a.content,
+   a.manifest_hash AS "manifestHash",a.signature_algorithm AS "hmacAlgorithm",
+   a.manifest_signature AS "hmacSignature",a.signing_key_id AS "hmacKeyId",a.signed_at AS "sealedAt"
+   FROM sidec_exports e
+   JOIN incidents i ON i.id=e.incident_id
+   JOIN sidec_export_artifacts a ON a.export_id=e.id
+   WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
+ const row=artifactResult.rows[0] as any;
+ if(!row)throw Object.assign(new Error("Artefato SIDEC selado não encontrado."),{statusCode:404,code:"SEALED_ARTIFACT_NOT_FOUND"});
+ if(hashBinary(row.content)!==row.artifactHash)throw Object.assign(new Error("Hash do ZIP selado divergente."),{statusCode:409,code:"SEALED_ZIP_INTEGRITY_ERROR"});
+ const attestation=await ensureSidecArtifactAttestation(org,id,userId) as any;
+ if(!verifySidecIntegrity({
+  manifestHash:row.manifestHash,artifactHash:row.artifactHash,signature:attestation.signature,
+  publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint
+ }))throw Object.assign(new Error("Atestação Ed25519 inválida."),{statusCode:409,code:"ED25519_ATTESTATION_INVALID"});
+ return {
+  proofVersion:"sigdec-sidec-integrity-proof/1.0" as const,
+  export:{id:row.id,protocol:row.protocol,revision:Number(row.revision),schemaVersion:row.schemaVersion,sealedAt:new Date(row.sealedAt).toISOString()},
+  artifact:{fileName:row.fileName,byteSize:Number(row.byteSize),sha256:row.artifactHash},
+  manifest:{sha256:row.manifestHash},
+  hmac:{algorithm:"HMAC-SHA256" as const,keyId:row.hmacKeyId,signature:row.hmacSignature},
+  ed25519:{
+   algorithm:"Ed25519" as const,keyId:attestation.keyId,signature:attestation.signature,
+   publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint,
+   attestedAt:new Date(attestation.attestedAt).toISOString()
+  }
+ };
 }
 
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
