@@ -353,17 +353,32 @@ export async function sidecRoutes(app:FastifyInstance){
   const mappings=await effectiveMappings(org);
   const root=incidentRoot(incidentRow);
   const cobradeCode=String(incidentRow.cobradeCode??"").trim()||null;
-  const cobradeRequirements=await effectiveCobradeRequirements(org,cobradeCode);
-  const checks=[...evaluateSidecReadiness(root,mappings),...evaluateCobradeRequirements(root,cobradeRequirements)];
-  if(!isSidecReady(checks))return reply.code(409).send({error:"NOT_READY",checks,cobradeCode,cobradeRequirements});
+  const typeCode=String(incidentRow.typeCode??"").trim()||null;
+  const [cobradeRequirements,documentRequirements,availableDocumentsResult]=await Promise.all([
+   effectiveCobradeRequirements(org,cobradeCode),
+   effectiveDocumentRequirements(org,cobradeCode,typeCode),
+   db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
+     FROM technical_documents
+     WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED'
+     ORDER BY issued_at DESC,created_at DESC`,[org,id])
+  ]);
+  const availableDocuments=availableDocumentsResult.rows as Array<Record<string,unknown>&SidecAvailableDocument>;
+  const effectiveDocs=mergeDocumentRequirements(documentRequirements);
+  const checks=[
+   ...evaluateSidecReadiness(root,mappings),
+   ...evaluateCobradeRequirements(root,cobradeRequirements),
+   ...evaluateDocumentRequirements(availableDocuments,effectiveDocs)
+  ];
+  if(!isSidecReady(checks))return reply.code(409).send({error:"NOT_READY",checks,cobradeCode,typeCode,cobradeRequirements,documentRequirements:effectiveDocs});
 
-  const selectedDocuments=documentIds.length
-   ? await db.query(`SELECT id,number,title,document_type AS "documentType",revision,content_hash AS "contentHash",issued_at AS "issuedAt"
-       FROM technical_documents
-       WHERE organization_id=$1 AND incident_id=$2 AND status='ISSUED' AND id=ANY($3::uuid[])
-       ORDER BY issued_at ASC,created_at ASC`,[org,id,documentIds])
-   : {rows:[] as Record<string,unknown>[]};
+  const selectedDocuments={rows:availableDocumentsResult.rows.filter((document:any)=>documentIds.includes(String(document.id)))};
   if(selectedDocuments.rows.length!==documentIds.length)return reply.code(400).send({error:"INVALID_DOCUMENT_SELECTION"});
+  const documentSelectionChecks=evaluateDocumentRequirements(availableDocuments,effectiveDocs,documentIds);
+  if(!isSidecReady(documentSelectionChecks))return reply.code(409).send({
+   error:"DOCUMENT_REQUIREMENTS_NOT_MET",
+   checks:documentSelectionChecks,
+   requiredDocumentIds:chooseRequiredDocumentIds(availableDocuments,effectiveDocs)
+  });
 
   const [actions,inspections,supportRequests,deliveries,timeline]=await Promise.all([
    db.query(`SELECT action_type AS "actionType",title,description,started_at AS "startedAt",ended_at AS "endedAt",
@@ -398,7 +413,7 @@ export async function sidecRoutes(app:FastifyInstance){
    mappedFields:buildMappedFields(root,mappings)
   });
   const snapshotHash=hashSidecPackage(pkg);
-  const readinessSnapshot={ready:true,checks,mappings,cobradeCode,cobradeRequirements};
+  const readinessSnapshot={ready:true,checks:[...checks,...documentSelectionChecks],mappings,cobradeCode,typeCode,cobradeRequirements,documentRequirements:effectiveDocs};
   const manifestDocuments=(selectedDocuments.rows as Array<Record<string,any>>).map(document=>({
    id:String(document.id),
    number:document.number??null,
