@@ -411,6 +411,82 @@ export async function sidecRoutes(app:FastifyInstance){
       e.updated_at DESC LIMIT 300`,[org]);
   return {items:r.rows};
  });
+ app.get("/api/v1/sidec/pending",{preHandler:requirePermission("sidec_exports.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const incidents=await db.query(`SELECT i.id AS "incidentId",i.protocol,i.summary,i.status AS "incidentStatus",i.priority,
+    i.risk_to_life AS "riskToLife",i.description,i.source,i.address_line AS "addressLine",i.neighborhood,
+    i.reference_point AS "referencePoint",i.latitude,i.longitude,i.created_at AS "createdAt",i.updated_at AS "updatedAt",
+    t.code AS "typeCode",t.name AS "typeName",t.group_name AS "typeGroup",t.cobrade_code AS "cobradeCode",
+    latest.id AS "exportId",latest.revision,latest.status AS "exportStatus",latest.external_protocol AS "externalProtocol",
+    latest.updated_at AS "exportUpdatedAt",(artifact.export_id IS NOT NULL) AS "artifactSealed"
+   FROM incidents i
+   JOIN incident_types t ON t.id=i.incident_type_id
+   LEFT JOIN LATERAL (
+    SELECT e.id,e.revision,e.status,e.external_protocol,e.updated_at
+    FROM sidec_exports e WHERE e.incident_id=i.id AND e.organization_id=$1
+    ORDER BY e.revision DESC LIMIT 1
+   ) latest ON true
+   LEFT JOIN sidec_export_artifacts artifact ON artifact.export_id=latest.id
+   WHERE i.organization_id=$1 AND i.status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
+   ORDER BY i.updated_at DESC LIMIT 200`,[org]);
+
+  const mappings=await effectiveMappings(org);
+  const allCobrade=await db.query(`SELECT cobrade_code AS "cobradeCode",source_path AS "sourcePath",label,required,enabled,sort_order AS "sortOrder"
+    FROM sidec_cobrade_requirements WHERE organization_id=$1 AND enabled=true ORDER BY cobrade_code,sort_order`,[org]);
+  const allDocRules=await db.query(`SELECT scope_type AS "scopeType",scope_value AS "scopeValue",document_type AS "documentType",
+    label,min_count AS "minCount",required,enabled
+    FROM sidec_document_requirements WHERE organization_id=$1 AND enabled=true`,[org]);
+  const ids=incidents.rows.map((row:any)=>row.incidentId);
+  const documentRows=ids.length?await db.query(`SELECT incident_id AS "incidentId",id,document_type AS "documentType",issued_at AS "issuedAt"
+    FROM technical_documents WHERE organization_id=$1 AND status='ISSUED' AND incident_id=ANY($2::uuid[])`,[org,ids]):{rows:[]};
+  const docsByIncident=new Map<string,SidecAvailableDocument[]>();
+  for(const doc of documentRows.rows as Array<any>){
+   const list=docsByIncident.get(String(doc.incidentId))??[];
+   list.push({id:String(doc.id),documentType:String(doc.documentType),issuedAt:doc.issuedAt?String(doc.issuedAt):null});
+   docsByIncident.set(String(doc.incidentId),list);
+  }
+
+  const items:Array<Record<string,unknown>>=[];
+  for(const row of incidents.rows as Array<any>){
+   let pendingStatus:string|null=null;
+   let missing:string[]=[];
+   if(row.exportStatus==="READY")pendingStatus="PACKAGE_READY";
+   else if(row.exportStatus==="EXPORTED")pendingStatus="AWAITING_PROTOCOL";
+   else if(row.exportStatus==="SUBMITTED")pendingStatus="AWAITING_RETURN";
+   else if(row.exportStatus==="REJECTED")pendingStatus="REJECTED";
+   else if(row.exportStatus==="CANCELLED")pendingStatus="READY_TO_PACKAGE";
+   else if(!row.exportStatus){
+    const root=incidentRoot(row);
+    const cobradeRules=(allCobrade.rows as Array<any>).filter(rule=>String(rule.cobradeCode)===String(row.cobradeCode??"")) as CobradeRequirement[];
+    const docRules=(allDocRules.rows as Array<any>).filter(rule=>
+      (rule.scopeType==="DEFAULT"&&rule.scopeValue==="*")||
+      (rule.scopeType==="COBRADE"&&String(rule.scopeValue)===String(row.cobradeCode??""))||
+      (rule.scopeType==="INCIDENT_TYPE"&&String(rule.scopeValue)===String(row.typeCode??""))
+    ) as SidecDocumentRequirement[];
+    const checks=[
+     ...evaluateSidecReadiness(root,mappings),
+     ...evaluateCobradeRequirements(root,cobradeRules),
+     ...evaluateDocumentRequirements(docsByIncident.get(String(row.incidentId))??[],docRules)
+    ];
+    const failed=checks.filter(check=>check.required&&!check.ok);
+    pendingStatus=failed.length?"NOT_READY":"READY_TO_PACKAGE";
+    missing=failed.map(check=>check.label);
+   }
+   if(!pendingStatus)continue;
+   items.push({
+    incidentId:row.incidentId,protocol:row.protocol,summary:row.summary,priority:row.priority,
+    typeCode:row.typeCode,cobradeCode:row.cobradeCode,pendingStatus,missing,
+    exportId:row.exportId??null,revision:row.revision??null,exportStatus:row.exportStatus??null,
+    externalProtocol:row.externalProtocol??null,artifactSealed:Boolean(row.artifactSealed),
+    updatedAt:row.exportUpdatedAt??row.updatedAt
+   });
+  }
+  const summary=items.reduce<Record<string,number>>((acc,item)=>{
+   const key=String(item.pendingStatus);acc[key]=(acc[key]??0)+1;return acc;
+  },{});
+  return {summary,items};
+ });
+
  app.get("/api/v1/incidents/:id/sidec-exports",{preHandler:requirePermission("sidec_exports.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const incident=await db.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[id,org]);
