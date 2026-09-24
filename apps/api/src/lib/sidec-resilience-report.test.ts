@@ -12,7 +12,7 @@ test("relatório PDF de resiliência gera documento válido",async()=>{
   const pdf=await buildSidecResiliencePdf({
     organizationName:"Prefeitura da Cidade de Ubatuba",
     report:{
-      reportVersion:"sigdec-sidec-resilience-report/1.1",
+      reportVersion:"sigdec-sidec-resilience-report/1.2",
       generatedAt:"2026-09-24T12:00:00.000Z",
       period:{days:30,from:"2026-08-25T12:00:00.000Z",to:"2026-09-24T12:00:00.000Z"},
       redundancy:{archives:4,replicas:4,coveragePct:100},
@@ -21,6 +21,12 @@ test("relatório PDF de resiliência gera documento válido",async()=>{
       restoreDrills:[{destination:"PRIMARY",drills:2,successful:2,successPct:100,averageDurationMs:120}],
       conditions:{detected:1,alerted:0,resolved:1,openAlerts:0},
       retries:{jobs:1,pending:0,succeeded:1,attempts:1},
+      continuity:{
+        policy:{enabled:true,rpoMinutes:60,rtoMinutes:30,drillMaxAgeHours:168},
+        metrics:{archives:4,replicas:4,missingReplicas:0,maxReplicationDelayMinutes:10,replicaRequired:true,latestSuccessfulPrimaryDrillAt:"2026-09-23T12:00:00.000Z",latestSuccessfulPrimaryDrillDurationMinutes:5,latestSuccessfulReplicaDrillAt:"2026-09-23T12:05:00.000Z",latestSuccessfulReplicaDrillDurationMinutes:6},
+        readiness:{overall:"COMPLIANT",rpo:{state:"COMPLIANT",objectiveMinutes:60,observedMinutes:10,reason:"Dentro do objetivo."},rto:{state:"COMPLIANT",objectiveMinutes:30,observedMinutes:6,reason:"Dentro do objetivo."},drillFreshness:{state:"COMPLIANT",maxAgeHours:168,ageHours:24,reason:"Evidência recente."}},
+        note:"Objetivos administrativos."
+      },
       trend:[{month:"2026-09",primaryIntegrityPct:100,replicaIntegrityPct:100,alertsDetected:0,drills:2,drillsSuccessful:2}]
     }
   });
