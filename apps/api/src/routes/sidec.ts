@@ -12,6 +12,7 @@ import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
 import { archiveSidecArtifact, archiveSidecReplica, enableSidecArchiveLegalHold, enableSidecReplicaLegalHold, extendSidecArchiveRetention, extendSidecReplicaRetention, restoreSidecArchiveObject, restoreSidecReplicaObject, verifySidecArchive, verifySidecReplica, wormMode, wormReplicaEnabled, wormReplicaMode } from "../lib/sidec-worm.js";
 import { hasZipSignature, nextResilienceRetryAt, shouldAlertResilience } from "../lib/sidec-resilience.js";
+import { buildSidecResiliencePdf, resiliencePct } from "../lib/sidec-resilience-report.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -1747,10 +1748,12 @@ export async function sidecRoutes(app:FastifyInstance){
 
  app.get("/api/v1/sidec/resilience/report",{preHandler:requirePermission("sidec_resilience.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId);
-  const query=request.query as {days?:string;download?:string};
+  const query=request.query as {days?:string;download?:string;format?:string;months?:string};
   const days=Math.max(1,Math.min(365,Number(query.days??30)||30));
+  const months=Math.max(3,Math.min(24,Number(query.months??12)||12));
   const from=new Date(Date.now()-days*24*60*60*1000);
-  const [coverage,primary,replica,drills,conditions,retries]=await Promise.all([
+  const [organization,coverage,primary,replica,drills,conditions,retries,trend]=await Promise.all([
+   db.query(`SELECT name FROM organizations WHERE id=$1`,[org]),
    db.query(`SELECT count(*)::int AS archives,
       count(s.export_id)::int AS replicas
      FROM sidec_archive_receipts p LEFT JOIN sidec_archive_replicas s ON s.export_id=p.export_id
@@ -1778,32 +1781,80 @@ export async function sidecRoutes(app:FastifyInstance){
       count(*) FILTER(WHERE succeeded_at IS NULL)::int AS pending,
       count(*) FILTER(WHERE succeeded_at IS NOT NULL)::int AS succeeded,
       COALESCE(sum(attempts),0)::int AS attempts
-     FROM sidec_replica_retry_jobs WHERE organization_id=$1 AND created_at>=$2`,[org,from])
+     FROM sidec_replica_retry_jobs WHERE organization_id=$1 AND created_at>=$2`,[org,from]),
+   db.query(`WITH months AS (
+      SELECT generate_series(
+        date_trunc('month',now())-(($2::int-1)*interval '1 month'),
+        date_trunc('month',now()),
+        interval '1 month'
+      ) AS month_start
+    )
+    SELECT to_char(month_start,'YYYY-MM') AS month,
+      (SELECT count(*)::int FROM sidec_archive_verifications v
+        WHERE v.organization_id=$1 AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "primaryChecks",
+      (SELECT count(*)::int FROM sidec_archive_verifications v
+        WHERE v.organization_id=$1 AND v.exists_remote=true AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "primaryAvailable",
+      (SELECT count(*)::int FROM sidec_archive_verifications v
+        WHERE v.organization_id=$1 AND v.hash_valid=true AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "primaryHashValid",
+      (SELECT count(*)::int FROM sidec_archive_replica_verifications v
+        WHERE v.organization_id=$1 AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "replicaChecks",
+      (SELECT count(*)::int FROM sidec_archive_replica_verifications v
+        WHERE v.organization_id=$1 AND v.exists_remote=true AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "replicaAvailable",
+      (SELECT count(*)::int FROM sidec_archive_replica_verifications v
+        WHERE v.organization_id=$1 AND v.hash_valid=true AND v.verified_at>=month_start AND v.verified_at<month_start+interval '1 month') AS "replicaHashValid",
+      (SELECT count(*)::int FROM sidec_resilience_conditions rc
+        WHERE rc.organization_id=$1 AND rc.first_detected_at>=month_start AND rc.first_detected_at<month_start+interval '1 month') AS "alertsDetected",
+      (SELECT count(*)::int FROM sidec_restore_drills d
+        WHERE d.organization_id=$1 AND d.performed_at>=month_start AND d.performed_at<month_start+interval '1 month') AS drills,
+      (SELECT count(*)::int FROM sidec_restore_drills d
+        WHERE d.organization_id=$1 AND d.success=true AND d.performed_at>=month_start AND d.performed_at<month_start+interval '1 month') AS "drillsSuccessful"
+    FROM months ORDER BY month_start`,[org,months])
   ]);
-  const pct=(value:number,total:number)=>total?Math.round((value/total)*10000)/100:null;
   const p=primary.rows[0]??{},r=replica.rows[0]??{},cv=coverage.rows[0]??{};
   const report={
-   reportVersion:"sigdec-sidec-resilience-report/1.0",
+   reportVersion:"sigdec-sidec-resilience-report/1.1",
    generatedAt:new Date().toISOString(),period:{days,from:from.toISOString(),to:new Date().toISOString()},
    redundancy:{
     archives:Number(cv.archives??0),replicas:Number(cv.replicas??0),
-    coveragePct:pct(Number(cv.replicas??0),Number(cv.archives??0))
+    coveragePct:resiliencePct(Number(cv.replicas??0),Number(cv.archives??0))
    },
    primary:{
-    checks:Number(p.checks??0),availabilityCheckPct:pct(Number(p.available??0),Number(p.checks??0)),
-    integrityCheckPct:pct(Number(p.hashValid??0),Number(p.checks??0))
+    checks:Number(p.checks??0),availabilityCheckPct:resiliencePct(Number(p.available??0),Number(p.checks??0)),
+    integrityCheckPct:resiliencePct(Number(p.hashValid??0),Number(p.checks??0))
    },
    replica:{
-    checks:Number(r.checks??0),availabilityCheckPct:pct(Number(r.available??0),Number(r.checks??0)),
-    integrityCheckPct:pct(Number(r.hashValid??0),Number(r.checks??0))
+    checks:Number(r.checks??0),availabilityCheckPct:resiliencePct(Number(r.available??0),Number(r.checks??0)),
+    integrityCheckPct:resiliencePct(Number(r.hashValid??0),Number(r.checks??0))
    },
    restoreDrills:drills.rows.map((x:any)=>({
     destination:x.destination,drills:Number(x.drills),successful:Number(x.successful),
-    successPct:pct(Number(x.successful),Number(x.drills)),averageDurationMs:x.averageDurationMs===null?null:Number(x.averageDurationMs)
+    successPct:resiliencePct(Number(x.successful),Number(x.drills)),averageDurationMs:x.averageDurationMs===null?null:Number(x.averageDurationMs)
    })),
    conditions:conditions.rows[0]??{},
-   retries:retries.rows[0]??{}
+   retries:retries.rows[0]??{},
+   trend:trend.rows.map((x:any)=>({
+    month:String(x.month),
+    primaryChecks:Number(x.primaryChecks??0),
+    primaryAvailabilityPct:resiliencePct(Number(x.primaryAvailable??0),Number(x.primaryChecks??0)),
+    primaryIntegrityPct:resiliencePct(Number(x.primaryHashValid??0),Number(x.primaryChecks??0)),
+    replicaChecks:Number(x.replicaChecks??0),
+    replicaAvailabilityPct:resiliencePct(Number(x.replicaAvailable??0),Number(x.replicaChecks??0)),
+    replicaIntegrityPct:resiliencePct(Number(x.replicaHashValid??0),Number(x.replicaChecks??0)),
+    alertsDetected:Number(x.alertsDetected??0),
+    drills:Number(x.drills??0),
+    drillsSuccessful:Number(x.drillsSuccessful??0)
+   }))
   };
+  if(String(query.format??"").toLowerCase()==="pdf"){
+   const pdf=await buildSidecResiliencePdf({
+    organizationName:String(organization.rows[0]?.name??"Município"),
+    report
+   });
+   return reply.type("application/pdf")
+    .header("Content-Disposition",`attachment; filename="SIGDEC-resiliencia-SIDEC-${days}d.pdf"`)
+    .header("Content-Length",String(pdf.length))
+    .send(pdf);
+  }
   if(String(query.download??"")==="1"){
    reply.header("Content-Type","application/json; charset=utf-8");
    reply.header("Content-Disposition",`attachment; filename="SIGDEC-resiliencia-SIDEC-${days}d.json"`);
