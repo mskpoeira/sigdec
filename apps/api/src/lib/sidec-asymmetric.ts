@@ -1,6 +1,7 @@
 import { createHash,createPrivateKey,createPublicKey,sign,verify } from "node:crypto";
 
 const proofDomain="SIGDEC/SIDEC/INTEGRITY/ED25519/v1";
+const timestampDomain="SIGDEC/SIDEC/TIMESTAMP/ED25519/v1";
 const pkcs8Prefix=Buffer.from("302e020100300506032b657004220420","hex");
 
 function baseSecret(){
@@ -25,6 +26,10 @@ function privateKey(){
 
 function integrityPayload(manifestHash:string,artifactHash:string){
  return Buffer.from(`${proofDomain}\nmanifest=${manifestHash}\nartifact=${artifactHash}\n`,"utf8");
+}
+
+function timestampPayload(manifestHash:string,artifactHash:string,attestationSignature:string,timestampedAt:string){
+ return Buffer.from(`${timestampDomain}\nmanifest=${manifestHash}\nartifact=${artifactHash}\nattestation=${attestationSignature}\ntimestamp=${timestampedAt}\n`,"utf8");
 }
 
 export function signSidecIntegrity(manifestHash:string,artifactHash:string){
@@ -62,6 +67,43 @@ export function verifySidecIntegrity(input:{
    createPublicKey(input.publicKey),
    Buffer.from(input.signature,"base64")
   );
+ }catch{
+  return false;
+ }
+}
+
+
+export function signSidecTimestamp(input:{manifestHash:string;artifactHash:string;attestationSignature:string;timestampedAt:string}){
+ const key=privateKey();
+ const publicKey=createPublicKey(key);
+ const publicDer=publicKey.export({format:"der",type:"spki"}) as Buffer;
+ const payload=timestampPayload(input.manifestHash,input.artifactHash,input.attestationSignature,input.timestampedAt);
+ return {
+  algorithm:"Ed25519" as const,
+  keyId:currentSidecEd25519KeyId(),
+  statementHash:createHash("sha256").update(payload).digest("hex"),
+  signature:sign(null,payload,key).toString("base64"),
+  publicKey:publicKey.export({format:"pem",type:"spki"}).toString(),
+  publicKeyFingerprint:createHash("sha256").update(publicDer).digest("hex")
+ };
+}
+
+export function verifySidecTimestamp(input:{
+ manifestHash:string;
+ artifactHash:string;
+ attestationSignature:string;
+ timestampedAt:string;
+ statementHash:string;
+ signature:string;
+ publicKey:string;
+ publicKeyFingerprint:string;
+}){
+ try{
+  const fingerprint=fingerprintSidecPublicKey(input.publicKey);
+  if(fingerprint!==input.publicKeyFingerprint)return false;
+  const payload=timestampPayload(input.manifestHash,input.artifactHash,input.attestationSignature,input.timestampedAt);
+  if(createHash("sha256").update(payload).digest("hex")!==input.statementHash)return false;
+  return verify(null,payload,createPublicKey(input.publicKey),Buffer.from(input.signature,"base64"));
  }catch{
   return false;
  }
