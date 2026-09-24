@@ -53,3 +53,15 @@ COMMENT ON COLUMN sidec_export_artifacts.manifest_signature IS
   'Assinatura interna HMAC-SHA256 do hash do manifesto; não equivale a assinatura ICP-Brasil.';
 COMMENT ON TABLE sidec_document_requirements IS
   'Regras municipais de documentos emitidos exigidos por padrão, COBRADE ou tipo de ocorrência.';
+
+
+CREATE OR REPLACE FUNCTION prevent_sidec_export_artifact_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Artefato SIDEC selado é imutável.';
+END;
+$$;
+
+CREATE TRIGGER sidec_export_artifacts_immutable
+BEFORE UPDATE OR DELETE ON sidec_export_artifacts
+FOR EACH ROW EXECUTE FUNCTION prevent_sidec_export_artifact_mutation();
