@@ -12,8 +12,11 @@ export type SidecContinuityMetrics={
   replicas:number;
   missingReplicas:number;
   maxReplicationDelayMinutes:number|null;
-  latestSuccessfulDrillAt:Date|null;
-  latestSuccessfulDrillDurationMinutes:number|null;
+  replicaRequired:boolean;
+  latestSuccessfulPrimaryDrillAt:Date|null;
+  latestSuccessfulPrimaryDrillDurationMinutes:number|null;
+  latestSuccessfulReplicaDrillAt:Date|null;
+  latestSuccessfulReplicaDrillDurationMinutes:number|null;
 };
 
 export type SidecContinuityReadiness={
@@ -47,6 +50,9 @@ export function evaluateSidecContinuity(
   if(metrics.archives===0){
     rpoState="INSUFFICIENT_DATA";
     rpoReason="Ainda não há arquivos WORM para avaliar o objetivo de replicação.";
+  }else if(!metrics.replicaRequired){
+    rpoState="INSUFFICIENT_DATA";
+    rpoReason="A réplica secundária está desabilitada; o RPO de replicação não pode ser comprovado.";
   }else if(metrics.missingReplicas>0){
     rpoState="BREACH";
     rpoReason=`${metrics.missingReplicas} arquivo(s) WORM ainda não possuem réplica.`;
@@ -61,31 +67,47 @@ export function evaluateSidecContinuity(
     rpoReason="O maior atraso observado de replicação excede o objetivo administrativo.";
   }
 
-  const drillAgeHours=metrics.latestSuccessfulDrillAt?hoursBetween(metrics.latestSuccessfulDrillAt,now):null;
+  const drillDates=[
+    metrics.latestSuccessfulPrimaryDrillAt,
+    ...(metrics.replicaRequired?[metrics.latestSuccessfulReplicaDrillAt]:[])
+  ];
+  const drillDurations=[
+    metrics.latestSuccessfulPrimaryDrillDurationMinutes,
+    ...(metrics.replicaRequired?[metrics.latestSuccessfulReplicaDrillDurationMinutes]:[])
+  ];
+  const allRequiredDrillsPresent=drillDates.every(Boolean)&&drillDurations.every(value=>value!==null);
+  const drillAgeHours=allRequiredDrillsPresent
+    ?Math.max(...drillDates.map(value=>hoursBetween(value as Date,now)))
+    :null;
   let drillState:ContinuityState;
   let drillReason:string;
-  if(!metrics.latestSuccessfulDrillAt){
+  if(!allRequiredDrillsPresent){
     drillState="INSUFFICIENT_DATA";
-    drillReason="Nenhum drill de restauração bem-sucedido foi registrado.";
+    drillReason=metrics.replicaRequired
+      ?"É necessário drill bem-sucedido recente do primário e da réplica."
+      :"É necessário drill bem-sucedido recente do primário.";
   }else if((drillAgeHours??Infinity)<=policy.drillMaxAgeHours){
     drillState="COMPLIANT";
-    drillReason="Existe evidência recente de restauração bem-sucedida.";
+    drillReason="As evidências exigidas de restauração estão dentro da janela de validade.";
   }else{
     drillState="BREACH";
-    drillReason="A última evidência de restauração bem-sucedida está vencida.";
+    drillReason="Ao menos uma evidência exigida de restauração está vencida.";
   }
 
+  const observedRtoMinutes=allRequiredDrillsPresent
+    ?Math.max(...drillDurations.map(value=>Number(value)))
+    :null;
   let rtoState:ContinuityState;
   let rtoReason:string;
-  if(metrics.latestSuccessfulDrillDurationMinutes===null){
+  if(observedRtoMinutes===null){
     rtoState="INSUFFICIENT_DATA";
-    rtoReason="Não há duração de drill bem-sucedido disponível para comparação.";
-  }else if(metrics.latestSuccessfulDrillDurationMinutes<=policy.rtoMinutes){
+    rtoReason="Não há duração de todos os drills exigidos para comparação.";
+  }else if(observedRtoMinutes<=policy.rtoMinutes){
     rtoState="COMPLIANT";
-    rtoReason="A duração do último drill está dentro do objetivo administrativo de recuperação.";
+    rtoReason="A pior duração dos drills exigidos está dentro do objetivo administrativo de recuperação.";
   }else{
     rtoState="BREACH";
-    rtoReason="A duração do último drill excede o objetivo administrativo de recuperação.";
+    rtoReason="A pior duração dos drills exigidos excede o objetivo administrativo de recuperação.";
   }
 
   const states=[rpoState,rtoState,drillState];
@@ -106,7 +128,7 @@ export function evaluateSidecContinuity(
     rto:{
       state:rtoState,
       objectiveMinutes:policy.rtoMinutes,
-      observedMinutes:metrics.latestSuccessfulDrillDurationMinutes,
+      observedMinutes:observedRtoMinutes,
       reason:rtoReason
     },
     drillFreshness:{
