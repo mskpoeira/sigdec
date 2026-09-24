@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect,useState } from "react";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -17,12 +18,12 @@ type PublicIntegrity={
  timestamp:{keyId:string;statementHash:string;timestampedAt:string;publicKeyFingerprint:string;valid:boolean};
 };
 
-export default function PublicIntegrityPage({params}:{params:Promise<{hash:string}>}){
- const [hash,setHash]=useState("");
+export default function PublicIntegrityPage(){
+ const params=useParams<{hash:string}>();
+ const hash=String(params?.hash??"");
  const [data,setData]=useState<PublicIntegrity|null>(null);
  const [error,setError]=useState("");
 
- useEffect(()=>{void params.then(p=>setHash(p.hash))},[params]);
  useEffect(()=>{
   if(!hash)return;
   void fetch(`${API}/api/v1/public/sidec-integrity/${encodeURIComponent(hash)}`)
