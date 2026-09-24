@@ -88,6 +88,23 @@ export async function buildSidecResiliencePdf(input:{organizationName:string;rep
       `Jobs de retry: ${metric(report.retries?.jobs)} · pendentes: ${metric(report.retries?.pending)} · concluídos: ${metric(report.retries?.succeeded)} · tentativas: ${metric(report.retries?.attempts)}`
     );
 
+    const continuity=report.continuity;
+    if(continuity){
+      pdf.moveDown(0.9).font("Helvetica-Bold").fontSize(10).fillColor("#102033").text("OBJETIVOS ADMINISTRATIVOS DE CONTINUIDADE");
+      pdf.font("Helvetica").fontSize(9).fillColor("#102033").text(
+        `Estado geral: ${metric(continuity.readiness?.overall)} · RPO ${metric(continuity.policy?.rpoMinutes)} min · RTO ${metric(continuity.policy?.rtoMinutes)} min · validade de drill ${metric(continuity.policy?.drillMaxAgeHours)} h`
+      );
+      pdf.fontSize(8.5).fillColor("#52657a").text(
+        `RPO observado: ${metric(continuity.readiness?.rpo?.observedMinutes)} min · ${metric(continuity.readiness?.rpo?.state)}. ${metric(continuity.readiness?.rpo?.reason)}`
+      );
+      pdf.text(
+        `RTO observado em drill: ${metric(continuity.readiness?.rto?.observedMinutes)} min · ${metric(continuity.readiness?.rto?.state)}. ${metric(continuity.readiness?.rto?.reason)}`
+      );
+      pdf.text(
+        `Atualidade dos drills: ${metric(continuity.readiness?.drillFreshness?.state)} · idade máxima observada ${metric(continuity.readiness?.drillFreshness?.ageHours)} h.`
+      );
+    }
+
     const trend=Array.isArray(report.trend)?report.trend:[];
     if(trend.length){
       pdf.moveDown(0.9).font("Helvetica-Bold").fontSize(10).text("SÉRIE HISTÓRICA MENSAL");
@@ -103,7 +120,7 @@ export async function buildSidecResiliencePdf(input:{organizationName:string;rep
 
     pdf.moveDown(1).font("Helvetica-Bold").fontSize(9).fillColor("#102033").text("NOTA METODOLÓGICA");
     pdf.font("Helvetica").fontSize(8.5).fillColor("#52657a").text(
-      "Os percentuais representam os resultados das verificações efetivamente registradas no SIGDEC. Não equivalem a SLA contratual, disponibilidade contínua do provedor ou certificação externa de continuidade de negócios.",
+      "Os percentuais representam os resultados das verificações efetivamente registradas no SIGDEC. RPO e RTO são objetivos administrativos: o RPO é confrontado com atraso de replicação WORM e o RTO usa duração de drills como evidência, sem equivaler à recuperação integral do SIGDEC. Não constituem SLA contratual, disponibilidade contínua do provedor ou certificação externa de continuidade de negócios.",
       {align:"justify",lineGap:2}
     );
 
