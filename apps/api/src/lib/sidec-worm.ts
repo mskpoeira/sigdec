@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { GetObjectCommand,PutObjectCommand,S3Client,type ObjectLockMode } from "@aws-sdk/client-s3";
+import { GetObjectCommand,GetObjectLegalHoldCommand,GetObjectRetentionCommand,PutObjectCommand,PutObjectLegalHoldCommand,PutObjectRetentionCommand,S3Client,type ObjectLockMode } from "@aws-sdk/client-s3";
 
 export type WormRetention={
  retainUntil?:Date|null;
@@ -80,19 +80,43 @@ export async function archiveSidecArtifact(input:{
  };
 }
 
-export async function verifySidecArchive(input:{bucket:string;key:string;expectedHash:string}){
+export async function extendSidecArchiveRetention(input:{
+ bucket:string;key:string;versionId?:string|null;mode:ObjectLockMode;retainUntil:Date;
+}){
+ await client().send(new PutObjectRetentionCommand({
+  Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined,
+  Retention:{Mode:input.mode,RetainUntilDate:input.retainUntil}
+ }));
+ return {mode:input.mode,retainUntil:input.retainUntil};
+}
+
+export async function enableSidecArchiveLegalHold(input:{bucket:string;key:string;versionId?:string|null}){
+ await client().send(new PutObjectLegalHoldCommand({
+  Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined,
+  LegalHold:{Status:"ON"}
+ }));
+ return {legalHold:true};
+}
+
+export async function verifySidecArchive(input:{bucket:string;key:string;versionId?:string|null;expectedHash:string}){
  try{
-  const result=await client().send(new GetObjectCommand({Bucket:input.bucket,Key:input.key}));
+  const s3=client();
+  const result=await s3.send(new GetObjectCommand({Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined}));
   if(!result.Body)throw new Error("Objeto WORM sem corpo.");
   const bytes=Buffer.from(await result.Body.transformToByteArray());
   const observedHash=createHash("sha256").update(bytes).digest("hex");
+  const [retentionResult,holdResult]=await Promise.all([
+   s3.send(new GetObjectRetentionCommand({Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined})).catch(()=>null),
+   s3.send(new GetObjectLegalHoldCommand({Bucket:input.bucket,Key:input.key,VersionId:input.versionId??undefined})).catch(()=>null)
+  ]);
   return {
    existsRemote:true,
    observedHash,
    hashValid:observedHash===input.expectedHash,
-   objectLockMode:result.ObjectLockMode??null,
-   retainUntil:result.ObjectLockRetainUntilDate??null,
-   legalHold:result.ObjectLockLegalHoldStatus==="ON",
+   objectLockMode:retentionResult?.Retention?.Mode??result.ObjectLockMode??null,
+   retainUntil:retentionResult?.Retention?.RetainUntilDate??result.ObjectLockRetainUntilDate??null,
+   legalHold:(holdResult?.LegalHold?.Status??result.ObjectLockLegalHoldStatus)==="ON",
+   versionId:result.VersionId??input.versionId??null,
    errorMessage:null as string|null
   };
  }catch(error){
@@ -103,6 +127,7 @@ export async function verifySidecArchive(input:{bucket:string;key:string;expecte
    objectLockMode:null,
    retainUntil:null,
    legalHold:null,
+   versionId:input.versionId??null,
    errorMessage:error instanceof Error?error.message:String(error)
   };
  }
