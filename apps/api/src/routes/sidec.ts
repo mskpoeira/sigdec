@@ -128,7 +128,7 @@ type SidecZipSource={
  status?:string;
 };
 
-async function buildSidecZip(org:string,id:string,item:SidecZipSource,manifestSignature?:string|null){
+async function buildSidecZip(org:string,id:string,item:SidecZipSource,options?:{signManifest?:boolean}){
  const docs=await db.query(`SELECT d.document_id AS id,d.document_number AS number,d.document_title AS title,
    d.document_type AS "documentType",d.document_revision AS revision,d.content_hash AS "contentHash"
    FROM sidec_export_documents d WHERE d.export_id=$1 ORDER BY d.document_title,d.document_id`,[id]);
@@ -139,6 +139,7 @@ async function buildSidecZip(org:string,id:string,item:SidecZipSource,manifestSi
   documents:docs.rows as SidecManifestDocument[]
  });
  const computedManifestHash=hashSidecManifest(manifest);
+ const manifestSignature=options?.signManifest?signSidecManifestHash(computedManifestHash):null;
  if(item.manifestHash&&item.manifestHash!==computedManifestHash){
   throw Object.assign(new Error("Hash do manifesto divergente."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR",expected:item.manifestHash,computed:computedManifestHash});
  }
@@ -192,11 +193,12 @@ async function sealSidecExportArtifact(org:string,id:string,userId:string){
    WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
  const source=sourceResult.rows[0] as SidecZipSource|undefined;
  if(!source)throw Object.assign(new Error("Pacote SIDEC não encontrado."),{statusCode:404,code:"NOT_FOUND"});
- const manifestHash=String(source.manifestHash??"");
- if(!manifestHash)throw Object.assign(new Error("Pacote sem hash de manifesto."),{statusCode:409,code:"MANIFEST_HASH_MISSING"});
- const manifestSignature=signSidecManifestHash(manifestHash);
- const built=await buildSidecZip(org,id,source,manifestSignature);
- if(built.manifestHash!==manifestHash)throw Object.assign(new Error("Manifesto alterado antes da selagem."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR"});
+ const built=await buildSidecZip(org,id,source,{signManifest:true});
+ const manifestHash=built.manifestHash;
+ const manifestSignature=built.manifestSignature;
+ if(!manifestSignature)throw Object.assign(new Error("Falha ao assinar manifesto."),{statusCode:500,code:"MANIFEST_SIGNATURE_ERROR"});
+ if(source.manifestHash&&source.manifestHash!==manifestHash)throw Object.assign(new Error("Manifesto alterado antes da selagem."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR"});
+ if(!source.manifestHash)await db.query("UPDATE sidec_exports SET manifest_hash=$1 WHERE id=$2 AND organization_id=$3 AND manifest_hash IS NULL",[manifestHash,id,org]);
  const contentHash=hashBinary(built.zip);
  await db.query(`INSERT INTO sidec_export_artifacts(
    export_id,organization_id,file_name,byte_size,content_hash,content,manifest_hash,signature_algorithm,manifest_signature,signed_by
@@ -692,7 +694,7 @@ export async function sidecRoutes(app:FastifyInstance){
      .send(artifact.content);
    }
 
-   const preview=await buildSidecZip(org,id,item,null);
+   const preview=await buildSidecZip(org,id,item);
    return reply.type("application/zip")
     .header("Content-Disposition",`attachment; filename="PREVIEW-${preview.fileName}"`)
     .header("Content-Length",String(preview.zip.length))
