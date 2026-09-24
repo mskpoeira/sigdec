@@ -12,7 +12,7 @@ import { commandRoutes } from "./routes/command.js";
 import { planningRoutes } from "./routes/planning.js";
 import { documentRoutes } from "./routes/documents.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
-import { continuityRoutes } from "./routes/continuity.js";
+import { continuityRoutes, evaluateContinuityActionAlerts } from "./routes/continuity.js";
 const app=Fastify({logger:true,trustProxy:true});
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
@@ -36,3 +36,9 @@ const evaluateResilience=()=>evaluateSidecResilience().catch(error=>app.log.erro
 void evaluateResilience();
 const sidecResilienceTimer=setInterval(evaluateResilience,sidecResilienceMinutes*60*1000);
 sidecResilienceTimer.unref();
+
+const continuityActionAlertMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_CONTINUITY_ACTION_ALERT_MINUTES??60)));
+const evaluateContinuityActions=()=>evaluateContinuityActionAlerts().catch(error=>app.log.error({err:error},"Falha ao avaliar ações corretivas de continuidade SIDEC."));
+void evaluateContinuityActions();
+const continuityActionAlertTimer=setInterval(evaluateContinuityActions,continuityActionAlertMinutes*60*1000);
+continuityActionAlertTimer.unref();
