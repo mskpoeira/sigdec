@@ -334,7 +334,7 @@ test("SIDEC v1.29 possui vinculos e avaliacao de eficacia das acoes",async()=>{
  assert.match(defs,/EFFECTIVE/);
  assert.match(defs,/PARTIAL/);
  assert.match(defs,/INEFFECTIVE/);
- assert.match(defs,/status = 'DONE'/);
+ assert.match(defs,/effectiveness.*NOT_EVALUATED.*OR.*status.*DONE/s);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
