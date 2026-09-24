@@ -196,15 +196,19 @@ async function loadExercise(org:string,id:string){
  const aarRow=aarResult.rows[0];
  let aar:any=null;
  if(aarRow){
-  const actions=await db.query(`SELECT ai.id,ai.title,ai.description,ai.priority,ai.owner_user_id AS "ownerUserId",
-    owner.display_name AS "ownerName",owner.matricula AS "ownerMatricula",ai.due_at AS "dueAt",ai.status,
-    ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt"
-   FROM sidec_continuity_action_items ai
-   LEFT JOIN users owner ON owner.id=ai.owner_user_id
-   WHERE ai.aar_id=$1
-   ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
-    ai.due_at NULLS LAST,ai.created_at`,[aarRow.id]);
-  aar={...aarRow,actions:actions.rows};
+  const [actions,lessons]=await Promise.all([
+   db.query(`SELECT ai.id,ai.title,ai.description,ai.priority,ai.owner_user_id AS "ownerUserId",
+     owner.display_name AS "ownerName",owner.matricula AS "ownerMatricula",ai.due_at AS "dueAt",ai.status,
+     ai.completed_at AS "completedAt",ai.created_at AS "createdAt",ai.updated_at AS "updatedAt"
+    FROM sidec_continuity_action_items ai
+    LEFT JOIN users owner ON owner.id=ai.owner_user_id
+    WHERE ai.aar_id=$1
+    ORDER BY CASE ai.priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
+     ai.due_at NULLS LAST,ai.created_at`,[aarRow.id]),
+   db.query(`SELECT id,category,recurrence_key AS "recurrenceKey",title,observation,severity,created_at AS "createdAt"
+    FROM sidec_continuity_lessons WHERE aar_id=$1 ORDER BY created_at`,[aarRow.id])
+  ]);
+  aar={...aarRow,actions:actions.rows,lessons:lessons.rows};
  }
  return {...exercise,summary,steps,aar};
 }
@@ -647,7 +651,8 @@ export async function continuityRoutes(app:FastifyInstance){
    if(schedule){
     const base=new Date(schedule.nextDueAt);
     const now=new Date();
-    while(base.getTime()<=now.getTime())base.setUTCDate(base.getUTCDate()+Number(schedule.intervalDays));
+    if(base.getTime()>now.getTime())base.setUTCDate(base.getUTCDate()+Number(schedule.intervalDays));
+    else while(base.getTime()<=now.getTime())base.setUTCDate(base.getUTCDate()+Number(schedule.intervalDays));
     await client.query(`UPDATE sidec_continuity_schedules
       SET last_exercise_id=$1,next_due_at=$2,updated_at=now()
       WHERE id=$3 AND organization_id=$4`,[exerciseId,base,schedule.id,org]);
