@@ -11,7 +11,7 @@ import { fieldRoutes } from "./routes/field.js";
 import { commandRoutes } from "./routes/command.js";
 import { planningRoutes } from "./routes/planning.js";
 import { documentRoutes } from "./routes/documents.js";
-import { evaluateSidecDeadlineAlerts, sidecRoutes } from "./routes/sidec.js";
+import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, sidecRoutes } from "./routes/sidec.js";
 const app=Fastify({logger:true,trustProxy:true});
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
@@ -24,3 +24,8 @@ const evaluateDeadlines=()=>evaluateSidecDeadlineAlerts().catch(error=>app.log.e
 void evaluateDeadlines();
 const sidecDeadlineTimer=setInterval(evaluateDeadlines,sidecDeadlineMinutes*60*1000);
 sidecDeadlineTimer.unref();
+const sidecArchiveVerificationMinutes=Math.max(60,Math.min(10080,Number(process.env.SIDEC_WORM_VERIFICATION_MINUTES??1440)));
+const evaluateArchives=()=>evaluateSidecArchiveVerifications().catch(error=>app.log.error({err:error},"Falha ao verificar arquivos WORM SIDEC."));
+void evaluateArchives();
+const sidecArchiveTimer=setInterval(evaluateArchives,sidecArchiveVerificationMinutes*60*1000);
+sidecArchiveTimer.unref();
