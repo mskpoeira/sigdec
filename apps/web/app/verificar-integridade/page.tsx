@@ -8,6 +8,7 @@ const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type VerificationResult={
  valid:boolean;
  asymmetricValid:boolean;
+ timestampValid?:boolean|null;
  hmacValid:boolean|null;
  registeredArtifact:boolean;
  proofVersion:string;
@@ -80,6 +81,7 @@ export default function VerifyIntegrityPage(){
    <h2>{result.valid?"✓ Comprovante criptograficamente válido":"⚠ Comprovante inválido"}</h2>
    <div className="dataGrid">
     <article className="card"><h2>Ed25519</h2><p><strong>{result.asymmetricValid?"Válido":"Inválido"}</strong></p></article>
+    <article className="card"><h2>Carimbo interno</h2><p><strong>{result.timestampValid===undefined||result.timestampValid===null?"Não aplicável (proof 1.0)":result.timestampValid?"Válido":"Inválido"}</strong></p></article>
     <article className="card"><h2>HMAC interno</h2><p><strong>{result.hmacValid===null?"Não disponível":result.hmacValid?"Válido":"Inválido"}</strong></p></article>
     <article className="card"><h2>Registro SIGDEC</h2><p><strong>{result.registeredArtifact?"Hash corresponde a artefato registrado":"Sem correspondência confirmada"}</strong></p></article>
    </div>
