@@ -269,11 +269,42 @@ export default function SidecExportsPage(){
   </section>
 
   <section className="detailSection">
+   <div><span className="eyebrow">DOCUMENTOS OBRIGATÓRIOS</span><h2>Regras por perfil / COBRADE</h2><p>O checklist combina o padrão municipal, o tipo da ocorrência e o COBRADE; quando a mesma categoria aparece mais de uma vez, prevalece o maior mínimo exigido.</p></div>
+   <div className="dataGrid">
+    {(readiness?.documentRequirements??[]).length===0?<div className="infoCard">Nenhum documento obrigatório configurado para esta ocorrência.</div>:(readiness?.documentRequirements??[]).map(rule=><article className="card" key={rule.documentType}><h2>{rule.label}</h2><p><strong>{rule.documentType}</strong> · mínimo {rule.minCount} · {rule.required?"obrigatório":"recomendado"}</p></article>)}
+   </div>
+   <div className="incidentForm compactForm" style={{marginTop:12}}>
+    <label>Editar escopo
+     <select value={documentScope} onChange={e=>void changeDocumentScope(e.target.value as "DEFAULT"|"COBRADE"|"INCIDENT_TYPE")}>
+      <option value="DEFAULT">Padrão municipal</option>
+      {readiness?.cobradeCode&&<option value="COBRADE">COBRADE {readiness.cobradeCode}</option>}
+      {readiness?.typeCode&&<option value="INCIDENT_TYPE">Tipo {readiness.typeCode}</option>}
+     </select>
+    </label>
+    <div className="dataGrid">
+     {documentRuleRows.length===0?<div className="infoCard">Nenhuma regra cadastrada neste escopo.</div>:documentRuleRows.map((row,index)=><article className="card" key={row.documentType+"-"+index}>
+      <label>Tipo
+       <select value={row.documentType} onChange={e=>updateDocumentRule(index,{documentType:e.target.value as DocumentRequirement["documentType"]})}>
+        <option value="REPORT">Relatório</option><option value="OPINION">Parecer</option><option value="INTERDICTION">Interdição</option><option value="DECLARATION">Declaração</option><option value="FORM">Formulário</option><option value="OTHER">Outro</option>
+       </select>
+      </label>
+      <label>Rótulo<input value={row.label} onChange={e=>updateDocumentRule(index,{label:e.target.value})}/></label>
+      <label>Quantidade mínima<input type="number" min="1" max="20" value={row.minCount} onChange={e=>updateDocumentRule(index,{minCount:Number(e.target.value)})}/></label>
+      <label><input type="checkbox" checked={row.enabled} onChange={e=>updateDocumentRule(index,{enabled:e.target.checked})}/> Ativo</label>
+      <label><input type="checkbox" checked={row.required} onChange={e=>updateDocumentRule(index,{required:e.target.checked})}/> Obrigatório</label>
+      <button className="secondaryLink" type="button" disabled={busy} onClick={()=>removeDocumentRule(index)}>Remover</button>
+     </article>)}
+    </div>
+    <div className="headerActions"><button className="secondaryLink" type="button" disabled={busy} onClick={addDocumentRule}>Adicionar regra</button><button className="primaryButton" type="button" disabled={busy} onClick={()=>void saveDocumentRules()}>Salvar regras documentais</button></div>
+   </div>
+  </section>
+
+  <section className="detailSection">
    <div><span className="eyebrow">DOCUMENTOS</span><h2>Documentos emitidos que acompanharão a revisão</h2></div>
    {(readiness?.availableDocuments??[]).length===0?<div className="infoCard">Nenhum documento técnico emitido está vinculado à ocorrência. Documentos são opcionais.</div>:
    <div className="dataGrid">{readiness?.availableDocuments.map(doc=><label className="card" key={doc.id} style={{cursor:"pointer"}}>
     <span><input type="checkbox" checked={selectedDocuments.includes(doc.id)} onChange={e=>setSelectedDocuments(ids=>e.target.checked?[...ids,doc.id]:ids.filter(id=>id!==doc.id))}/> Selecionar</span>
-    <h2>{doc.number??"Sem número"} · {doc.title}</h2><p>{doc.documentType} · revisão {doc.revision} · emitido em {new Date(doc.issuedAt).toLocaleString("pt-BR")}</p>
+    <h2>{doc.number??"Sem número"} · {doc.title}</h2><p>{doc.documentType} · revisão {doc.revision} · emitido em {new Date(doc.issuedAt).toLocaleString("pt-BR")}</p>{readiness?.requiredDocumentIds?.includes(doc.id)&&<small>Selecionado automaticamente para cumprir requisito documental.</small>}
     <a className="secondaryLink" href={documentPdfUrl(doc.id)} target="_blank" rel="noreferrer">Abrir PDF oficial</a>
    </label>)}</div>}
   </section>
