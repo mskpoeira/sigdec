@@ -43,7 +43,8 @@ function secretForKey(keyId:string){
 }
 
 function derivedKey(keyId:string){
- return createHmac("sha256",secretForKey(keyId)).update(`${domain}:${keyId}`,"utf8").digest();
+ const context=keyId===legacyKeyId?domain:`${domain}:${keyId}`;
+ return createHmac("sha256",secretForKey(keyId)).update(context,"utf8").digest();
 }
 
 export function signSidecManifestHashVersioned(manifestHash:string,keyId=currentSidecSigningKeyId()){
