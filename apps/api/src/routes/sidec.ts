@@ -10,7 +10,7 @@ import { currentSidecSigningKeyId, hashBinary, signSidecManifestHashVersioned, v
 import { isSidecDeadlineOverdue, sidecDueAt, type SidecDeadlinePolicy } from "../lib/sidec-deadlines.js";
 import { buildSidecCustodyPdf, type CustodyEvent } from "../lib/sidec-custody.js";
 import { signSidecIntegrity, signSidecTimestamp, verifySidecIntegrity, verifySidecTimestamp } from "../lib/sidec-asymmetric.js";
-import { archiveSidecArtifact, verifySidecArchive } from "../lib/sidec-worm.js";
+import { archiveSidecArtifact, enableSidecArchiveLegalHold, extendSidecArchiveRetention, verifySidecArchive, wormMode } from "../lib/sidec-worm.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -73,6 +73,15 @@ const retentionSchema=z.object({
  legalHold:z.boolean().default(false),
  notes:z.string().trim().max(4000).nullable().optional()
 });
+
+const archiveRetentionExtensionSchema=z.object({
+ retainUntil:z.coerce.date(),
+ reason:z.string().trim().min(5).max(4000)
+});
+const archiveLegalHoldEnableSchema=z.object({
+ reason:z.string().trim().min(5).max(4000)
+});
+
 
 const returnEnvelopeSchema=z.object({
  schemaVersion:z.literal("sigdec-sidec-return/1.0"),
@@ -429,9 +438,9 @@ async function buildSidecIntegrityProof(org:string,id:string,userId:string){
 
 async function recordArchiveVerification(input:{
  org:string;exportId:string;source:"SCHEDULED"|"MANUAL"|"ARCHIVE";
- bucket:string;key:string;expectedHash:string;
+ bucket:string;key:string;versionId?:string|null;expectedHash:string;
 }){
- const verification=await verifySidecArchive({bucket:input.bucket,key:input.key,expectedHash:input.expectedHash});
+ const verification=await verifySidecArchive({bucket:input.bucket,key:input.key,versionId:input.versionId,expectedHash:input.expectedHash});
  await db.query(`INSERT INTO sidec_archive_verifications(
   export_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,retain_until,legal_hold,
   verification_source,error_message
@@ -447,14 +456,14 @@ export async function evaluateSidecArchiveVerifications(organizationId?:string){
  let where="";
  if(organizationId){params.push(organizationId);where="WHERE r.organization_id=$1";}
  const rows=await db.query(`SELECT r.export_id AS "exportId",r.organization_id AS "organizationId",r.bucket,
-   r.object_key AS "objectKey",r.content_hash AS "contentHash"
+   r.object_key AS "objectKey",r.version_id AS "versionId",r.content_hash AS "contentHash"
    FROM sidec_archive_receipts r ${where}
    ORDER BY r.archived_at ASC LIMIT 500`,params);
  let checked=0,failed=0;
  for(const row of rows.rows as Array<any>){
   const result=await recordArchiveVerification({
    org:String(row.organizationId),exportId:String(row.exportId),source:"SCHEDULED",
-   bucket:String(row.bucket),key:String(row.objectKey),expectedHash:String(row.contentHash)
+   bucket:String(row.bucket),key:String(row.objectKey),versionId:row.versionId?String(row.versionId):null,expectedHash:String(row.contentHash)
   });
   checked++;
   if(!result.existsRemote||result.hashValid!==true)failed++;
@@ -1082,10 +1091,10 @@ export async function sidecRoutes(app:FastifyInstance){
     archived.objectLockMode,archived.retainUntil,archived.legalHold,item.contentHash,auth.userId
   ]);
   const receipt=inserted.rows[0]??(await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",
-    content_hash AS "contentHash",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
+    version_id AS "versionId",content_hash AS "contentHash",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
     legal_hold AS "legalHold",archived_at AS "archivedAt" FROM sidec_archive_receipts WHERE export_id=$1`,[id])).rows[0];
   const verification=await recordArchiveVerification({
-   org,exportId:id,source:"ARCHIVE",bucket:receipt.bucket,key:receipt.objectKey,expectedHash:item.contentHash
+   org,exportId:id,source:"ARCHIVE",bucket:receipt.bucket,key:receipt.objectKey,versionId:receipt.versionId??null,expectedHash:item.contentHash
   });
   await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
    VALUES($1,'sidec_archive.created',$2,$3,$4::jsonb)`,[
@@ -1105,12 +1114,12 @@ export async function sidecRoutes(app:FastifyInstance){
 
  app.post("/api/v1/sidec-exports/:id/archive/verify",{preHandler:requirePermission("sidec_archive.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
-  const receipt=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",content_hash AS "contentHash"
+  const receipt=await db.query(`SELECT export_id AS "exportId",bucket,object_key AS "objectKey",version_id AS "versionId",content_hash AS "contentHash"
    FROM sidec_archive_receipts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
   const item=receipt.rows[0] as any;
   if(!item)return reply.code(404).send({error:"ARCHIVE_NOT_FOUND"});
   const verification=await recordArchiveVerification({
-   org,exportId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,expectedHash:item.contentHash
+   org,exportId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,versionId:item.versionId??null,expectedHash:item.contentHash
   });
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
    VALUES($1,'sidec_archive.verify','sidec_archive_receipt',$2,$3,$4,$5::jsonb)`,[
