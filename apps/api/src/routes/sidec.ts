@@ -868,11 +868,25 @@ export async function sidecRoutes(app:FastifyInstance){
     a.signing_key_id AS "signingKeyId",a.signed_at AS "artifactSignedAt",
     t.key_id AS "ed25519KeyId",t.public_key_fingerprint AS "ed25519Fingerprint",t.attested_at AS "ed25519AttestedAt",
     ar.retention_class AS "retentionClass",ar.retain_until AS "retainUntil",ar.legal_hold AS "legalHold",ar.notes AS "retentionNotes",
+    (wr.export_id IS NOT NULL) AS "archiveCreated",wr.bucket AS "archiveBucket",wr.object_key AS "archiveObjectKey",
+    wr.object_lock_mode AS "archiveLockMode",wr.retain_until AS "archiveRetainUntil",wr.legal_hold AS "archiveLegalHold",
+    wr.archived_at AS "archivedAt",wv.exists_remote AS "archiveExistsRemote",wv.hash_valid AS "archiveHashValid",
+    wv.verified_at AS "archiveVerifiedAt",wv.error_message AS "archiveVerificationError",
     COALESCE((SELECT json_agg(json_build_object(
       'id',d.document_id,'number',d.document_number,'title',d.document_title,'documentType',d.document_type,
       'revision',d.document_revision,'contentHash',d.content_hash
     ) ORDER BY d.document_title) FROM sidec_export_documents d WHERE d.export_id=e.id),'[]'::json) AS documents
-    FROM sidec_exports e LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id LEFT JOIN sidec_artifact_attestations t ON t.export_id=e.id LEFT JOIN sidec_artifact_retention ar ON ar.export_id=e.id WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
+    FROM sidec_exports e
+    LEFT JOIN sidec_export_artifacts a ON a.export_id=e.id
+    LEFT JOIN sidec_artifact_attestations t ON t.export_id=e.id
+    LEFT JOIN sidec_artifact_retention ar ON ar.export_id=e.id
+    LEFT JOIN sidec_archive_receipts wr ON wr.export_id=e.id
+    LEFT JOIN LATERAL (
+      SELECT exists_remote,hash_valid,verified_at,error_message
+      FROM sidec_archive_verifications av WHERE av.export_id=e.id
+      ORDER BY verified_at DESC LIMIT 1
+    ) wv ON true
+    WHERE e.incident_id=$1 AND e.organization_id=$2 ORDER BY e.revision DESC`,[id,org]);
   return {items:r.rows};
  });
 
