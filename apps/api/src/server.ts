@@ -15,9 +15,9 @@ import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluat
 const app=Fastify({logger:true,trustProxy:true});
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
-app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:"1.22.0",timestamp:new Date().toISOString()}));
+app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:"1.23.0",timestamp:new Date().toISOString()}));
 await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(documentRoutes);await app.register(sidecRoutes);
-app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release:"1.22.0",modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","inteligencia-assistiva","auditoria"]}));
+app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release:"1.23.0",modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","inteligencia-assistiva","auditoria"]}));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
 const sidecDeadlineMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_DEADLINE_EVALUATION_MINUTES??60)));
 const evaluateDeadlines=()=>evaluateSidecDeadlineAlerts().catch(error=>app.log.error({err:error},"Falha ao avaliar SLAs SIDEC."));
