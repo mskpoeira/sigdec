@@ -553,16 +553,29 @@ export async function evaluateSidecArchiveVerifications(organizationId?:string){
    r.object_key AS "objectKey",r.version_id AS "versionId",r.content_hash AS "contentHash"
    FROM sidec_archive_receipts r ${where}
    ORDER BY r.archived_at ASC LIMIT 500`,params);
- let checked=0,failed=0;
+ let checked=0,failed=0,replicaChecked=0,replicaFailed=0;
  for(const row of rows.rows as Array<any>){
+  const org=String(row.organizationId),exportId=String(row.exportId);
   const result=await recordArchiveVerification({
-   org:String(row.organizationId),exportId:String(row.exportId),source:"SCHEDULED",
+   org,exportId,source:"SCHEDULED",
    bucket:String(row.bucket),key:String(row.objectKey),versionId:row.versionId?String(row.versionId):null,expectedHash:String(row.contentHash)
   });
   checked++;
   if(!result.existsRemote||result.hashValid!==true)failed++;
+
+  const replica=await db.query(`SELECT bucket,object_key AS "objectKey",version_id AS "versionId",content_hash AS "contentHash"
+    FROM sidec_archive_replicas WHERE export_id=$1 AND organization_id=$2`,[exportId,org]);
+  if(replica.rows[0]){
+   const rr=replica.rows[0] as any;
+   const verification=await recordReplicaVerification({
+    org,exportId,source:"SCHEDULED",bucket:String(rr.bucket),key:String(rr.objectKey),
+    versionId:rr.versionId?String(rr.versionId):null,expectedHash:String(rr.contentHash)
+   });
+   replicaChecked++;
+   if(!verification.existsRemote||verification.hashValid!==true)replicaFailed++;
+  }
  }
- return {checked,failed};
+ return {checked,failed,replicaChecked,replicaFailed};
 }
 
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
