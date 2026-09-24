@@ -23,6 +23,36 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0030_sidec_worm_replication.sql"));
  assert.ok(files.includes("0031_sidec_resilience_operations.sql"));
  assert.ok(files.includes("0032_sidec_continuity_objectives.sql"));
+ assert.ok(files.includes("0033_sidec_continuity_runbook.sql"));
+});
+
+test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_plans','sidec_continuity_steps','sidec_continuity_exercises','sidec_continuity_exercise_steps'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_exercise_steps","sidec_continuity_exercises","sidec_continuity_plans","sidec_continuity_steps"
+ ]);
+ const planConstraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_plans'::regclass AND contype='c'`);
+ const planDefs=planConstraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(planDefs,/DRAFT/);
+ assert.match(planDefs,/ACTIVE/);
+ assert.match(planDefs,/RETIRED/);
+ const stepConstraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_steps'::regclass AND contype='c'`);
+ const stepDefs=stepConstraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(stepDefs,/DECLARATION/);
+ assert.match(stepDefs,/RECOVERY/);
+ assert.match(stepDefs,/RETURN/);
+ const exerciseConstraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_exercises'::regclass AND contype='c'`);
+ const exerciseDefs=exerciseConstraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(exerciseDefs,/IN_PROGRESS/);
+ assert.match(exerciseDefs,/COMPLETED/);
+ assert.match(exerciseDefs,/PASS/);
+ assert.match(exerciseDefs,/FAIL/);
 });
 
 test("política de continuidade SIDEC possui objetivos administrativos válidos",async()=>{
