@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { after,test } from "node:test";
 import { hashBinary,signSidecManifestHash,verifySidecManifestSignature } from "./sidec-signature.js";
 
 const previous=process.env.SIDEC_MANIFEST_SIGNING_SECRET;
@@ -18,7 +18,7 @@ test("hash binario SHA-256 e estavel",()=>{
  assert.notEqual(hashBinary(Buffer.from("SIGDEC")),hashBinary(Buffer.from("SIDEC")));
 });
 
-test.after(()=>{
+after(()=>{
  if(previous===undefined)delete process.env.SIDEC_MANIFEST_SIGNING_SECRET;
  else process.env.SIDEC_MANIFEST_SIGNING_SECRET=previous;
 });
