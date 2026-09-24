@@ -6,6 +6,7 @@ import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { buildSidecPackage, hashSidecPackage, sidecPackageSummaryCsv, type SidecPackage } from "../lib/sidec-package.js";
 import { buildSidecManifest, filterSidecDiffs, hashSidecManifest, sidecDiffCategories, type SidecManifestDocument } from "../lib/sidec-manifest.js";
+import { hashBinary, signSidecManifestHash, verifySidecManifestSignature } from "../lib/sidec-signature.js";
 import { buildPdf } from "./documents.js";
 import { buildMappedFields, chooseRequiredDocumentIds, diffSidecValues, evaluateCobradeRequirements, evaluateDocumentRequirements, evaluateSidecReadiness, isSidecReady, mergeDocumentRequirements, type CobradeRequirement, type SidecAvailableDocument, type SidecDocumentRequirement, type SidecMapping } from "../lib/sidec-readiness.js";
 
@@ -115,6 +116,97 @@ async function zipBuffer(entries:Array<{name:string;data:Buffer|string}>){
  for(const entry of entries)archive.append(entry.data,{name:entry.name});
  await archive.finalize();
  return completed;
+}
+
+type SidecZipSource={
+ revision:number;
+ schemaVersion:string;
+ snapshot:SidecPackage;
+ snapshotHash:string;
+ manifestHash?:string|null;
+ protocol:string;
+ status?:string;
+};
+
+async function buildSidecZip(org:string,id:string,item:SidecZipSource,manifestSignature?:string|null){
+ const docs=await db.query(`SELECT d.document_id AS id,d.document_number AS number,d.document_title AS title,
+   d.document_type AS "documentType",d.document_revision AS revision,d.content_hash AS "contentHash"
+   FROM sidec_export_documents d WHERE d.export_id=$1 ORDER BY d.document_title,d.document_id`,[id]);
+ const manifest=buildSidecManifest({
+  packageSchemaVersion:item.schemaVersion,
+  revision:item.revision,
+  snapshotHash:item.snapshotHash,
+  documents:docs.rows as SidecManifestDocument[]
+ });
+ const computedManifestHash=hashSidecManifest(manifest);
+ if(item.manifestHash&&item.manifestHash!==computedManifestHash){
+  throw Object.assign(new Error("Hash do manifesto divergente."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR",expected:item.manifestHash,computed:computedManifestHash});
+ }
+
+ const entries:Array<{name:string;data:Buffer|string}>=[
+  {name:"pacote.json",data:JSON.stringify({snapshotHash:item.snapshotHash,manifestHash:computedManifestHash,...item.snapshot},null,2)},
+  {name:"resumo.csv",data:"\uFEFF"+sidecPackageSummaryCsv(item.snapshot)},
+  {name:"manifesto.json",data:JSON.stringify({
+   manifestHash:computedManifestHash,
+   signature:manifestSignature?{algorithm:"HMAC-SHA256",value:manifestSignature,scope:"assinatura interna SIGDEC; não ICP-Brasil"}:null,
+   ...manifest
+  },null,2)}
+ ];
+
+ for(const documentRef of docs.rows as SidecManifestDocument[]){
+  const documentResult=await db.query<Record<string,any>>(`SELECT d.id,d.document_type AS "documentType",d.number,d.title,
+    d.subject,d.status,d.revision,d.content->>'text' AS "contentText",d.legal_basis AS "legalBasis",d.recipient,
+    d.valid_until AS "validUntil",d.content_hash AS "contentHash",o.name AS "organizationName",i.protocol
+    FROM technical_documents d
+    JOIN organizations o ON o.id=d.organization_id
+    LEFT JOIN incidents i ON i.id=d.incident_id
+    WHERE d.id=$1 AND d.organization_id=$2 AND d.status='ISSUED'`,[documentRef.id,org]);
+  const document=documentResult.rows[0];
+  if(!document)throw Object.assign(new Error("Documento emitido indisponível."),{statusCode:409,code:"DOCUMENT_NOT_AVAILABLE",documentId:documentRef.id});
+  if(documentRef.contentHash&&document.contentHash!==documentRef.contentHash){
+   throw Object.assign(new Error("Hash documental divergente."),{statusCode:409,code:"DOCUMENT_INTEGRITY_ERROR",documentId:documentRef.id});
+  }
+  const signatures=await db.query<Record<string,any>>(`SELECT s.signature_type AS "signatureType",s.signed_at AS "signedAt",
+    u.display_name AS "displayName",u.matricula
+    FROM technical_document_signatures s JOIN users u ON u.id=s.signed_by
+    WHERE s.document_id=$1 ORDER BY s.signed_at`,[documentRef.id]);
+  const pdf=await buildPdf(document,signatures.rows);
+  const safeDocument=String(documentRef.number??documentRef.id).replace(/[^0-9A-Za-z_-]/g,"_");
+  entries.push({name:`documentos/${safeDocument}.pdf`,data:pdf});
+ }
+ const zip=await zipBuffer(entries);
+ const safeProtocol=item.protocol.replace(/[^A-Za-z0-9_-]/g,"_");
+ return {zip,manifest,manifestHash:computedManifestHash,fileName:`SIDEC-${safeProtocol}-R${item.revision}.zip`};
+}
+
+async function sealSidecExportArtifact(org:string,id:string,userId:string){
+ const existing=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
+   content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
+   manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+   FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ if(existing.rows[0])return existing.rows[0];
+
+ const sourceResult=await db.query(`SELECT e.revision,e.schema_version AS "schemaVersion",e.snapshot,e.snapshot_hash AS "snapshotHash",
+   e.manifest_hash AS "manifestHash",e.status,i.protocol
+   FROM sidec_exports e JOIN incidents i ON i.id=e.incident_id
+   WHERE e.id=$1 AND e.organization_id=$2`,[id,org]);
+ const source=sourceResult.rows[0] as SidecZipSource|undefined;
+ if(!source)throw Object.assign(new Error("Pacote SIDEC não encontrado."),{statusCode:404,code:"NOT_FOUND"});
+ const manifestHash=String(source.manifestHash??"");
+ if(!manifestHash)throw Object.assign(new Error("Pacote sem hash de manifesto."),{statusCode:409,code:"MANIFEST_HASH_MISSING"});
+ const manifestSignature=signSidecManifestHash(manifestHash);
+ const built=await buildSidecZip(org,id,source,manifestSignature);
+ if(built.manifestHash!==manifestHash)throw Object.assign(new Error("Manifesto alterado antes da selagem."),{statusCode:409,code:"MANIFEST_INTEGRITY_ERROR"});
+ const contentHash=hashBinary(built.zip);
+ await db.query(`INSERT INTO sidec_export_artifacts(
+   export_id,organization_id,file_name,byte_size,content_hash,content,manifest_hash,signature_algorithm,manifest_signature,signed_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,'HMAC-SHA256',$8,$9)
+  ON CONFLICT(export_id) DO NOTHING`,[id,org,built.fileName,built.zip.length,contentHash,built.zip,manifestHash,manifestSignature,userId]);
+ const sealed=await db.query(`SELECT export_id AS "exportId",file_name AS "fileName",byte_size AS "byteSize",
+   content_hash AS "contentHash",manifest_hash AS "manifestHash",signature_algorithm AS "signatureAlgorithm",
+   manifest_signature AS "manifestSignature",signed_at AS "signedAt"
+   FROM sidec_export_artifacts WHERE export_id=$1 AND organization_id=$2`,[id,org]);
+ return sealed.rows[0];
 }
 
 async function effectiveMappings(org:string):Promise<SidecMapping[]>{
