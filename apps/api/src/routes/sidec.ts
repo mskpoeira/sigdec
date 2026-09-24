@@ -640,6 +640,7 @@ async function queueSidecReplicaRetry(org:string,exportId:string,operation:"REPL
 }
 
 async function processSidecReplicaRetries(organizationId?:string){
+ if(!wormReplicaEnabled())return {attempted:0,succeeded:0,failed:0,disabled:true};
  const baseMinutes=Math.max(1,Math.min(1440,Number(process.env.SIDEC_REPLICA_RETRY_BASE_MINUTES??15)));
  const maxMinutes=Math.max(baseMinutes,Math.min(10080,Number(process.env.SIDEC_REPLICA_RETRY_MAX_MINUTES??1440)));
  const params:unknown[]=[];
@@ -718,9 +719,17 @@ async function currentSidecResilienceHealth(organizationId?:string){
 async function updateSidecResilienceConditions(organizationId?:string){
  const thresholdHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_RESILIENCE_ALERT_AFTER_HOURS??6)));
  const rows=await currentSidecResilienceHealth(organizationId);
+ const replicaEnabled=wormReplicaEnabled();
+ const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
  let opened=0,alerted=0,resolved=0;
  for(const row of rows){
-  const org=String(row.organizationId),exportId=String(row.exportId),health=String(row.health);
+  const org=String(row.organizationId),exportId=String(row.exportId);
+  let health=String(row.health);
+  if(!replicaEnabled&&health==="MISSING_REPLICA"){
+   const primaryCritical=row.primaryExistsRemote===false||row.primaryHashValid===false;
+   const primaryStale=!row.primaryVerifiedAt||new Date(row.primaryVerifiedAt).getTime()<Date.now()-staleHours*3600000;
+   health=primaryCritical?"CRITICAL":primaryStale?"STALE":"HEALTHY";
+  }
   if(health==="HEALTHY"){
    const rr=await db.query(`UPDATE sidec_resilience_conditions SET resolved_at=now(),last_detected_at=now()
      WHERE export_id=$1 AND organization_id=$2 AND resolved_at IS NULL RETURNING id`,[exportId,org]);
@@ -748,14 +757,15 @@ async function updateSidecResilienceConditions(organizationId?:string){
    await db.query("UPDATE sidec_resilience_conditions SET alerted_at=now() WHERE id=$1",[current.id]);
    alerted++;
   }
-  if(health==="MISSING_REPLICA")await queueSidecReplicaRetry(org,exportId,"REPLICATE");
-  if(health==="POLICY_DRIFT")await queueSidecReplicaRetry(org,exportId,"SYNC_POLICY");
+  if(replicaEnabled&&health==="MISSING_REPLICA")await queueSidecReplicaRetry(org,exportId,"REPLICATE");
+  if(replicaEnabled&&health==="POLICY_DRIFT")await queueSidecReplicaRetry(org,exportId,"SYNC_POLICY");
  }
  return {opened,alerted,resolved,thresholdHours,items:rows};
 }
 
 async function runScheduledSidecRestoreDrills(organizationId?:string){
  const drillHours=Math.max(24,Math.min(8760,Number(process.env.SIDEC_RESTORE_DRILL_HOURS??168)));
+ const replicaEnabled=wormReplicaEnabled();
  const params:unknown[]=[drillHours];
  let orgFilter="";
  if(organizationId){params.push(organizationId);orgFilter=" AND p.organization_id=$2";}
@@ -776,7 +786,7 @@ async function runScheduledSidecRestoreDrills(organizationId?:string){
    const result=await runSidecRestoreDrill({org,exportId,destination:"PRIMARY",trigger:"SCHEDULED"});
    performed++;if(!result.success)failed++;
   }
-  if(row.replicaCreated&&(!row.replicaLastDrill||new Date(row.replicaLastDrill).getTime()<Date.now()-drillHours*3600000)){
+  if(replicaEnabled&&row.replicaCreated&&(!row.replicaLastDrill||new Date(row.replicaLastDrill).getTime()<Date.now()-drillHours*3600000)){
    const result=await runSidecRestoreDrill({org,exportId,destination:"REPLICA",trigger:"SCHEDULED"});
    performed++;if(!result.success)failed++;
   }
