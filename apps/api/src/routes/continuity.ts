@@ -31,8 +31,9 @@ const createRevisionSchema=z.object({
 });
 
 const exerciseCreateSchema=z.object({
- scenario:z.string().trim().min(10).max(12000)
-});
+ scenario:z.string().trim().min(10).max(12000).optional(),
+ scheduleId:z.string().uuid().optional()
+}).refine(value=>Boolean(value.scenario||value.scheduleId),{message:"Informe cenário ou agenda."});
 
 const exerciseStepSchema=z.object({
  status:z.enum(["PENDING","COMPLETED","SKIPPED","FAILED"]),
@@ -77,6 +78,37 @@ const aarActionUpdateSchema=z.object({
  dueAt:z.coerce.date().nullable().optional(),
  status:z.enum(["OPEN","IN_PROGRESS","DONE","CANCELLED"]).optional()
 });
+
+const scheduleCreateSchema=z.object({
+ name:z.string().trim().min(3).max(240),
+ intervalDays:z.number().int().min(7).max(1095),
+ nextDueAt:z.coerce.date(),
+ defaultScenario:z.string().trim().min(10).max(12000),
+ ownerUserId:z.string().uuid().nullable().optional(),
+ enabled:z.boolean().default(true)
+});
+const scheduleUpdateSchema=scheduleCreateSchema.partial();
+
+const continuityContactSchema=z.object({
+ contactScope:z.enum(["INTERNAL","EXTERNAL"]),
+ escalationLevel:z.number().int().min(1).max(5),
+ name:z.string().trim().min(2).max(200),
+ roleTitle:z.string().trim().max(200).nullable().optional(),
+ organizationName:z.string().trim().max(240).nullable().optional(),
+ channelType:z.enum(["PHONE","EMAIL","RADIO","OTHER"]),
+ channelValue:z.string().trim().min(2).max(500),
+ notes:z.string().trim().max(4000).nullable().optional(),
+ active:z.boolean().default(true)
+});
+
+const continuityLessonSchema=z.object({
+ category:z.enum(["PROCESS","PEOPLE","TECHNOLOGY","COMMUNICATION","DATA","STORAGE","CONNECTIVITY","OTHER"]),
+ recurrenceKey:z.string().trim().min(2).max(100).regex(/^[a-z0-9][a-z0-9._-]*$/),
+ title:z.string().trim().min(3).max(240),
+ observation:z.string().trim().min(5).max(8000),
+ severity:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]).default("MEDIUM")
+});
+
 
 
 function organizationId(value:string|null){
@@ -175,6 +207,31 @@ async function loadExercise(org:string,id:string){
   aar={...aarRow,actions:actions.rows};
  }
  return {...exercise,summary,steps,aar};
+}
+
+export async function evaluateContinuityActionAlerts(organizationId?:string){
+ const dueSoonHours=Math.max(1,Math.min(720,Number(process.env.SIDEC_CONTINUITY_ACTION_DUE_SOON_HOURS??72)));
+ const params:unknown[]=[];
+ let where="";
+ if(organizationId){params.push(organizationId);where="AND a.organization_id=$1";}
+ const actions=await db.query(`SELECT ai.id AS "actionId",ai.due_at AS "dueAt",ai.status,a.organization_id AS "organizationId"
+  FROM sidec_continuity_action_items ai
+  JOIN sidec_continuity_aars a ON a.id=ai.aar_id
+  WHERE ai.status IN ('OPEN','IN_PROGRESS') AND ai.due_at IS NOT NULL ${where}`,params);
+ let created=0;
+ const now=Date.now();
+ for(const row of actions.rows as Array<any>){
+  const due=new Date(row.dueAt).getTime();
+  const alertType=due<=now?"OVERDUE":due<=now+dueSoonHours*60*60*1000?"DUE_SOON":null;
+  if(!alertType)continue;
+  const inserted=await db.query(`INSERT INTO sidec_continuity_action_alerts(
+    organization_id,action_id,alert_type,due_at
+   ) VALUES($1,$2,$3,$4)
+   ON CONFLICT(action_id,alert_type,due_at) DO NOTHING RETURNING id`,
+   [row.organizationId,row.actionId,alertType,row.dueAt]);
+  if(inserted.rows[0])created++;
+ }
+ return {created,dueSoonHours};
 }
 
 export async function continuityRoutes(app:FastifyInstance){
