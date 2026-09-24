@@ -20,6 +20,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0027_sidec_public_integrity_timestamp_custody.sql"));
  assert.ok(files.includes("0028_sidec_worm_archive.sql"));
  assert.ok(files.includes("0029_sidec_worm_governance.sql"));
+ assert.ok(files.includes("0030_sidec_worm_replication.sql"));
 });
 
 test("schema documental preserva fonte e snapshot",async()=>{
@@ -185,6 +186,22 @@ test("SIDEC v1.21 possui historico monotônico de governanca WORM",async()=>{
  assert.match(defs,/LEGAL_HOLD_ENABLED/);
  assert.doesNotMatch(defs,/RETENTION_SHORTENED/);
  assert.doesNotMatch(defs,/LEGAL_HOLD_DISABLED/);
+});
+
+test("SIDEC v1.22 possui replica WORM e verificacao independente",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('sidec_archive_replicas','sidec_archive_replica_verifications') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["sidec_archive_replica_verifications","sidec_archive_replicas"]);
+ const constraints=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_archive_replica_verifications'::regclass`);
+ const defs=constraints.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/SCHEDULED/);
+ assert.match(defs,/MANUAL/);
+ assert.match(defs,/REPLICATION/);
+ const columns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_archive_replicas'
+    AND column_name IN ('destination_code','version_id','content_hash','retain_until','legal_hold') ORDER BY column_name`);
+ assert.deepEqual(columns.rows.map(x=>x.column_name),["content_hash","destination_code","legal_hold","retain_until","version_id"]);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
