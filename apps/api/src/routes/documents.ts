@@ -215,8 +215,8 @@ export async function documentRoutes(app: FastifyInstance) {
               d.created_at AS "createdAt", d.updated_at AS "updatedAt",
               d.approved_at AS "approvedAt", d.issued_at AS "issuedAt",
               d.cancelled_at AS "cancelledAt", d.source_type AS "sourceType",
-              i.protocol, creator.display_name AS "createdByName",
-              approver.display_name AS "approvedByName"
+              i.protocol, creator.display_name AS "createdByName", creator.matricula AS "createdByMatricula",
+              approver.display_name AS "approvedByName", approver.matricula AS "approvedByMatricula"
          FROM technical_documents d
          LEFT JOIN incidents i ON i.id = d.incident_id
          JOIN users creator ON creator.id = d.created_by
