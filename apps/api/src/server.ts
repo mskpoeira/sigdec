@@ -12,6 +12,7 @@ import { commandRoutes } from "./routes/command.js";
 import { planningRoutes } from "./routes/planning.js";
 import { documentRoutes } from "./routes/documents.js";
 import { adminRoutes } from "./routes/admin.js";
+import { dispatchWebhooks } from "./lib/webhooks.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 const app=Fastify({logger:true,trustProxy:true});
@@ -46,3 +47,9 @@ const evaluateContinuityActions=()=>evaluateContinuityActionAlerts().catch(error
 void evaluateContinuityActions();
 const continuityActionAlertTimer=setInterval(evaluateContinuityActions,continuityActionAlertMinutes*60*1000);
 continuityActionAlertTimer.unref();
+
+const webhookDispatchSeconds=Math.max(10,Math.min(300,Number(process.env.WEBHOOK_DISPATCH_SECONDS??30)));
+const evaluateWebhooks=()=>dispatchWebhooks().catch(error=>app.log.error({err:error},"Falha ao processar webhooks SIGDEC."));
+void evaluateWebhooks();
+const webhookDispatchTimer=setInterval(evaluateWebhooks,webhookDispatchSeconds*1000);
+webhookDispatchTimer.unref();
