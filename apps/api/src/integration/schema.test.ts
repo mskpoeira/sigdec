@@ -556,6 +556,37 @@ test("SIDEC v1.35 possui resiliencia WORM e delegacao temporaria",async()=>{
  assert.ok(Number(permission.rows[0]?.roles??0)>=2);
 });
 
+test("SIGDEC v1.35.1 endurece historico e delegacoes apos auditoria",async()=>{
+ const triggers=await db.query(`SELECT tgname FROM pg_trigger
+  WHERE NOT tgisinternal AND tgname IN (
+   'sidec_continuity_change_report_policy_events_immutable',
+   'sidec_continuity_change_report_archive_verifications_immutable',
+   'sidec_continuity_change_report_replica_verifications_immutable',
+   'sidec_continuity_approval_delegations_guard',
+   'sidec_continuity_approval_delegations_validate'
+  ) ORDER BY tgname`);
+ assert.deepEqual(triggers.rows.map(x=>x.tgname),[
+  "sidec_continuity_approval_delegations_guard",
+  "sidec_continuity_approval_delegations_validate",
+  "sidec_continuity_change_report_archive_verifications_immutable",
+  "sidec_continuity_change_report_policy_events_immutable",
+  "sidec_continuity_change_report_replica_verifications_immutable"
+ ]);
+
+ const functions=await db.query(`SELECT proname,pg_get_functiondef(oid) AS definition FROM pg_proc
+  WHERE proname IN (
+   'prevent_sidec_continuity_history_mutation',
+   'guard_sidec_continuity_approval_delegation',
+   'validate_sidec_continuity_approval_delegation'
+  ) ORDER BY proname`);
+ assert.equal(functions.rowCount,3);
+ const defs=functions.rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/append-only/);
+ assert.match(defs,/90 days/);
+ assert.match(defs,/tstzrange/);
+ assert.match(defs,/created_by/);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
