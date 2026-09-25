@@ -58,6 +58,22 @@ export async function loadAccess(userId: string) {
   };
 }
 
+export async function hasLivePermission(userId: string, permission: string) {
+  const result = await db.query(
+    `SELECT 1
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+       JOIN permissions p ON p.id = rp.permission_id
+      WHERE u.id = $1
+        AND u.active = true
+        AND p.code IN ($2, 'system.master')
+      LIMIT 1`,
+    [userId, permission]
+  );
+  return result.rowCount === 1;
+}
+
 export async function createSession(params: {
   userId: string;
   organizationId: string | null;
@@ -144,26 +160,34 @@ export function requirePermission(permission: string) {
     if (reply.sent) return;
 
     const auth = authFrom(request);
-    const passwordState = await db.query<{ must_change_password: boolean }>(
-      "SELECT must_change_password FROM users WHERE id = $1 AND active = true",
+    const userState = await db.query<{ must_change_password: boolean; organization_id: string | null }>(
+      "SELECT must_change_password, organization_id::text AS organization_id FROM users WHERE id = $1 AND active = true",
       [auth.userId]
     );
 
-    if (!passwordState.rows[0]) {
+    const user = userState.rows[0];
+    if (!user) {
       return reply.code(401).send({
         error: "UNAUTHENTICATED",
         message: "Usuário inativo ou inexistente."
       });
     }
 
-    if (passwordState.rows[0].must_change_password) {
+    if ((user.organization_id ?? null) !== (auth.organizationId ?? null)) {
+      return reply.code(401).send({
+        error: "SESSION_CONTEXT_STALE",
+        message: "A vinculação organizacional mudou. Entre novamente para atualizar a sessão."
+      });
+    }
+
+    if (user.must_change_password) {
       return reply.code(403).send({
         error: "PASSWORD_CHANGE_REQUIRED",
         message: "Altere a senha temporária antes de continuar."
       });
     }
 
-    if (!auth.permissions.includes(permission) && !auth.permissions.includes("system.master")) {
+    if (!(await hasLivePermission(auth.userId, permission))) {
       return reply.code(403).send({
         error: "FORBIDDEN",
         message: "Permissão insuficiente para esta operação."
