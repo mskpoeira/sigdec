@@ -24,9 +24,10 @@ type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks
 type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
 type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
 type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
-type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;decidedById:string;decidedByName?:string|null};
-type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>};
-type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
+type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;validUntil?:string|null;revalidatedAt?:string|null;decidedById:string;decidedByName?:string|null};
+type ChangePolicy={approvalValidHours:number;reportWormRetentionDays?:number|null;reportWormLegalHold:boolean;updatedAt?:string|null};
+type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;archived:number;archiveHealthy:number;approvalsExpiring24h:number;approvalsExpired:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>;byRecurrence:Array<{recurrenceKey:string;proposals:number;verified:number;improved:number;regressed:number;lastProposalAt:string}>};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -46,6 +47,7 @@ export default function ContinuidadePage(){
  const [effectivenessHistory,setEffectivenessHistory]=useState<EffectivenessHistory[]>([]);
  const [changeProposals,setChangeProposals]=useState<ChangeProposal[]>([]);
  const [changeMetrics,setChangeMetrics]=useState<ChangeMetrics|null>(null);
+ const [changePolicy,setChangePolicy]=useState<ChangePolicy|null>(null);
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
  const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
@@ -74,7 +76,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats,policy]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -86,7 +88,8 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/runbook/recommendations"),
     request("/api/v1/sidec/continuity/actions/effectiveness-history"),
     request("/api/v1/sidec/continuity/runbook/change-proposals"),
-    request("/api/v1/sidec/continuity/runbook/change-metrics")
+    request("/api/v1/sidec/continuity/runbook/change-metrics"),
+    request("/api/v1/sidec/continuity/runbook/change-policy")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -100,6 +103,7 @@ export default function ContinuidadePage(){
    if(history)setEffectivenessHistory(history.items??[]);
    if(proposals)setChangeProposals(proposals.items??[]);
    if(changeStats)setChangeMetrics(changeStats);
+   if(policy)setChangePolicy(policy);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -283,6 +287,23 @@ export default function ContinuidadePage(){
   setMessage("Evidência de implementação registrada.");
  });
 
+ const configureChangePolicy=()=>act(async()=>{
+  const current=changePolicy??{approvalValidHours:168,reportWormRetentionDays:null,reportWormLegalHold:false};
+  const approvalRaw=window.prompt("Validade das aprovações críticas, em horas:",String(current.approvalValidHours));
+  if(approvalRaw===null)return;
+  const approvalValidHours=Number(approvalRaw);
+  if(!Number.isInteger(approvalValidHours)||approvalValidHours<1||approvalValidHours>2160)throw new Error("Informe entre 1 e 2160 horas.");
+  const retentionRaw=window.prompt("Retenção WORM do relatório, em dias. Deixe vazio para não definir prazo:",current.reportWormRetentionDays==null?"":String(current.reportWormRetentionDays));
+  if(retentionRaw===null)return;
+  const reportWormRetentionDays=retentionRaw.trim()===""?null:Number(retentionRaw);
+  if(reportWormRetentionDays!==null&&(!Number.isInteger(reportWormRetentionDays)||reportWormRetentionDays<1||reportWormRetentionDays>36500))throw new Error("Informe entre 1 e 36500 dias ou deixe vazio.");
+  const reportWormLegalHold=window.confirm("Ativar legal hold para novos relatórios WORM? Use somente quando a política administrativa exigir preservação sem data.");
+  await request("/api/v1/sidec/continuity/runbook/change-policy",{
+   method:"PATCH",body:JSON.stringify({approvalValidHours,reportWormRetentionDays,reportWormLegalHold})
+  });
+  setMessage("Política de governança das mudanças atualizada.");
+ });
+
  const decideCriticalProposal=(proposal:ChangeProposal,decision:"APPROVED"|"REJECTED")=>act(async()=>{
   const defaultNote=decision==="APPROVED"?"Mudança crítica analisada e aprovada para aplicação controlada.":"Mudança crítica rejeitada após análise.";
   const notes=window.prompt("Fundamentação da decisão:",defaultNote);
@@ -302,6 +323,17 @@ export default function ContinuidadePage(){
  const verifyChangeReportSeal=(proposal:ChangeProposal)=>act(async()=>{
   const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/seal`);
   setMessage(result?.valid?`Selo íntegro e assinatura válida · ${String(result.publicKeyFingerprint??"").slice(0,16)}…`:"A verificação do selo falhou.");
+ });
+
+ const archiveChangeReport=(proposal:ChangeProposal)=>act(async()=>{
+  if(!window.confirm("Arquivar o PDF selado no WORM conforme a política vigente?"))return;
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive`,{method:"POST",body:"{}"});
+  setMessage(result?.verification?.hashValid?"Relatório arquivado no WORM e hash remoto validado.":"Relatório enviado ao arquivo WORM.");
+ });
+
+ const verifyArchivedChangeReport=(proposal:ChangeProposal)=>act(async()=>{
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/verify`,{method:"POST",body:"{}"});
+  setMessage(result?.existsRemote&&result?.hashValid?"Arquivo WORM íntegro e disponível.":"A verificação do arquivo WORM indicou problema.");
  });
 
  const applyChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
@@ -350,7 +382,7 @@ export default function ContinuidadePage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.33</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.34</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
