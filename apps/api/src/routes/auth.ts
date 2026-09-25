@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import argon2 from "argon2";
+import QRCode from "qrcode";
 import { z } from "zod";
 import {
   authFrom,
@@ -13,11 +14,22 @@ import {
 } from "../auth.js";
 import { db } from "../db.js";
 import { isMailConfigured, sendPasswordResetEmail } from "../mail.js";
+import {
+  buildTotpUri,
+  decryptMfaSecret,
+  encryptMfaSecret,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  hashRecoveryCode,
+  verifyTotp
+} from "../lib/mfa.js";
 
 const loginSchema = z.object({
   matricula: z.string().min(1).max(32),
-  password: z.string().min(8).max(256)
+  password: z.string().min(8).max(256),
+  mfaCode: z.string().trim().min(6).max(64).optional()
 });
+const mfaVerifySchema=z.object({code:z.string().trim().min(6).max(64)});
 
 const strongPasswordSchema = z.string()
   .min(12)
