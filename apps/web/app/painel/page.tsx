@@ -60,7 +60,7 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Resumo Territorial</h2><Link href="/campo">Abrir operação de campo</Link></header><div className="situationMap"><div className="coast">UBATUBA · DADOS ATUAIS</div>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map(x=><div className="incidentMini" key={"territorial-"+x.id}><div><b>{x.neighborhood??"Local não informado"}</b><small>{x.priority} · {x.status}</small></div></div>)}<div className="legend">Resumo derivado das ocorrências reais carregadas pelo SIGDEC.</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.38.1 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC v1.39.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }
