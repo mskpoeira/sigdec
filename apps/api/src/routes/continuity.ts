@@ -1136,6 +1136,51 @@ export async function continuityRoutes(app:FastifyInstance){
   return {items:[...groups.entries()].map(([recurrenceKey,history])=>({recurrenceKey,history}))};
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/change-metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const summary=await db.query(`SELECT
+    count(*)::int AS total,
+    count(*) FILTER(WHERE cp.status='PROPOSED')::int AS proposed,
+    count(*) FILTER(WHERE cp.status='APPLIED')::int AS applied,
+    count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+    count(*) FILTER(WHERE cp.status='CANCELLED')::int AS cancelled,
+    count(*) FILTER(WHERE rr.severity='CRITICAL')::int AS critical,
+    count(*) FILTER(WHERE seal.proposal_id IS NOT NULL)::int AS sealed,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='STABLE')::int AS stable,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='NO_BASELINE')::int AS "noBaseline",
+    round((100.0*count(*) FILTER(WHERE cp.status='VERIFIED')/NULLIF(count(*) FILTER(WHERE cp.status<>'CANCELLED'),0))::numeric,1) AS "verifiedRate",
+    round((100.0*count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')/
+      NULLIF(count(*) FILTER(WHERE cp.effectiveness_outcome IN ('IMPROVED','STABLE','REGRESSED')),0))::numeric,1) AS "improvedRate",
+    round(avg(EXTRACT(EPOCH FROM (cp.applied_at-cp.created_at))/3600.0) FILTER(WHERE cp.applied_at IS NOT NULL)::numeric,1) AS "avgApplyHours",
+    round(avg(EXTRACT(EPOCH FROM (cp.verified_at-cp.applied_at))/3600.0) FILTER(WHERE cp.verified_at IS NOT NULL AND cp.applied_at IS NOT NULL)::numeric,1) AS "avgVerificationHours"
+   FROM sidec_continuity_change_proposals cp
+   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
+   WHERE cp.organization_id=$1`,[org]);
+  const [bySeverity,byMonth]=await Promise.all([
+   db.query(`SELECT rr.severity,count(*)::int AS total,
+      count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed
+     FROM sidec_continuity_change_proposals cp
+     JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+     WHERE cp.organization_id=$1
+     GROUP BY rr.severity
+     ORDER BY CASE rr.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`,[org]),
+   db.query(`SELECT to_char(date_trunc('month',cp.created_at),'YYYY-MM') AS month,count(*)::int AS total,
+      count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed
+     FROM sidec_continuity_change_proposals cp
+     WHERE cp.organization_id=$1 AND cp.created_at>=date_trunc('month',now())-interval '11 months'
+     GROUP BY date_trunc('month',cp.created_at)
+     ORDER BY date_trunc('month',cp.created_at)`,[org])
+  ]);
+  return {summary:summary.rows[0],bySeverity:bySeverity.rows,byMonth:byMonth.rows};
+ });
+
  app.get("/api/v1/sidec/continuity/runbook/recommendations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   await refreshRunbookRecommendations(org);
@@ -1411,35 +1456,75 @@ export async function continuityRoutes(app:FastifyInstance){
 
  app.get("/api/v1/sidec/continuity/runbook/change-proposals/:id/report.pdf",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
   const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
-  const result=await db.query(`SELECT cp.id,cp.status,cp.proposal_text AS "proposalText",cp.status_notes AS "statusNotes",
-    cp.created_at AS "createdAt",cp.applied_at AS "appliedAt",cp.verified_at AS "verifiedAt",
-    cp.target_plan_id AS "targetPlanId",p.version AS "targetPlanVersion",p.title AS "targetPlanTitle",
-    cp.base_plan_id AS "basePlanId",bp.version AS "basePlanVersion",bp.title AS "basePlanTitle",
-    cp.diff_snapshot AS "diffSnapshot",cp.effectiveness_snapshot AS "effectivenessSnapshot",
-    cp.effectiveness_outcome AS "effectivenessOutcome",
-    rr.recurrence_key AS "recurrenceKey",rr.title AS "recommendationTitle",
-    creator.display_name AS "createdByName",applier.display_name AS "appliedByName",verifier.display_name AS "verifiedByName",
-    COALESCE((SELECT json_agg(json_build_object(
-      'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
-      'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
-    ) ORDER BY ev.created_at)
-     FROM sidec_continuity_change_evidence ev
-     LEFT JOIN users eu ON eu.id=ev.created_by
-     WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence
-   FROM sidec_continuity_change_proposals cp
-   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
-   JOIN sidec_continuity_plans p ON p.id=cp.target_plan_id
-   LEFT JOIN sidec_continuity_plans bp ON bp.id=cp.base_plan_id
-   LEFT JOIN users creator ON creator.id=cp.created_by
-   LEFT JOIN users applier ON applier.id=cp.applied_by
-   LEFT JOIN users verifier ON verifier.id=cp.verified_by
-   WHERE cp.id=$1 AND cp.organization_id=$2`,[id,org]);
-  const proposal=result.rows[0] as any;if(!proposal)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
-  const diff=proposal.diffSnapshot??await buildRunbookDiff(org,String(proposal.targetPlanId),proposal.basePlanId?String(proposal.basePlanId):null);
-  const effectiveness=proposal.effectivenessSnapshot??null;
-  const organization=await db.query(`SELECT name FROM organizations WHERE id=$1`,[org]);
-  const pdf=await buildContinuityChangeReportPdf({organizationName:String(organization.rows[0]?.name??"Organização"),proposal,diff,effectiveness});
+  const sealed=await db.query(`SELECT report_hash AS "reportHash",report_bytes AS "reportBytes"
+    FROM sidec_continuity_change_report_seals WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  if(sealed.rows[0]){
+   const bytes=sealed.rows[0].reportBytes as Buffer;
+   return reply.type("application/pdf")
+    .header("Content-Disposition",`attachment; filename="SIGDEC-continuity-change-${id}-sealed.pdf"`)
+    .header("Content-Length",String(bytes.length))
+    .header("ETag",String(sealed.rows[0].reportHash))
+    .header("X-SIGDEC-Report-Sealed","true")
+    .send(bytes);
+  }
+  const payload=await loadChangeReportPayload(org,id);
+  if(!payload)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
+  const pdf=await buildContinuityChangeReportPdf(payload);
   return reply.type("application/pdf").header("Content-Disposition",`attachment; filename="SIGDEC-continuity-change-${id}.pdf"`).header("Content-Length",String(pdf.length)).send(pdf);
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/seal",{preHandler:requirePermission("sidec_continuity_change.seal")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const existing=await db.query(`SELECT proposal_id AS "proposalId",report_hash AS "reportHash",key_id AS "keyId",
+    public_key_fingerprint AS "publicKeyFingerprint",sealed_at AS "sealedAt"
+    FROM sidec_continuity_change_report_seals WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  if(existing.rows[0])return existing.rows[0];
+  const payload=await loadChangeReportPayload(org,id);
+  if(!payload)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
+  if(payload.proposal.status!=="VERIFIED")return reply.code(409).send({error:"VERIFIED_PROPOSAL_REQUIRED",status:payload.proposal.status});
+  const pdf=await buildContinuityChangeReportPdf(payload);
+  const reportHash=createHash("sha256").update(pdf).digest("hex");
+  const sealedAt=new Date().toISOString();
+  const proof=signSidecContinuityChangeReport({
+   reportHash,proposalId:id,targetPlanId:String(payload.proposal.targetPlanId),sealedAt
+  });
+  const inserted=await db.query(`INSERT INTO sidec_continuity_change_report_seals(
+     proposal_id,organization_id,report_hash,report_bytes,algorithm,key_id,signature,public_key,public_key_fingerprint,sealed_by,sealed_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    RETURNING proposal_id AS "proposalId",report_hash AS "reportHash",algorithm,key_id AS "keyId",
+      public_key_fingerprint AS "publicKeyFingerprint",sealed_at AS "sealedAt"`,[
+     id,org,reportHash,pdf,proof.algorithm,proof.keyId,proof.signature,proof.publicKey,proof.publicKeyFingerprint,auth.userId,sealedAt
+    ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_report_seal','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(inserted.rows[0]),
+     JSON.stringify({reportHash,algorithm:proof.algorithm,keyId:proof.keyId})
+    ]);
+  return reply.code(201).send({...inserted.rows[0],valid:true});
+ });
+
+ app.get("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/seal",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const seal=await db.query(`SELECT s.proposal_id AS "proposalId",s.report_hash AS "reportHash",s.report_bytes AS "reportBytes",
+    s.algorithm,s.key_id AS "keyId",s.signature,s.public_key AS "publicKey",s.public_key_fingerprint AS "publicKeyFingerprint",
+    s.sealed_at AS "sealedAt",cp.target_plan_id AS "targetPlanId",u.display_name AS "sealedByName"
+   FROM sidec_continuity_change_report_seals s
+   JOIN sidec_continuity_change_proposals cp ON cp.id=s.proposal_id AND cp.organization_id=s.organization_id
+   LEFT JOIN users u ON u.id=s.sealed_by
+   WHERE s.proposal_id=$1 AND s.organization_id=$2`,[id,org]);
+  const row=seal.rows[0] as any;if(!row)return reply.code(404).send({error:"REPORT_NOT_SEALED"});
+  const observedHash=createHash("sha256").update(row.reportBytes as Buffer).digest("hex");
+  const hashValid=observedHash===row.reportHash;
+  const signatureValid=verifySidecContinuityChangeReport({
+   reportHash:String(row.reportHash),proposalId:id,targetPlanId:String(row.targetPlanId),
+   sealedAt:new Date(row.sealedAt).toISOString(),signature:String(row.signature),
+   publicKey:String(row.publicKey),publicKeyFingerprint:String(row.publicKeyFingerprint)
+  });
+  return {
+   proposalId:id,algorithm:row.algorithm,keyId:row.keyId,reportHash:row.reportHash,observedHash,
+   publicKeyFingerprint:row.publicKeyFingerprint,sealedAt:row.sealedAt,sealedByName:row.sealedByName,
+   hashValid,signatureValid,valid:hashValid&&signatureValid
+  };
  });
 
  app.patch("/api/v1/sidec/continuity/runbook/recommendations/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
