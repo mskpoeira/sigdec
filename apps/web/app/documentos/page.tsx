@@ -283,7 +283,7 @@ export default function DocumentosPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.38</span>
+          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.38.1</span>
           <h1>Documentos técnicos</h1>
           <p>Elaboração, revisão, aprovação, emissão, integridade e PDF.</p>
         </div>
