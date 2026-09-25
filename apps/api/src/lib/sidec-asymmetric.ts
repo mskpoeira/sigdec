@@ -2,6 +2,7 @@ import { createHash,createPrivateKey,createPublicKey,sign,verify } from "node:cr
 
 const proofDomain="SIGDEC/SIDEC/INTEGRITY/ED25519/v1";
 const timestampDomain="SIGDEC/SIDEC/TIMESTAMP/ED25519/v1";
+const continuityChangeReportDomain="SIGDEC/SIDEC/CONTINUITY-CHANGE-REPORT/ED25519/v1";
 const pkcs8Prefix=Buffer.from("302e020100300506032b657004220420","hex");
 
 function baseSecret(){
@@ -30,6 +31,13 @@ function integrityPayload(manifestHash:string,artifactHash:string){
 
 function timestampPayload(manifestHash:string,artifactHash:string,attestationSignature:string,timestampedAt:string){
  return Buffer.from(`${timestampDomain}\nmanifest=${manifestHash}\nartifact=${artifactHash}\nattestation=${attestationSignature}\ntimestamp=${timestampedAt}\n`,"utf8");
+}
+
+function continuityChangeReportPayload(input:{reportHash:string;proposalId:string;targetPlanId:string;sealedAt:string}){
+ return Buffer.from(
+  `${continuityChangeReportDomain}\nproposal=${input.proposalId}\ntargetPlan=${input.targetPlanId}\nreport=${input.reportHash}\nsealedAt=${input.sealedAt}\n`,
+  "utf8"
+ );
 }
 
 export function signSidecIntegrity(manifestHash:string,artifactHash:string){
@@ -86,6 +94,43 @@ export function signSidecTimestamp(input:{manifestHash:string;artifactHash:strin
   publicKey:publicKey.export({format:"pem",type:"spki"}).toString(),
   publicKeyFingerprint:createHash("sha256").update(publicDer).digest("hex")
  };
+}
+
+export function signSidecContinuityChangeReport(input:{reportHash:string;proposalId:string;targetPlanId:string;sealedAt:string}){
+ const key=privateKey();
+ const publicKey=createPublicKey(key);
+ const publicDer=publicKey.export({format:"der",type:"spki"}) as Buffer;
+ const payload=continuityChangeReportPayload(input);
+ return {
+  algorithm:"Ed25519" as const,
+  keyId:currentSidecEd25519KeyId(),
+  signature:sign(null,payload,key).toString("base64"),
+  publicKey:publicKey.export({format:"pem",type:"spki"}).toString(),
+  publicKeyFingerprint:createHash("sha256").update(publicDer).digest("hex")
+ };
+}
+
+export function verifySidecContinuityChangeReport(input:{
+ reportHash:string;
+ proposalId:string;
+ targetPlanId:string;
+ sealedAt:string;
+ signature:string;
+ publicKey:string;
+ publicKeyFingerprint:string;
+}){
+ try{
+  const fingerprint=fingerprintSidecPublicKey(input.publicKey);
+  if(fingerprint!==input.publicKeyFingerprint)return false;
+  return verify(
+   null,
+   continuityChangeReportPayload(input),
+   createPublicKey(input.publicKey),
+   Buffer.from(input.signature,"base64")
+  );
+ }catch{
+  return false;
+ }
 }
 
 export function verifySidecTimestamp(input:{
