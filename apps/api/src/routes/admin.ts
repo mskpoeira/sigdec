@@ -1,6 +1,6 @@
 import type {FastifyInstance} from "fastify";
 import {z} from "zod";
-import {authFrom,requirePermission} from "../auth.js";
+import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
 
 const FEATURES=[
@@ -33,6 +33,12 @@ const activeSchema=z.object({active:z.boolean()});
 function organizationId(value:string|null){if(!value)throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409});return value}
 
 export async function adminRoutes(app:FastifyInstance){
+ app.get("/api/v1/features",{preHandler:requireAuth},async request=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const stored=await db.query<{code:string;enabled:boolean}>("SELECT code,enabled FROM feature_flags WHERE organization_id=$1",[org]);
+  const byCode=new Map(stored.rows.map(x=>[x.code,x.enabled]));
+  return {items:FEATURES.map(([code,label])=>({code,label,enabled:byCode.get(code)??true}))};
+ });
  app.get("/api/v1/admin/features",{preHandler:requirePermission("admin.features")},async request=>{
   const org=organizationId(authFrom(request).organizationId);
   const stored=await db.query<{code:string;enabled:boolean;updated_at:Date}>(
