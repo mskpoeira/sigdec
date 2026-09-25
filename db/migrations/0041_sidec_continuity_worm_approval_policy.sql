@@ -36,17 +36,10 @@ CREATE TABLE IF NOT EXISTS sidec_continuity_change_report_archives (
 CREATE INDEX IF NOT EXISTS sidec_continuity_change_report_archives_org_idx
   ON sidec_continuity_change_report_archives(organization_id,archived_at DESC);
 
-CREATE OR REPLACE FUNCTION prevent_sidec_continuity_change_report_archive_mutation()
-RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  RAISE EXCEPTION 'Recibo WORM de relatório SIDEC é imutável';
-END;
-$$;
-
 DROP TRIGGER IF EXISTS sidec_continuity_change_report_archives_immutable ON sidec_continuity_change_report_archives;
 CREATE TRIGGER sidec_continuity_change_report_archives_immutable
 BEFORE UPDATE OR DELETE ON sidec_continuity_change_report_archives
-FOR EACH ROW EXECUTE FUNCTION prevent_sidec_continuity_change_report_archive_mutation();
+FOR EACH ROW EXECUTE FUNCTION prevent_sidec_continuity_change_report_seal_mutation();
 
 CREATE TABLE IF NOT EXISTS sidec_continuity_change_report_archive_verifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
