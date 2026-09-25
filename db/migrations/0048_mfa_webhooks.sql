@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS mfa_login_challenges_active_idx
 UPDATE users u
 SET mfa_required=true,updated_at=now()
 FROM user_roles ur
-JOIN roles r ON r.id=ur.role_id AND r.code='MASTER'
+JOIN roles r ON r.id=ur.role_id AND r.level>=80
 WHERE ur.user_id=u.id
   AND u.mfa_required=false;
 
