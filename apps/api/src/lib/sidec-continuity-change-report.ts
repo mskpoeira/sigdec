@@ -35,7 +35,9 @@ export async function buildContinuityChangeReportPdf(input:any){
    p(`Mudança crítica: ${approved} aprovação(ões) e ${rejected} rejeição(ões) registradas. A aplicação exige duas aprovações de usuários distintos do proponente e nenhuma rejeição vigente.`);
    if(!approvals.length)p("Nenhuma decisão de aprovação registrada.");
    for(const item of approvals){
-    pdf.font("Helvetica-Bold").fontSize(8).fillColor("#102033").text(`• ${item.decision} · ${item.decidedByName??"Usuário"} · ${when(item.decidedAt)}`);
+    const validity=item.decision==="APPROVED"&&item.validUntil?` · válida até ${when(item.validUntil)}`:"";
+    const revalidated=item.revalidatedAt?` · revalidada em ${when(item.revalidatedAt)}`:"";
+    pdf.font("Helvetica-Bold").fontSize(8).fillColor("#102033").text(`• ${item.decision} · ${item.decidedByName??"Usuário"} · ${when(item.decidedAt)}${validity}${revalidated}`);
     p(item.notes);
    }
   }
