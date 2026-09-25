@@ -1766,7 +1766,13 @@ export async function continuityRoutes(app:FastifyInstance){
       WHERE x.organization_id=$1 AND x.status='PROPOSED' AND ca.decision='APPROVED'
        AND (ca.valid_until IS NULL OR ca.valid_until<=now())) AS "approvalsExpired",
     (SELECT count(*)::int FROM sidec_continuity_approval_delegations d
-      WHERE d.organization_id=$1 AND d.revoked_at IS NULL AND d.valid_from<=now() AND d.valid_until>now()) AS "activeDelegations"
+      WHERE d.organization_id=$1 AND d.revoked_at IS NULL AND d.valid_from<=now() AND d.valid_until>now()) AS "activeDelegations",
+    (SELECT count(*)::int FROM sidec_continuity_change_report_resilience_conditions c
+      WHERE c.organization_id=$1 AND c.resolved_at IS NULL) AS "reportResilienceOpen",
+    (SELECT count(*)::int FROM sidec_continuity_change_report_retry_jobs j
+      WHERE j.organization_id=$1 AND j.succeeded_at IS NULL) AS "reportRetryPending",
+    (SELECT count(*)::int FROM sidec_continuity_change_report_restore_drills d
+      WHERE d.organization_id=$1 AND d.success=false AND d.performed_at>=now()-interval '30 days') AS "reportRestoreFailures30d"
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
    LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
@@ -1811,6 +1817,27 @@ export async function continuityRoutes(app:FastifyInstance){
      ORDER BY count(*) DESC,max(cp.created_at) DESC LIMIT 20`,[org])
   ]);
   return {summary:summary.rows[0],bySeverity:bySeverity.rows,byMonth:byMonth.rows,byRecurrence:byRecurrence.rows};
+ });
+
+ app.get("/api/v1/sidec/continuity/runbook/change-report-resilience",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const [items,conditions,retries,drills]=await Promise.all([
+   currentContinuityChangeReportResilienceHealth(org),
+   db.query(`SELECT id,proposal_id AS "proposalId",condition,first_detected_at AS "firstDetectedAt",
+     last_detected_at AS "lastDetectedAt",alerted_at AS "alertedAt",details
+    FROM sidec_continuity_change_report_resilience_conditions
+    WHERE organization_id=$1 AND resolved_at IS NULL ORDER BY first_detected_at`,[org]),
+   db.query(`SELECT id,proposal_id AS "proposalId",operation,attempts,next_retry_at AS "nextRetryAt",
+     last_attempt_at AS "lastAttemptAt",last_error AS "lastError",created_at AS "createdAt"
+    FROM sidec_continuity_change_report_retry_jobs
+    WHERE organization_id=$1 AND succeeded_at IS NULL ORDER BY next_retry_at`,[org]),
+   db.query(`SELECT DISTINCT ON(proposal_id,destination) proposal_id AS "proposalId",destination,success,
+     duration_ms AS "durationMs",pdf_header_valid AS "pdfHeaderValid",error_message AS "errorMessage",
+     performed_at AS "performedAt"
+    FROM sidec_continuity_change_report_restore_drills
+    WHERE organization_id=$1 ORDER BY proposal_id,destination,performed_at DESC`,[org])
+  ]);
+  return {replicaEnabled:wormReplicaEnabled(),items,conditions:conditions.rows,retries:retries.rows,latestDrills:drills.rows};
  });
 
  app.get("/api/v1/sidec/continuity/runbook/recommendations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
@@ -2312,12 +2339,14 @@ export async function continuityRoutes(app:FastifyInstance){
     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
    ]);
    if(result.verification&&(!result.verification.existsRemote||result.verification.hashValid!==true)){
-    return reply.code(502).send({error:"REPORT_REPLICA_VERIFICATION_FAILED",...result});
+    await queueContinuityChangeReportRetry(org,id,"REPLICATE",result.verification.errorMessage??"Verificação inicial da réplica falhou.");
+    return reply.code(502).send({error:"REPORT_REPLICA_VERIFICATION_FAILED",...result,retryQueued:true});
    }
    return result.created?reply.code(201).send(result):result;
   }catch(error){
+   await queueContinuityChangeReportRetry(org,id,"REPLICATE",error instanceof Error?error.message:String(error)).catch(()=>undefined);
    return reply.code((error as any)?.statusCode??502).send({
-    error:(error as any)?.code??"REPORT_REPLICA_FAILED",message:error instanceof Error?error.message:String(error)
+    error:(error as any)?.code??"REPORT_REPLICA_FAILED",message:error instanceof Error?error.message:String(error),retryQueued:true
    });
   }
  });
@@ -2344,14 +2373,39 @@ export async function continuityRoutes(app:FastifyInstance){
   try{
    const result=await syncChangeReportReplicaPolicy(org,id,auth.userId,"Sincronização manual da política WORM principal para a réplica.");
    if(!result.enabled)return reply.code(409).send(result);
-   if(result.error)return reply.code(404).send(result);
+   if(result.error){
+    await queueContinuityChangeReportRetry(org,id,"SYNC_POLICY",result.error);
+    return reply.code(404).send({...result,retryQueued:true});
+   }
    await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
     VALUES($1,'sidec_continuity.change_report_replica_sync_policy','sidec_continuity_change_report_replica',$2,$3,$4,$5::jsonb)`,[
     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
    ]);
    return result;
   }catch(error){
-   return reply.code(502).send({error:"REPORT_REPLICA_POLICY_SYNC_FAILED",message:error instanceof Error?error.message:String(error)});
+   await queueContinuityChangeReportRetry(org,id,"SYNC_POLICY",error instanceof Error?error.message:String(error)).catch(()=>undefined);
+   return reply.code(502).send({error:"REPORT_REPLICA_POLICY_SYNC_FAILED",message:error instanceof Error?error.message:String(error),retryQueued:true});
+  }
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/resilience/drill",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=reportRestoreDrillSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  try{
+   const drill=await runContinuityChangeReportRestoreDrill({
+    org,proposalId:id,destination:parsed.data.destination,trigger:"MANUAL",userId:auth.userId
+   });
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_report_restore_drill','sidec_continuity_change_report_archive',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(drill),
+    JSON.stringify({destination:parsed.data.destination})
+   ]);
+   return drill.success?drill:reply.code(502).send({error:"REPORT_RESTORE_DRILL_FAILED",drill});
+  }catch(error){
+   return reply.code((error as any)?.statusCode??500).send({
+    error:(error as any)?.code??"REPORT_RESTORE_DRILL_ERROR",message:error instanceof Error?error.message:String(error)
+   });
   }
  });
 
