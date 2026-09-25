@@ -29,6 +29,8 @@ type Incident = {
   vehicle_code: string | null;
   created_at: string;
   updated_at: string;
+  created_by_matricula: string | null;
+  created_by_name: string | null;
 };
 
 type TimelineItem = {
@@ -342,7 +344,7 @@ export default function OcorrenciaDetalhePage() {
             <div><dt>Situação</dt><dd>{statusLabels[incident.status] ?? incident.status}</dd></div>
             <div><dt>Risco à vida</dt><dd>{incident.risk_to_life ? "Sim" : "Não"}</dd></div>
             <div><dt>Origem</dt><dd>{incident.source}</dd></div>
-            <div><dt>Aberta em</dt><dd>{formatDateTimeBR(incident.created_at)}</dd></div>
+            <div><dt>Aberta em</dt><dd>{formatDateTimeBR(incident.created_at)}</dd></div><div><dt>Registrada por</dt><dd>Matrícula {incident.created_by_matricula??"—"}{incident.created_by_name?` · ${incident.created_by_name}`:""}</dd></div>
             <div><dt>Solicitante</dt><dd>{incident.caller_name || "Não informado"}</dd></div>
             <div><dt>Telefone</dt><dd>{incident.caller_phone || "Não informado"}</dd></div>
             <div className="detailWide"><dt>Descrição</dt><dd>{incident.description || "Sem descrição complementar."}</dd></div>
@@ -499,7 +501,7 @@ export default function OcorrenciaDetalhePage() {
                 <p>{item.note || "Registro automático do sistema."}</p>
                 <small>
                   {formatDateTimeBR(item.occurredAt)}
-                  {item.actorName ? ` · ${item.actorName}` : ""}
+                  {item.actorMatricula ? ` · matrícula ${item.actorMatricula}` : ""}{item.actorName ? ` · ${item.actorName}` : ""}
                 </small>
               </div>
             </article>
