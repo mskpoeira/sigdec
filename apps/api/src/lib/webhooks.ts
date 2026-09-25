@@ -34,7 +34,7 @@ async function enqueueWebhookEvents(){
   SELECT e.id,a.id,a.action,
    jsonb_build_object(
     'eventId',a.id,'occurredAt',a.occurred_at,'action',a.action,'entityType',a.entity_type,'entityId',a.entity_id,
-    'data',CASE WHEN COALESCE((e.config->>'includeData')::boolean,false)
+    'data',CASE WHEN CASE WHEN e.config->>'includeData'='true' THEN true ELSE false END
       THEN jsonb_build_object('before',a.before_data,'after',a.after_data,'metadata',a.metadata)
       ELSE jsonb_build_object('metadata',a.metadata) END
    )
@@ -43,6 +43,7 @@ async function enqueueWebhookEvents(){
   LEFT JOIN users u ON u.id=a.actor_user_id
   WHERE e.integration_type='WEBHOOK' AND e.active=true AND e.webhook_secret_ciphertext IS NOT NULL
     AND u.organization_id=e.organization_id
+    AND a.occurred_at>=COALESCE(e.webhook_active_from,e.created_at)
     AND a.action NOT LIKE 'auth.login_failed'
     AND (COALESCE(e.config->>'eventPrefix','')='' OR a.action LIKE (e.config->>'eventPrefix')||'%')
     AND NOT EXISTS(SELECT 1 FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.audit_log_id=a.id)
