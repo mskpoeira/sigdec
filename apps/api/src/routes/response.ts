@@ -8,11 +8,26 @@ import { normalizeMonitoringPayload } from "../lib/monitoring-adapters.js";
 
 function org(id:string|null){ if(!id) throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409}); return id; }
 
+const certificationSchema=z.object({
+ name:z.string().trim().min(2).max(200),institution:z.string().trim().max(200).optional(),
+ workloadHours:z.number().nonnegative().max(100000).optional(),validUntil:z.string().trim().max(40).optional(),
+ certificateRef:z.string().trim().max(500).optional()
+});
 const volunteerSchema=z.object({
  fullName:z.string().trim().min(3).max(200), phone:z.string().trim().max(50).optional(), email:z.string().email().optional(),
  availability:z.string().trim().max(300).optional(), shirtSize:z.string().trim().max(20).optional(),
- raincoatSize:z.string().trim().max(20).optional(), shoeSize:z.string().trim().max(20).optional(),
- skills:z.array(z.string().trim().min(1).max(80)).max(30).default([]), notes:z.string().trim().max(3000).optional()
+ pantsSize:z.string().trim().max(20).optional(),jacketSize:z.string().trim().max(20).optional(),
+ raincoatSize:z.string().trim().max(20).optional(),vestSize:z.string().trim().max(20).optional(),
+ gloveSize:z.string().trim().max(20).optional(),shoeSize:z.string().trim().max(20).optional(),
+ profession:z.string().trim().max(200).optional(),education:z.string().trim().max(300).optional(),
+ institution:z.string().trim().max(200).optional(),cnhCategory:z.string().trim().max(30).optional(),
+ languages:z.array(z.string().trim().min(1).max(60)).max(20).default([]),
+ radioamateurCallSign:z.string().trim().max(40).optional(),operationRegion:z.string().trim().max(200).optional(),
+ skills:z.array(z.string().trim().min(1).max(80)).max(30).default([]),
+ validatedSkills:z.array(z.string().trim().min(1).max(80)).max(30).default([]),
+ certifications:z.array(certificationSchema).max(100).default([]),
+ history:z.array(z.record(z.string(),z.unknown())).max(200).default([]),
+ notes:z.string().trim().max(3000).optional()
 });
 const stationSchema=z.object({
  code:z.string().trim().min(1).max(80), name:z.string().trim().min(2).max(200),
@@ -54,18 +69,62 @@ const shelterSchema=z.object({name:z.string().trim().min(2).max(200),addressLine
 const householdSchema=z.object({incidentId:z.string().uuid().optional(),shelterId:z.string().uuid().optional(),responsibleName:z.string().trim().min(3).max(200),phone:z.string().trim().max(50).optional(),addressOrigin:z.string().trim().max(300).optional(),neighborhoodOrigin:z.string().trim().max(120).optional(),adults:z.number().int().min(0).default(0),children:z.number().int().min(0).default(0),elderly:z.number().int().min(0).default(0),personsWithDisability:z.number().int().min(0).default(0),condition:z.enum(["DISPLACED","HOMELESS"]),notes:z.string().trim().max(3000).optional()});
 const itemSchema=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),unit:z.string().trim().min(1).max(30),category:z.string().trim().min(1).max(50)});
 const stockSchema=z.object({itemId:z.string().uuid(),movementType:z.enum(["IN","OUT","ADJUST_IN","ADJUST_OUT"]),quantity:z.number().positive(),reference:z.string().trim().max(200).optional(),notes:z.string().trim().max(2000).optional()});
-const deliverySchema=z.object({incidentId:z.string().uuid().optional(),householdId:z.string().uuid().optional(),recipientName:z.string().trim().min(3).max(200),notes:z.string().trim().max(2000).optional()});
+const deliverySchema=z.object({
+ incidentId:z.string().uuid().optional(),householdId:z.string().uuid().optional(),
+ recipientName:z.string().trim().min(3).max(200),notes:z.string().trim().max(2000).optional(),
+ items:z.array(z.object({itemId:z.string().uuid(),quantity:z.number().positive().max(100000)})).min(1).max(50),
+ duplicateAcknowledged:z.boolean().default(false),duplicateReason:z.string().trim().max(2000).optional()
+}).superRefine((v,ctx)=>{
+ if(v.duplicateAcknowledged&&(!v.duplicateReason||v.duplicateReason.length<5)){
+  ctx.addIssue({code:z.ZodIssueCode.custom,path:["duplicateReason"],message:"Justifique a entrega após alerta de possível duplicidade."});
+ }
+});
 
 export async function responseRoutes(app:FastifyInstance){
  app.get("/api/v1/volunteers",{preHandler:requirePermission("volunteers.read")},async req=>{
   const o=org(authFrom(req).organizationId);
-  const r=await db.query(`SELECT id,full_name AS "fullName",phone,email,status,availability,shirt_size AS "shirtSize",raincoat_size AS "raincoatSize",shoe_size AS "shoeSize",skills,notes FROM volunteers WHERE organization_id=$1 ORDER BY full_name`,[o]);
+  const r=await db.query(`SELECT id,full_name AS "fullName",phone,email,status,availability,
+   shirt_size AS "shirtSize",pants_size AS "pantsSize",jacket_size AS "jacketSize",
+   raincoat_size AS "raincoatSize",vest_size AS "vestSize",glove_size AS "gloveSize",shoe_size AS "shoeSize",
+   profession,education,institution,cnh_category AS "cnhCategory",languages,
+   radioamateur_call_sign AS "radioamateurCallSign",operation_region AS "operationRegion",
+   skills,validated_skills AS "validatedSkills",certifications,history,notes
+   FROM volunteers WHERE organization_id=$1 ORDER BY full_name`,[o]);
   return {items:r.rows};
  });
  app.post("/api/v1/volunteers",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
   const a=authFrom(req),o=org(a.organizationId),p=volunteerSchema.safeParse(req.body); if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
-  const v=p.data,r=await db.query(`INSERT INTO volunteers(organization_id,full_name,phone,email,availability,shirt_size,raincoat_size,shoe_size,skills,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[o,v.fullName,v.phone??null,v.email??null,v.availability??null,v.shirtSize??null,v.raincoatSize??null,v.shoeSize??null,v.skills,v.notes??null]);
+  const v=p.data,r=await db.query(`INSERT INTO volunteers(
+   organization_id,full_name,phone,email,availability,shirt_size,pants_size,jacket_size,raincoat_size,vest_size,glove_size,shoe_size,
+   profession,education,institution,cnh_category,languages,radioamateur_call_sign,operation_region,skills,validated_skills,certifications,history,notes
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23::jsonb,$24) RETURNING id`,[
+   o,v.fullName,v.phone??null,v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,
+   v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,
+   v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,
+   JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null
+  ]);
   return reply.code(201).send({id:r.rows[0]?.id});
+ });
+ app.put("/api/v1/volunteers/:id",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=volunteerSchema.safeParse(req.body);
+  if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const v=p.data;const before=await db.query("SELECT * FROM volunteers WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query(`UPDATE volunteers SET full_name=$1,phone=$2,email=$3,availability=$4,shirt_size=$5,pants_size=$6,jacket_size=$7,
+   raincoat_size=$8,vest_size=$9,glove_size=$10,shoe_size=$11,profession=$12,education=$13,institution=$14,cnh_category=$15,
+   languages=$16,radioamateur_call_sign=$17,operation_region=$18,skills=$19,validated_skills=$20,certifications=$21::jsonb,
+   history=$22::jsonb,notes=$23,updated_at=now()
+   WHERE id=$24 AND organization_id=$25 RETURNING id`,[
+   v.fullName,v.phone??null,v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,
+   v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,
+   v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,
+   JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null,id,o
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+   VALUES($1,'VOLUNTEER_UPDATED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+   a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(v)
+  ]);
+  return r.rows[0];
  });
  app.get("/api/v1/monitoring/stations",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT id,code,name,station_type AS "stationType",provider,external_id AS "externalId",latitude,longitude,active FROM monitoring_stations WHERE organization_id=$1 ORDER BY name`,[o]); return {items:r.rows};
@@ -298,13 +357,95 @@ export async function responseRoutes(app:FastifyInstance){
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT h.id,h.responsible_name AS "responsibleName",h.condition,h.adults,h.children,h.elderly,h.persons_with_disability AS "personsWithDisability",h.admitted_at AS "admittedAt",s.name AS "shelterName",i.protocol FROM assisted_households h LEFT JOIN shelters s ON s.id=h.shelter_id LEFT JOIN incidents i ON i.id=h.incident_id WHERE h.organization_id=$1 ORDER BY h.admitted_at DESC`,[o]); return {items:r.rows};
  });
  app.get("/api/v1/humanitarian/deliveries",{preHandler:requirePermission("humanitarian.read")},async req=>{
-  const o=org(authFrom(req).organizationId),r=await db.query(`SELECT d.id,d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",d.notes,i.protocol FROM humanitarian_deliveries d LEFT JOIN incidents i ON i.id=d.incident_id WHERE d.organization_id=$1 ORDER BY d.delivered_at DESC LIMIT 200`,[o]); return {items:r.rows};
+  const o=org(authFrom(req).organizationId),r=await db.query(`SELECT d.id,d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",
+   d.household_id AS "householdId",d.notes,d.duplicate_acknowledged AS "duplicateAcknowledged",d.duplicate_reason AS "duplicateReason",
+   i.protocol,COALESCE(jsonb_agg(jsonb_build_object('itemId',di.item_id,'name',hi.name,'unit',hi.unit,'quantity',di.quantity)
+    ORDER BY hi.name) FILTER(WHERE di.item_id IS NOT NULL),'[]'::jsonb) AS items
+   FROM humanitarian_deliveries d
+   LEFT JOIN incidents i ON i.id=d.incident_id
+   LEFT JOIN humanitarian_delivery_items di ON di.delivery_id=d.id
+   LEFT JOIN humanitarian_items hi ON hi.id=di.item_id
+   WHERE d.organization_id=$1 GROUP BY d.id,i.protocol ORDER BY d.delivered_at DESC LIMIT 200`,[o]); return {items:r.rows};
  });
  app.get("/api/v1/humanitarian/shelters",{preHandler:requirePermission("humanitarian.read")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query('SELECT id,name,address_line AS "addressLine",neighborhood,capacity_people AS "capacityPeople",status,notes FROM shelters WHERE organization_id=$1 ORDER BY name',[o]);return {items:r.rows};});
  app.post("/api/v1/humanitarian/shelters",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=shelterSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO shelters(organization_id,name,address_line,neighborhood,capacity_people,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[o,v.name,v.addressLine??null,v.neighborhood??null,v.capacityPeople,v.status,v.notes??null]);return reply.code(201).send(r.rows[0]);});
  app.post("/api/v1/humanitarian/households",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=householdSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO assisted_households(organization_id,incident_id,shelter_id,responsible_name,phone,address_origin,neighborhood_origin,adults,children,elderly,persons_with_disability,condition,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id',[o,v.incidentId??null,v.shelterId??null,v.responsibleName,v.phone??null,v.addressOrigin??null,v.neighborhoodOrigin??null,v.adults,v.children,v.elderly,v.personsWithDisability,v.condition,v.notes??null]);return reply.code(201).send(r.rows[0]);});
- app.post("/api/v1/humanitarian/deliveries",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const a=authFrom(req),o=org(a.organizationId),p=deliverySchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO humanitarian_deliveries(organization_id,incident_id,household_id,recipient_name,notes,delivered_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id',[o,v.incidentId??null,v.householdId??null,v.recipientName,v.notes??null,a.userId]);return reply.code(201).send(r.rows[0]);});
- app.get("/api/v1/inventory/items",{preHandler:requirePermission("humanitarian.read")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query(`SELECT i.id,i.code,i.name,i.unit,i.category,COALESCE(sum(CASE WHEN m.movement_type IN ('IN','ADJUST_IN') THEN m.quantity ELSE -m.quantity END),0) AS balance FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id=i.id WHERE i.organization_id=$1 GROUP BY i.id ORDER BY i.name`,[o]);return {items:r.rows};});
- app.post("/api/v1/inventory/items",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=itemSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO inventory_items(organization_id,code,name,unit,category) VALUES($1,$2,$3,$4,$5) RETURNING id',[o,v.code,v.name,v.unit,v.category]);return reply.code(201).send(r.rows[0]);});
- app.post("/api/v1/inventory/movements",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const a=authFrom(req),o=org(a.organizationId),p=stockSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;const i=await db.query('SELECT 1 FROM inventory_items WHERE id=$1 AND organization_id=$2',[v.itemId,o]);if(!i.rows[0])return reply.code(404).send({error:"NOT_FOUND"});const r=await db.query('INSERT INTO inventory_movements(organization_id,item_id,movement_type,quantity,reference,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[o,v.itemId,v.movementType,v.quantity,v.reference??null,v.notes??null,a.userId]);return reply.code(201).send(r.rows[0]);});
+ app.post("/api/v1/humanitarian/deliveries",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=deliverySchema.safeParse(req.body);
+  if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const v=p.data,itemIds=[...new Set(v.items.map(x=>x.itemId))];
+  if(v.householdId){const h=await db.query("SELECT 1 FROM assisted_households WHERE id=$1 AND organization_id=$2",[v.householdId,o]);if(!h.rows[0])return reply.code(404).send({error:"HOUSEHOLD_NOT_FOUND"});}
+  const validItems=await db.query("SELECT id,name FROM humanitarian_items WHERE organization_id=$1 AND active=true AND id=ANY($2::uuid[])",[o,itemIds]);
+  if(validItems.rowCount!==itemIds.length)return reply.code(400).send({error:"INVALID_DELIVERY_ITEM"});
+  const dup=await db.query(`SELECT d.id,d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",
+    array_agg(DISTINCT di.item_id::text) AS "itemIds"
+   FROM humanitarian_deliveries d JOIN humanitarian_delivery_items di ON di.delivery_id=d.id
+   WHERE d.organization_id=$1 AND d.delivered_at>=now()-interval '24 hours'
+    AND (($2::uuid IS NOT NULL AND d.household_id=$2) OR ($2::uuid IS NULL AND lower(d.recipient_name)=lower($3)))
+    AND di.item_id=ANY($4::uuid[])
+   GROUP BY d.id ORDER BY d.delivered_at DESC LIMIT 10`,[o,v.householdId??null,v.recipientName,itemIds]);
+  if(dup.rows.length&&!v.duplicateAcknowledged){
+   return reply.code(409).send({error:"POSSIBLE_DUPLICATE_DELIVERY",message:"Há entrega recente para o mesmo beneficiário com item coincidente. Confirme e justifique se a nova entrega for necessária.",duplicates:dup.rows});
+  }
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   await client.query("SELECT id FROM humanitarian_items WHERE organization_id=$1 AND id=ANY($2::uuid[]) FOR UPDATE",[o,itemIds]);
+   for(const item of v.items){
+    const bal=await client.query(`SELECT COALESCE(sum(CASE WHEN movement_type IN ('IN','ADJUST_IN') THEN quantity ELSE -quantity END),0)::float8 AS balance
+     FROM humanitarian_stock_movements WHERE organization_id=$1 AND item_id=$2`,[o,item.itemId]);
+    if(Number(bal.rows[0]?.balance??0)<item.quantity)throw Object.assign(new Error("Estoque insuficiente para um dos itens."),{statusCode:409,code:"INSUFFICIENT_STOCK",itemId:item.itemId,balance:Number(bal.rows[0]?.balance??0)});
+   }
+   const d=await client.query(`INSERT INTO humanitarian_deliveries(
+     organization_id,incident_id,household_id,recipient_name,notes,delivered_by,duplicate_acknowledged,duplicate_reason
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,delivered_at AS "deliveredAt"`,[
+     o,v.incidentId??null,v.householdId??null,v.recipientName,v.notes??null,a.userId,v.duplicateAcknowledged,v.duplicateReason??null
+    ]);
+   const deliveryId=String(d.rows[0].id);
+   for(const item of v.items){
+    await client.query("INSERT INTO humanitarian_delivery_items(delivery_id,item_id,quantity) VALUES($1,$2,$3)",[deliveryId,item.itemId,item.quantity]);
+    await client.query(`INSERT INTO humanitarian_stock_movements(organization_id,item_id,movement_type,quantity,reference,notes,created_by)
+     VALUES($1,$2,'OUT',$3,$4,$5,$6)`,[o,item.itemId,item.quantity,`delivery:${deliveryId}`,v.notes??null,a.userId]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'HUMANITARIAN_DELIVERY_CREATED','humanitarian_delivery',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    a.userId,deliveryId,req.ip,req.headers["user-agent"]??null,JSON.stringify({recipientName:v.recipientName,items:v.items}),
+    JSON.stringify({duplicateAcknowledged:v.duplicateAcknowledged,duplicateReason:v.duplicateReason??null})
+   ]);
+   await client.query("COMMIT");
+   return reply.code(201).send({id:deliveryId,deliveredAt:d.rows[0].deliveredAt,duplicateAcknowledged:v.duplicateAcknowledged});
+  }catch(error){
+   await client.query("ROLLBACK");
+   const e=error as any;
+   if(e?.statusCode)return reply.code(e.statusCode).send({error:e.code??"DELIVERY_FAILED",message:e.message,itemId:e.itemId,balance:e.balance});
+   throw error;
+  }finally{client.release();}
+ });
+ app.get("/api/v1/inventory/items",{preHandler:requirePermission("humanitarian.read")},async req=>{
+  const o=org(authFrom(req).organizationId),r=await db.query(`SELECT i.id,i.code,i.name,i.unit,i.category,
+   COALESCE(sum(CASE WHEN m.movement_type IN ('IN','ADJUST_IN') THEN m.quantity ELSE -m.quantity END),0)::float8 AS balance
+   FROM humanitarian_items i LEFT JOIN humanitarian_stock_movements m ON m.item_id=i.id AND m.organization_id=i.organization_id
+   WHERE i.organization_id=$1 AND i.active=true GROUP BY i.id ORDER BY i.name`,[o]);return {items:r.rows};
+ });
+ app.post("/api/v1/inventory/items",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
+  const o=org(authFrom(req).organizationId),p=itemSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const r=await db.query(`INSERT INTO humanitarian_items(organization_id,code,name,unit,category) VALUES($1,$2,$3,$4,$5)
+   ON CONFLICT(organization_id,code) DO UPDATE SET name=EXCLUDED.name,unit=EXCLUDED.unit,category=EXCLUDED.category,active=true
+   RETURNING id`,[o,v.code,v.name,v.unit,v.category]);return reply.code(201).send(r.rows[0]);
+ });
+ app.post("/api/v1/inventory/movements",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),p=stockSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const client=await db.connect();try{await client.query("BEGIN");
+   const item=await client.query("SELECT id FROM humanitarian_items WHERE id=$1 AND organization_id=$2 AND active=true FOR UPDATE",[v.itemId,o]);
+   if(!item.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
+   if(v.movementType==="OUT"||v.movementType==="ADJUST_OUT"){
+    const bal=await client.query(`SELECT COALESCE(sum(CASE WHEN movement_type IN ('IN','ADJUST_IN') THEN quantity ELSE -quantity END),0)::float8 AS balance
+     FROM humanitarian_stock_movements WHERE organization_id=$1 AND item_id=$2`,[o,v.itemId]);
+    if(Number(bal.rows[0]?.balance??0)<v.quantity){await client.query("ROLLBACK");return reply.code(409).send({error:"INSUFFICIENT_STOCK",balance:Number(bal.rows[0]?.balance??0)});}
+   }
+   const r=await client.query(`INSERT INTO humanitarian_stock_movements(organization_id,item_id,movement_type,quantity,reference,notes,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,[o,v.itemId,v.movementType,v.quantity,v.reference??null,v.notes??null,a.userId]);
+   await client.query("COMMIT");return reply.code(201).send(r.rows[0]);
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
 }

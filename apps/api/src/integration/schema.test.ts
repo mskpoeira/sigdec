@@ -665,6 +665,29 @@ test("SIGDEC v1.38 possui metas quantitativas de eficacia",async()=>{
  assert.ok((unique.rowCount??0)>=1);
 });
 
+test("SIGDEC v1.39 fecha voluntariado e assistencia humanitaria",async()=>{
+ const volunteerCols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='volunteers'
+   AND column_name IN ('pants_size','jacket_size','vest_size','glove_size','profession','education','institution',
+    'cnh_category','languages','radioamateur_call_sign','operation_region','validated_skills','certifications','history')
+  ORDER BY column_name`);
+ assert.equal(volunteerCols.rowCount,14);
+
+ const deliveryCols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='humanitarian_deliveries'
+   AND column_name IN ('duplicate_acknowledged','duplicate_reason') ORDER BY column_name`);
+ assert.deepEqual(deliveryCols.rows.map(x=>x.column_name),["duplicate_acknowledged","duplicate_reason"]);
+
+ const deliveryItems=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('humanitarian_delivery_items','humanitarian_items','humanitarian_stock_movements')
+  ORDER BY table_name`);
+ assert.deepEqual(deliveryItems.rows.map(x=>x.table_name),["humanitarian_delivery_items","humanitarian_items","humanitarian_stock_movements"]);
+
+ const features=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('feature_flags','integration_endpoints') ORDER BY table_name`);
+ assert.deepEqual(features.rows.map(x=>x.table_name),["feature_flags","integration_endpoints"]);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
