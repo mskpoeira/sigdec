@@ -128,7 +128,7 @@ export default function LoginForm() {
         <label>Chave manual<input readOnly value={mfa.manualKey??""} onFocus={e=>e.currentTarget.select()}/></label>
       </>}
       <label>{mfa.setupRequired?"Código de 6 dígitos":"Código MFA ou recuperação"}
-        <input autoFocus autoComplete="one-time-code" inputMode="numeric" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} required minLength={6} maxLength={40}/>
+        <input autoFocus autoComplete="one-time-code" inputMode={mfa.setupRequired?"numeric":"text"} value={mfaCode} onChange={e=>setMfaCode(e.target.value)} required minLength={6} maxLength={40}/>
       </label>
       {message&&<p className={message.includes("inválido")?"errorMessage":"formMessage"} role="alert">{message}</p>}
       <button type="submit" disabled={loading}>{loading?"Validando...":mfa.setupRequired?"Ativar e entrar":"Confirmar acesso"}</button>
