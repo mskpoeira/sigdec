@@ -145,7 +145,7 @@ export async function fieldRoutes(app: FastifyInstance) {
 
     const positions = await db.query(
       `SELECT DISTINCT ON (p.user_id)
-              p.user_id AS "userId", u.display_name AS "displayName",
+              p.user_id AS "userId", u.display_name AS "displayName", u.matricula,
               p.team_id AS "teamId", tm.code AS "teamCode",
               p.latitude, p.longitude, p.accuracy_meters AS "accuracyMeters",
               p.recorded_at AS "recordedAt", p.captured_at AS "capturedAt"
@@ -190,7 +190,7 @@ export async function fieldRoutes(app: FastifyInstance) {
 
     const [positions, monitoring] = await Promise.all([
       db.query(
-        `SELECT p.user_id AS "userId",u.display_name AS "displayName",tm.code AS "teamCode",
+        `SELECT p.user_id AS "userId",u.display_name AS "displayName",u.matricula,tm.code AS "teamCode",
                 p.latitude,p.longitude,p.accuracy_meters AS "accuracyMeters",p.recorded_at AS "recordedAt",p.captured_at AS "capturedAt"
            FROM field_positions p
            JOIN users u ON u.id=p.user_id
