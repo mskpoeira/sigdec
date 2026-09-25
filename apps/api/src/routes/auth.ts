@@ -449,7 +449,10 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     const access = await loadAccess(user.id);
-    const mfaRequired=user.mfa_required||user.mfa_enabled||access.roles.includes("MASTER");
+    const strategicLevel=Math.max(1,Math.min(100,Number(process.env.MFA_STRATEGIC_ROLE_LEVEL??80)));
+    const strategic=await db.query(`SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+      WHERE ur.user_id=$1 AND r.level>=$2 LIMIT 1`,[user.id,strategicLevel]);
+    const mfaRequired=user.mfa_required||user.mfa_enabled||strategic.rowCount===1;
     if(mfaRequired){
       if(!user.mfa_required)await db.query("UPDATE users SET mfa_required=true,updated_at=now() WHERE id=$1",[user.id]);
       const challenge=await issueMfaChallenge({
