@@ -711,9 +711,9 @@ test("SIGDEC v1.41 possui MFA efetivo e fila persistente de webhooks",async()=>{
 
  const integrationCols=await db.query(`SELECT column_name FROM information_schema.columns
   WHERE table_schema='public' AND table_name='integration_endpoints'
-   AND column_name IN ('webhook_secret_ciphertext','last_delivery_at','delivery_failure_count')
+   AND column_name IN ('webhook_secret_ciphertext','webhook_active_from','last_delivery_at','delivery_failure_count')
   ORDER BY column_name`);
- assert.deepEqual(integrationCols.rows.map(x=>x.column_name),["delivery_failure_count","last_delivery_at","webhook_secret_ciphertext"]);
+ assert.deepEqual(integrationCols.rows.map(x=>x.column_name),["delivery_failure_count","last_delivery_at","webhook_active_from","webhook_secret_ciphertext"]);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
