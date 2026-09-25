@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
+const PENDING_LOCATION_KEY="sigdec.field.pending-location.v1";
 
 type FieldIncident = {
   id: string;
@@ -45,6 +46,7 @@ export default function CampoPage() {
   const [selectedId, setSelectedId] = useState("");
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
+  const [online,setOnline]=useState(true);
 
   async function load() {
     const response = await fetch(`${API_URL}/api/v1/field/map`, { credentials: "include" });
@@ -76,6 +78,25 @@ export default function CampoPage() {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar.");
     });
   }, []);
+
+  useEffect(()=>{
+    const update=()=>setOnline(navigator.onLine);
+    update();
+    const syncPending=async()=>{
+      update();
+      if(!navigator.onLine)return;
+      const raw=sessionStorage.getItem(PENDING_LOCATION_KEY);
+      if(!raw)return;
+      try{
+        const payload=JSON.parse(raw);
+        const response=await fetch(`${API_URL}/api/v1/field/location`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        if(response.ok){sessionStorage.removeItem(PENDING_LOCATION_KEY);setMessage("Posição pendente sincronizada com o servidor.");await load();}
+      }catch{}
+    };
+    window.addEventListener("online",syncPending);window.addEventListener("offline",update);
+    void syncPending();
+    return()=>{window.removeEventListener("online",syncPending);window.removeEventListener("offline",update)};
+  },[]);
 
   useEffect(() => {
     void fetch(`${API_URL}/api/v1/field/history?hours=${historyHours}`, { credentials: "include" })
@@ -116,24 +137,32 @@ export default function CampoPage() {
     setMessage("Obtendo localização do aparelho...");
 
     navigator.geolocation.getCurrentPosition(async (position) => {
+      const payload={
+        latitude:position.coords.latitude,
+        longitude:position.coords.longitude,
+        accuracyMeters:position.coords.accuracy,
+        recordedAt:new Date(position.timestamp).toISOString()
+      };
+      if(!navigator.onLine){
+        sessionStorage.setItem(PENDING_LOCATION_KEY,JSON.stringify(payload));
+        setMessage("Sem conexão: posição mantida apenas nesta sessão e será enviada quando a rede voltar.");
+        setSharing(false);return;
+      }
       try {
         const response = await fetch(`${API_URL}/api/v1/field/location`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracyMeters: position.coords.accuracy,
-            recordedAt: new Date(position.timestamp).toISOString()
-          })
+          body: JSON.stringify(payload)
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.message ?? "Não foi possível registrar a localização.");
+        sessionStorage.removeItem(PENDING_LOCATION_KEY);
         setMessage("Localização registrada com segurança.");
         await load();
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Falha ao registrar localização.");
+        sessionStorage.setItem(PENDING_LOCATION_KEY,JSON.stringify(payload));
+        setMessage("Falha de rede: posição mantida apenas nesta sessão para nova tentativa automática.");
       } finally {
         setSharing(false);
       }
@@ -150,11 +179,12 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.39</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.40</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências ativas e últimas posições informadas pelas equipes.</p>
         </div>
         <div className="headerActions">
+          <span className={online?"secondaryLink":"warningCard"}>{online?"Online":"Offline"}</span>
           <label className="secondaryLink">Histórico <select value={historyHours} onChange={(event)=>setHistoryHours(Number(event.target.value))}><option value={6}>6h</option><option value={24}>24h</option><option value={72}>72h</option></select></label>
           <Link className="secondaryLink" href="/painel">Painel</Link>
           <button className="primaryButton" disabled={sharing} onClick={shareLocation}>

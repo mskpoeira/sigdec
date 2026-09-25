@@ -14,3 +14,5 @@ uploads/
 storage/
 *.pem
 *.key
+
+backups/

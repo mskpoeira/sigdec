@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="96" fill="#173f69"/>
+<path d="M256 58 422 120v118c0 109-66 174-166 216C156 412 90 347 90 238V120z" fill="#fff"/>
+<path d="M256 96 384 144v92c0 82-47 133-128 171-81-38-128-89-128-171v-92z" fill="#f1b928"/>
+<path d="M256 150 329 290H183z" fill="#173f69"/>
+<circle cx="256" cy="265" r="17" fill="#fff"/>
+<rect x="248" y="190" width="16" height="54" rx="8" fill="#fff"/>
+<text x="256" y="348" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="700" fill="#173f69">SIGDEC</text>
+</svg>
