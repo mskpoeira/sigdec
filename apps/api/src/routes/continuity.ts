@@ -526,6 +526,27 @@ export async function evaluateContinuityActionAlerts(organizationId?:string){
  return {created,dueSoonHours};
 }
 
+export async function evaluateContinuityChangeReportArchives(organizationId?:string){
+ const params:unknown[]=[];
+ let where="";
+ if(organizationId){params.push(organizationId);where="WHERE a.organization_id=$1";}
+ const rows=await db.query(`SELECT a.proposal_id AS "proposalId",a.organization_id AS "organizationId",
+   a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",a.content_hash AS "contentHash"
+  FROM sidec_continuity_change_report_archives a ${where}
+  ORDER BY a.archived_at ASC LIMIT 500`,params);
+ let checked=0,failed=0;
+ for(const row of rows.rows as Array<any>){
+  const result=await recordChangeReportArchiveVerification({
+   org:String(row.organizationId),proposalId:String(row.proposalId),source:"SCHEDULED",
+   bucket:String(row.bucket),key:String(row.objectKey),
+   versionId:row.versionId?String(row.versionId):null,expectedHash:String(row.contentHash)
+  });
+  checked++;
+  if(!result.existsRemote||result.hashValid!==true)failed++;
+ }
+ return {checked,failed};
+}
+
 export async function continuityRoutes(app:FastifyInstance){
  app.get("/api/v1/sidec/continuity/runbook",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
