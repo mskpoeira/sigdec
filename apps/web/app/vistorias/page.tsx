@@ -1,5 +1,5 @@
 "use client";
-import { formatDateTimeBR } from "../lib/datetime";
+import { formatDateTimeBR, ubatubaLocalDateTimeToIso } from "../lib/datetime";
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -141,7 +141,7 @@ export default function VistoriasPage() {
           addressLine,
           neighborhood: neighborhood || undefined,
           referencePoint: referencePoint || undefined,
-          scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          scheduledAt: scheduledAt ? ubatubaLocalDateTimeToIso(scheduledAt) : undefined,
           notes: notes || undefined,
           latitude: hasCoordinates ? Number(latitude) : undefined,
           longitude: hasCoordinates ? Number(longitude) : undefined,
