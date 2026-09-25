@@ -4,6 +4,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import {db} from "./db.js";
 import { authRoutes } from "./routes/auth.js";
 import { incidentRoutes } from "./routes/incidents.js";
 import { responseRoutes } from "./routes/response.js";
@@ -16,11 +17,21 @@ import { dispatchWebhooks } from "./lib/webhooks.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 const app=Fastify({logger:true,trustProxy:true});
+const release="1.44.0";
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
-app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:"1.43.0",timestamp:new Date().toISOString()}));
+app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:release,timestamp:new Date().toISOString()}));
+app.get("/api/v1/ready",async(_request,reply)=>{
+ try{
+  await db.query("SELECT 1");
+  return {status:"ready",service:"sigdec-api",version:release};
+ }catch(error){
+  app.log.error({err:error},"Banco indisponível no readiness check.");
+  return reply.code(503).send({status:"unavailable",service:"sigdec-api",version:release});
+ }
+});
 await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
-app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release:"1.43.0",modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","sidec-continuidade","inteligencia-assistiva","auditoria"]}));
+app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release,modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","sidec-continuidade","inteligencia-assistiva","auditoria"]}));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
 const sidecDeadlineMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_DEADLINE_EVALUATION_MINUTES??60)));
 const evaluateDeadlines=()=>evaluateSidecDeadlineAlerts().catch(error=>app.log.error({err:error},"Falha ao avaliar SLAs SIDEC."));

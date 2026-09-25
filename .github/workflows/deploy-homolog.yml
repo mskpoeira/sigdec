@@ -21,6 +21,10 @@ jobs:
     environment: homologacao
 
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - name: Validar configuracao
         shell: bash
         env:
@@ -55,8 +59,10 @@ jobs:
           SSH_HOST: ${{ secrets.HOMOLOG_SSH_HOST }}
           SSH_USER: ${{ secrets.HOMOLOG_SSH_USER }}
           SSH_PORT: ${{ secrets.HOMOLOG_SSH_PORT }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit de deploy inválido"; exit 1; }
           PORT="${SSH_PORT:-22}"
           ssh -p "$PORT" \
             -i "$HOME/.ssh/id_ed25519" \
@@ -64,15 +70,19 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$SSH_USER@$SSH_HOST" '
+            "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_SHA" <<'REMOTE'
               set -euo pipefail
               cd /opt/sigdec
               git fetch --prune origin
+              if [[ "$(git rev-parse origin/main)" != "$1" ]]; then
+                echo "O main mudou após o CI; aguardando o deploy do commit mais recente."
+                exit 1
+              fi
               git checkout main
-              git reset --hard origin/main
+              git reset --hard "$1"
               chmod +x infra/homolog/deploy.sh
               infra/homolog/deploy.sh
-            '
+          REMOTE
 
       - name: Verificar aplicacao
         shell: bash
@@ -81,12 +91,18 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SIGDEC_URL" || { echo "HOMOLOG_PUBLIC_URL ausente"; exit 1; }
+          EXPECTED_VERSION="$(node -p 'require("./package.json").version')"
           for i in {1..20}; do
-            if curl --fail --silent --show-error --max-time 10 "$SIGDEC_URL/health" >/dev/null; then
-              echo "SIGDEC homologacao respondeu com sucesso."
-              exit 0
+            if body="$(curl --fail --silent --max-time 10 "$SIGDEC_URL/api/v1/ready")"; then
+              if READY_JSON="$body" EXPECTED_VERSION="$EXPECTED_VERSION" node -e '
+                const data=JSON.parse(process.env.READY_JSON);
+                process.exit(data.status==="ready" && data.version===process.env.EXPECTED_VERSION ? 0 : 1);
+              '; then
+                echo "SIGDEC pronto com banco acessível na versão $EXPECTED_VERSION."
+                exit 0
+              fi
             fi
             sleep 5
           done
-          echo "Falha no healthcheck."
+          echo "Falha no readiness check da versão $EXPECTED_VERSION."
           exit 1
