@@ -688,6 +688,20 @@ test("SIGDEC v1.39 fecha voluntariado e assistencia humanitaria",async()=>{
  assert.deepEqual(features.rows.map(x=>x.table_name),["feature_flags","integration_endpoints"]);
 });
 
+test("SIGDEC v1.41 registra garantia MFA por sessao",async()=>{
+ const sessionColumn=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='auth_sessions' AND column_name='mfa_verified_at'`);
+ assert.equal(sessionColumn.rowCount,1);
+
+ const credentialTable=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('mfa_totp_credentials','recovery_codes') ORDER BY table_name`);
+ assert.deepEqual(credentialTable.rows.map(x=>x.table_name),["mfa_totp_credentials","recovery_codes"]);
+
+ const recoveryIndex=await db.query(`SELECT indexname FROM pg_indexes
+  WHERE schemaname='public' AND tablename='recovery_codes' AND indexname='recovery_codes_user_unused_idx'`);
+ assert.equal(recoveryIndex.rowCount,1);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
