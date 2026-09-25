@@ -33,6 +33,18 @@ const activeSchema=z.object({active:z.boolean()});
 function organizationId(value:string|null){if(!value)throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409});return value}
 
 export async function adminRoutes(app:FastifyInstance){
+ app.get("/api/v1/dashboard/summary",{preHandler:requireAuth},async request=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const result=await db.query(`SELECT
+   (SELECT count(*)::int FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE')) AS "activeIncidents",
+   (SELECT count(*)::int FROM incidents WHERE organization_id=$1 AND created_at>=now()-interval '24 hours') AS "incidents24h",
+   (SELECT count(*)::int FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL) AS "activeHouseholds",
+   (SELECT COALESCE(sum(CASE WHEN m.movement_type IN ('IN','ADJUST_IN') THEN m.quantity ELSE -m.quantity END),0)::float8
+      FROM humanitarian_stock_movements m WHERE m.organization_id=$1) AS "stockBalance",
+   (SELECT count(*)::int FROM volunteers WHERE organization_id=$1 AND status='ACTIVE') AS "activeVolunteers",
+   (SELECT count(*)::int FROM trainings WHERE organization_id=$1 AND starts_at>=now()) AS "upcomingTrainings"`,[org]);
+  return result.rows[0];
+ });
  app.get("/api/v1/features",{preHandler:requireAuth},async request=>{
   const org=organizationId(authFrom(request).organizationId);
   const stored=await db.query<{code:string;enabled:boolean}>("SELECT code,enabled FROM feature_flags WHERE organization_id=$1",[org]);
