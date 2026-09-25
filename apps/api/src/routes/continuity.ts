@@ -1416,6 +1416,73 @@ export async function continuityRoutes(app:FastifyInstance){
   return updated.rows[0];
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/approval-delegations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const result=await db.query(`SELECT d.id,d.delegator_user_id AS "delegatorUserId",du.display_name AS "delegatorName",
+    du.matricula AS "delegatorMatricula",d.delegate_user_id AS "delegateUserId",eu.display_name AS "delegateName",
+    eu.matricula AS "delegateMatricula",d.valid_from AS "validFrom",d.valid_until AS "validUntil",d.reason,
+    d.revoked_at AS "revokedAt",d.created_at AS "createdAt",
+    CASE WHEN d.revoked_at IS NOT NULL THEN 'REVOKED'
+      WHEN d.valid_until<=now() THEN 'EXPIRED'
+      WHEN d.valid_from>now() THEN 'SCHEDULED'
+      ELSE 'ACTIVE' END AS status
+   FROM sidec_continuity_approval_delegations d
+   JOIN users du ON du.id=d.delegator_user_id
+   JOIN users eu ON eu.id=d.delegate_user_id
+   WHERE d.organization_id=$1
+   ORDER BY CASE WHEN d.revoked_at IS NULL AND d.valid_from<=now() AND d.valid_until>now() THEN 1 ELSE 2 END,
+    d.created_at DESC LIMIT 100`,[org]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/approval-delegations",{preHandler:requirePermission("sidec_continuity_change.delegate")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=approvalDelegationSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.delegateUserId===auth.userId)return reply.code(409).send({error:"SELF_DELEGATION_NOT_ALLOWED"});
+  const delegate=await db.query(`SELECT id,display_name AS "displayName",matricula FROM users
+    WHERE id=$1 AND organization_id=$2 AND active=true`,[parsed.data.delegateUserId,org]);
+  if(!delegate.rows[0])return reply.code(404).send({error:"DELEGATE_NOT_FOUND"});
+  const validFrom=parsed.data.validFrom??new Date(),validUntil=parsed.data.validUntil;
+  if(validUntil.getTime()<=validFrom.getTime())return reply.code(400).send({error:"INVALID_DELEGATION_WINDOW"});
+  if(validUntil.getTime()-validFrom.getTime()>90*24*60*60*1000)return reply.code(400).send({error:"DELEGATION_MAX_90_DAYS"});
+  const overlap=await db.query(`SELECT id FROM sidec_continuity_approval_delegations
+    WHERE organization_id=$1 AND delegator_user_id=$2 AND delegate_user_id=$3 AND revoked_at IS NULL
+      AND valid_from<$5 AND valid_until>$4 LIMIT 1`,[org,auth.userId,parsed.data.delegateUserId,validFrom,validUntil]);
+  if(overlap.rows[0])return reply.code(409).send({error:"OVERLAPPING_DELEGATION",delegationId:overlap.rows[0].id});
+  const created=await db.query(`INSERT INTO sidec_continuity_approval_delegations(
+     organization_id,delegator_user_id,delegate_user_id,valid_from,valid_until,reason,created_by
+    ) VALUES($1,$2,$3,$4,$5,$6,$2)
+    RETURNING id,delegator_user_id AS "delegatorUserId",delegate_user_id AS "delegateUserId",
+      valid_from AS "validFrom",valid_until AS "validUntil",reason,created_at AS "createdAt"`,[
+     org,auth.userId,parsed.data.delegateUserId,validFrom,validUntil,parsed.data.reason
+    ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.approval_delegation_create','sidec_continuity_approval_delegation',$2,$3,$4,$5::jsonb)`,[
+     auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0])
+    ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/approval-delegations/:id/revoke",{preHandler:requirePermission("sidec_continuity_change.delegate")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const current=await db.query(`SELECT id,delegator_user_id AS "delegatorUserId",revoked_at AS "revokedAt"
+    FROM sidec_continuity_approval_delegations WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const item=current.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"DELEGATION_NOT_FOUND"});
+  if(item.revokedAt)return reply.code(409).send({error:"DELEGATION_ALREADY_REVOKED"});
+  const master=auth.permissions.includes("system.master");
+  if(String(item.delegatorUserId)!==String(auth.userId)&&!master)return reply.code(403).send({error:"FORBIDDEN"});
+  const updated=await db.query(`UPDATE sidec_continuity_approval_delegations
+    SET revoked_at=now(),revoked_by=$1 WHERE id=$2 AND organization_id=$3
+    RETURNING id,revoked_at AS "revokedAt"`,[auth.userId,id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.approval_delegation_revoke','sidec_continuity_approval_delegation',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(item),JSON.stringify(updated.rows[0])
+    ]);
+  return updated.rows[0];
+ });
+
  app.get("/api/v1/sidec/continuity/runbook/change-metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const summary=await db.query(`SELECT
@@ -1523,6 +1590,11 @@ export async function continuityRoutes(app:FastifyInstance){
     archive.archived_at AS "reportArchivedAt",
     av.exists_remote AS "reportArchiveExistsRemote",av.hash_valid AS "reportArchiveHashValid",
     av.verified_at AS "reportArchiveVerifiedAt",av.error_message AS "reportArchiveErrorMessage",
+    replica.bucket AS "reportReplicaBucket",replica.object_key AS "reportReplicaObjectKey",
+    replica.retain_until AS "reportReplicaRetainUntil",replica.legal_hold AS "reportReplicaLegalHold",
+    replica.replicated_at AS "reportReplicatedAt",
+    rv.exists_remote AS "reportReplicaExistsRemote",rv.hash_valid AS "reportReplicaHashValid",
+    rv.verified_at AS "reportReplicaVerifiedAt",rv.error_message AS "reportReplicaErrorMessage",
     COALESCE((SELECT json_agg(json_build_object(
       'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
       'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
@@ -1538,10 +1610,13 @@ export async function continuityRoutes(app:FastifyInstance){
     COALESCE((SELECT json_agg(json_build_object(
       'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
       'validUntil',ca.valid_until,'revalidatedAt',ca.revalidated_at,
-      'decidedById',ca.decided_by,'decidedByName',au.display_name
+      'decidedById',ca.decided_by,'decidedByName',au.display_name,
+      'authorityUserId',ca.authority_user_id,'authorityUserName',authority.display_name,
+      'delegationId',ca.delegation_id,'delegated',(ca.delegation_id IS NOT NULL)
     ) ORDER BY ca.decided_at)
      FROM sidec_continuity_change_approvals ca
      LEFT JOIN users au ON au.id=ca.decided_by
+     LEFT JOIN users authority ON authority.id=ca.authority_user_id
      WHERE ca.proposal_id=cp.id),'[]'::json) AS approvals
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
@@ -1556,24 +1631,39 @@ export async function continuityRoutes(app:FastifyInstance){
    LEFT JOIN users sealer ON sealer.id=seal.sealed_by
    LEFT JOIN sidec_continuity_change_report_archives archive ON archive.proposal_id=cp.id
    LEFT JOIN LATERAL (
-    SELECT exists_remote,hash_valid,verified_at,error_message
+    SELECT exists_remote,hash_valid,verified_at,error_message,retain_until,legal_hold
     FROM sidec_continuity_change_report_archive_verifications x
     WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
    ) av ON true
+   LEFT JOIN sidec_continuity_change_report_replicas replica ON replica.proposal_id=cp.id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid,verified_at,error_message,retain_until,legal_hold
+    FROM sidec_continuity_change_report_replica_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
+   ) rv ON true
    WHERE cp.organization_id=$1
    ORDER BY CASE cp.status WHEN 'PROPOSED' THEN 1 WHEN 'APPLIED' THEN 2 WHEN 'VERIFIED' THEN 3 ELSE 4 END,cp.created_at DESC`,[org]);
   const items=[];
   for(const row of r.rows as Array<any>){
    const diff=row.diffSnapshot??await buildRunbookDiff(org,String(row.targetPlanId),row.basePlanId?String(row.basePlanId):null);
    const approvals=Array.isArray(row.approvals)?row.approvals:[];
-   const now=Date.now();
-   const approvedCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&item.validUntil&&new Date(item.validUntil).getTime()>now).length;
-   const expiredApprovalCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=now)).length;
-   const rejectedCount=approvals.filter((item:any)=>item.decision==="REJECTED").length;
+   const now=Date.now(),latestByAuthority=new Map<string,any>();
+   for(const item of approvals){
+    const authority=String(item.authorityUserId??item.decidedById);
+    const previous=latestByAuthority.get(authority);
+    if(!previous||new Date(item.decidedAt).getTime()>=new Date(previous.decidedAt).getTime())latestByAuthority.set(authority,item);
+   }
+   const authorityDecisions=[...latestByAuthority.values()];
+   const approvedCount=authorityDecisions.filter((item:any)=>item.decision==="APPROVED"&&item.validUntil&&new Date(item.validUntil).getTime()>now).length;
+   const expiredApprovalCount=authorityDecisions.filter((item:any)=>item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=now)).length;
+   const rejectedCount=authorityDecisions.filter((item:any)=>item.decision==="REJECTED").length;
    items.push({...row,approvedCount,expiredApprovalCount,rejectedCount,
     criticalApprovalSatisfied:row.recommendationSeverity!=="CRITICAL"||(approvedCount>=2&&rejectedCount===0),
     reportSealed:Boolean(row.reportHash),reportArchived:Boolean(row.reportArchiveObjectKey),
     reportArchiveHealthy:Boolean(row.reportArchiveExistsRemote&&row.reportArchiveHashValid),
+    reportReplicaCreated:Boolean(row.reportReplicaObjectKey),
+    reportReplicaHealthy:Boolean(row.reportReplicaExistsRemote&&row.reportReplicaHashValid),
+    reportReplicationHealthy:Boolean(row.reportArchiveExistsRemote&&row.reportArchiveHashValid&&row.reportReplicaExistsRemote&&row.reportReplicaHashValid),
     diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
 
   }
@@ -1631,7 +1721,7 @@ export async function continuityRoutes(app:FastifyInstance){
   return reply.code(201).send(created.rows[0]);
  });
 
- app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/approval",{preHandler:requirePermission("sidec_continuity_change.approve")},async(request,reply)=>{
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/approval",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=changeApprovalSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
@@ -1643,29 +1733,38 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!proposal)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
   if(proposal.severity!=="CRITICAL")return reply.code(409).send({error:"CRITICAL_PROPOSAL_REQUIRED"});
   if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
-  if(String(proposal.createdById)===String(auth.userId))return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
+  const directAuthority=auth.permissions.includes("sidec_continuity_change.approve")||auth.permissions.includes("system.master");
+  const delegation=directAuthority?null:await activeApprovalDelegation(org,auth.userId);
+  if(!directAuthority&&!delegation)return reply.code(403).send({error:"APPROVAL_AUTHORITY_REQUIRED"});
+  const authorityUserId=String(delegation?.delegatorUserId??auth.userId);
+  if(String(proposal.createdById)===String(auth.userId)||String(proposal.createdById)===authorityUserId){
+   return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
+  }
   const policy=await loadChangePolicy(org);
   const existingDecision=await db.query(`SELECT decision FROM sidec_continuity_change_approvals
     WHERE proposal_id=$1 AND decided_by=$2`,[id,auth.userId]);
   const revalidating=existingDecision.rows[0]?.decision==="APPROVED"&&parsed.data.decision==="APPROVED";
   const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(
-     proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by
+     proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by,delegation_id,authority_user_id
     ) VALUES(
      $1,$2,$3,$4,
      CASE WHEN $2='APPROVED' THEN now()+($5::text||' hours')::interval ELSE NULL END,
      CASE WHEN $6 THEN now() ELSE NULL END,
-     CASE WHEN $6 THEN $4 ELSE NULL END
+     CASE WHEN $6 THEN $4 ELSE NULL END,$7,$8
     )
     ON CONFLICT(proposal_id,decided_by) DO UPDATE
       SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),valid_until=EXCLUDED.valid_until,
-        revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,updated_at=now()
-    RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt",
-      valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
-     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating
+        revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,
+        delegation_id=EXCLUDED.delegation_id,authority_user_id=EXCLUDED.authority_user_id,updated_at=now()
+    RETURNING id,decision,notes,decided_by AS "decidedById",authority_user_id AS "authorityUserId",
+      delegation_id AS "delegationId",decided_at AS "decidedAt",valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
+     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating,delegation?.id??null,authorityUserId
     ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
     VALUES($1,'sidec_continuity.change_approval','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
-     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),JSON.stringify({decision:parsed.data.decision,approvalValidHours:policy.approvalValidHours,revalidating})
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),
+     JSON.stringify({decision:parsed.data.decision,approvalValidHours:policy.approvalValidHours,revalidating,
+      delegated:Boolean(delegation),delegationId:delegation?.id??null,authorityUserId})
     ]);
   return decision.rows[0];
  });
@@ -1705,11 +1804,16 @@ export async function continuityRoutes(app:FastifyInstance){
    const evidence=await db.query(`SELECT count(*)::int AS count FROM sidec_continuity_change_evidence WHERE proposal_id=$1`,[id]);
    if(Number(evidence.rows[0]?.count??0)<1)return reply.code(409).send({error:"CHANGE_EVIDENCE_REQUIRED"});
    if(current.recommendation_severity==="CRITICAL"){
-    const approvalState=await db.query(`SELECT
-      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND valid_until>now())::int AS approved,
-      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND (valid_until IS NULL OR valid_until<=now()))::int AS expired,
+    const approvalState=await db.query(`WITH latest AS (
+      SELECT DISTINCT ON (authority_user_id) authority_user_id,decision,valid_until,decided_at
+      FROM sidec_continuity_change_approvals
+      WHERE proposal_id=$1 AND authority_user_id<>$2
+      ORDER BY authority_user_id,decided_at DESC
+     )
+     SELECT count(*) FILTER(WHERE decision='APPROVED' AND valid_until>now())::int AS approved,
+      count(*) FILTER(WHERE decision='APPROVED' AND (valid_until IS NULL OR valid_until<=now()))::int AS expired,
       count(*) FILTER(WHERE decision='REJECTED')::int AS rejected
-     FROM sidec_continuity_change_approvals WHERE proposal_id=$1`,[id,current.created_by]);
+     FROM latest`,[id,current.created_by]);
     const approved=Number(approvalState.rows[0]?.approved??0),expired=Number(approvalState.rows[0]?.expired??0),rejected=Number(approvalState.rows[0]?.rejected??0);
     if(rejected>0)return reply.code(409).send({error:"CRITICAL_CHANGE_REJECTED",rejected});
     if(approved<2)return reply.code(409).send({error:"CRITICAL_CHANGE_DUAL_APPROVAL_REQUIRED",approved,expired,required:2});
