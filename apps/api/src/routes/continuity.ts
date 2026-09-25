@@ -2003,8 +2003,13 @@ export async function continuityRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId);
   const parsed=effectivenessTargetsReplaceSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
-  const normalized=parsed.data.items.map(item=>({...item,scopeValue:item.scopeType==="DEFAULT"?"*":item.scopeValue.trim()}));
+  const categories=new Set(["PROCESS","PEOPLE","TECHNOLOGY","COMMUNICATION","DATA","STORAGE","CONNECTIVITY","OTHER"]);
+  const normalized=parsed.data.items.map(item=>({...item,scopeValue:
+   item.scopeType==="DEFAULT"?"*":item.scopeType==="CATEGORY"?item.scopeValue.trim().toUpperCase():item.scopeValue.trim().toLowerCase()
+  }));
   if(normalized.some(item=>item.scopeType!=="DEFAULT"&&item.scopeValue.length<2))return reply.code(400).send({error:"INVALID_SCOPE_VALUE"});
+  if(normalized.some(item=>item.scopeType==="CATEGORY"&&!categories.has(item.scopeValue)))return reply.code(400).send({error:"INVALID_TARGET_CATEGORY"});
+  if(normalized.some(item=>item.scopeType==="RECURRENCE"&&!/^[a-z0-9][a-z0-9._-]*$/.test(item.scopeValue)))return reply.code(400).send({error:"INVALID_TARGET_RECURRENCE"});
   const keys=normalized.map(item=>item.scopeType+":"+item.scopeValue.toLowerCase());
   if(new Set(keys).size!==keys.length)return reply.code(400).send({error:"DUPLICATE_TARGET_SCOPE"});
   const before=(await db.query(`SELECT * FROM sidec_continuity_effectiveness_targets WHERE organization_id=$1 ORDER BY scope_type,scope_value`,[org])).rows;
