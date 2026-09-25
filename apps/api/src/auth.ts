@@ -58,6 +58,27 @@ export async function loadAccess(userId: string) {
   };
 }
 
+const FEATURE_PERMISSION_PREFIXES: Array<[string,string]> = [
+  ["incidents.","incidents"],["dispatch.","dispatch"],["field.","field"],["inspections.","inspections"],
+  ["monitoring.","monitoring"],["alerts.","alerts"],["humanitarian.","humanitarian"],["volunteers.","volunteers"],
+  ["communications.","communications"],["documents.","documents"],["sco.","sco"],["risks.","risks"],
+  ["s2id.","s2id"],["training.","training"],["recovery.","recovery"],["library.","library"],
+  ["bi.","bi"],["assistive.","assistive"],["sidec_continuity","sidec-continuity"],["sidec.","sidec"]
+];
+
+export function featureCodeForPermission(permission:string){
+  return FEATURE_PERMISSION_PREFIXES.find(([prefix])=>permission.startsWith(prefix))?.[1]??null;
+}
+
+export async function isFeatureEnabled(organizationId:string|null,code:string){
+  if(!organizationId)return true;
+  const result=await db.query<{enabled:boolean}>(
+    "SELECT enabled FROM feature_flags WHERE organization_id=$1 AND code=$2",
+    [organizationId,code]
+  );
+  return result.rows[0]?.enabled??true;
+}
+
 export async function hasLivePermission(userId: string, permission: string) {
   const result = await db.query(
     `SELECT 1
@@ -191,6 +212,15 @@ export function requirePermission(permission: string) {
       return reply.code(403).send({
         error: "FORBIDDEN",
         message: "Permissão insuficiente para esta operação."
+      });
+    }
+
+    const featureCode=featureCodeForPermission(permission);
+    if(featureCode&&!(await isFeatureEnabled(auth.organizationId,featureCode))){
+      return reply.code(403).send({
+        error:"FEATURE_DISABLED",
+        featureCode,
+        message:"Este módulo está desativado para a organização."
       });
     }
   };
