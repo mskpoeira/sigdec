@@ -9,23 +9,25 @@ type SessionUser={id:string;matricula:string;displayName:string;email:string|nul
 
 const nav: Array<[string,string,Route,string?]> =[
 ["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias","incidents"],["◉","Riscos e Mapas","/campo","field"],["▲","Alertas","/monitoramento","monitoring"],
-["♥","Assistência Humanitária","/assistencia","humanitarian"],["⌂","Abrigos","/assistencia","humanitarian"],["♟","Famílias","/assistencia","humanitarian"],["◇","Doações e Estoque","/assistencia","humanitarian"],
-["♥","Voluntariado","/voluntarios","volunteers"],["♟","Treinamentos e Simulados","/gestao","training"],["♻","Recuperação","/gestao","recovery"],["▥","Relatórios e BI","/gestao","bi"],
-["↻","Integrações (S2iD)","/gestao","s2id"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
+["♥","Assistência Humanitária","/assistencia","humanitarian"],["⌂","Abrigos","/assistencia#abrigos" as Route,"humanitarian"],["♟","Famílias","/assistencia#familias" as Route,"humanitarian"],["◇","Doações e Estoque","/assistencia#estoque" as Route,"humanitarian"],
+["♥","Voluntariado","/voluntarios","volunteers"],["▥","Centro de Gestão","/gestao"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
 ];
-const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia","blue","humanitarian"],["⌂","Gerenciar Abrigos","/assistencia","green","humanitarian"],["◇","Registrar Entrega","/assistencia","orange","humanitarian"],["▤","Planejar Treinamento","/gestao","navy","training"],["▥","Relatórios e Indicadores","/gestao","gray","bi"]];
+const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▥","Centro de Gestão","/gestao","gray"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
 type Feature={code:string;enabled:boolean};
+type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
 
 export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
+ const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);
  useEffect(()=>{
   fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
   fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
   fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
   fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
+  fetch(`${API_URL}/api/v1/navigation`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setCustomNavigation(b.items??[])).catch(()=>{});
  },[]);
  async function logout(){await fetch(`${API_URL}/auth/logout`,{method:"POST",credentials:"include"});location.href="/login"}
  if(!user)return <main className="shell"><p>Carregando sessão...</p></main>;
@@ -40,7 +42,7 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <aside className="opsSide">
    <div className="opsSideBrand"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}</nav>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios"><span>♙</span>Usuários</Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route}><span>›</span>{item.label}</Link>)}</nav>
    <div className="opsUser"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div>
    <button onClick={logout}>↪ &nbsp; Sair</button>
   </aside>
@@ -60,7 +62,7 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Resumo Territorial</h2><Link href="/campo">Abrir operação de campo</Link></header><div className="situationMap"><div className="coast">UBATUBA · DADOS ATUAIS</div>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map(x=><div className="incidentMini" key={"territorial-"+x.id}><div><b>{x.neighborhood??"Local não informado"}</b><small>{x.priority} · {x.status}</small></div></div>)}<div className="legend">Resumo derivado das ocorrências reais carregadas pelo SIGDEC.</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.44.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC v1.45.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }

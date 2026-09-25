@@ -33,6 +33,19 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0039_sidec_continuity_change_effectiveness.sql"));
  assert.ok(files.includes("0040_sidec_continuity_step_identity_critical_seals.sql"));
  assert.ok(files.includes("0041_sidec_continuity_worm_approval_policy.sql"));
+ assert.ok(files.includes("0050_admin_users_navigation.sql"));
+ assert.ok(files.includes("0051_field_map_points.sql"));
+});
+
+test("cadastro administrativo e pontos geográficos preservam estrutura e permissões",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('navigation_items','field_map_points') ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(row=>row.table_name),["field_map_points","navigation_items"]);
+ const permissions=await db.query(`SELECT r.code,p.code AS permission FROM roles r
+  JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id
+  WHERE r.code IN ('MASTER','CAMPO') AND p.code IN ('system.master','field.read','field.location.update')`);
+ assert.ok(permissions.rows.some(row=>row.code==="MASTER"&&row.permission==="system.master"));
+ assert.ok(permissions.rows.some(row=>row.code==="CAMPO"&&row.permission==="field.location.update"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{

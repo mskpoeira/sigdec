@@ -8,6 +8,10 @@ const inspectionType = z.enum([
 ]);
 const riskLevel = z.enum(["UNASSESSED", "LOW", "MODERATE", "HIGH", "CRITICAL"]);
 const historyQuerySchema=z.object({hours:z.coerce.number().int().min(1).max(168).default(24)});
+const mapPointSchema=z.object({title:z.string().trim().min(3).max(160),description:z.string().trim().max(2000).default(""),
+  latitude:z.number().finite().min(-90).max(90),longitude:z.number().finite().min(-180).max(180)});
+const xml=(value:unknown)=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"})[char]!);
+const csv=(value:unknown)=>'"'+String(value??"").replace(/[\r\n]/g," ").replace(/^[=+\-@]/,"'$&").replace(/"/g,'""')+'"';
 
 function organization(id: string | null) {
   if (!id) {
@@ -64,6 +68,58 @@ const inspectionTransitions: Record<string, string[]> = {
 };
 
 export async function fieldRoutes(app: FastifyInstance) {
+  app.get("/api/v1/field/map-points",{preHandler:requirePermission("field.read")},async request=>{
+    const result=await db.query(`SELECT p.id,p.title,p.description,p.latitude,p.longitude,p.created_at AS "createdAt",
+      u.display_name AS "createdBy" FROM field_map_points p JOIN users u ON u.id=p.created_by
+      WHERE p.organization_id=$1 AND p.archived_at IS NULL ORDER BY p.created_at DESC LIMIT 1000`,
+      [organization(authFrom(request).organizationId)]);
+    return {items:result.rows};
+  });
+  app.post("/api/v1/field/map-points",{preHandler:requirePermission("field.location.update")},async(request,reply)=>{
+    const parsed=mapPointSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+    const v=parsed.data,auth=authFrom(request),org=organization(auth.organizationId);
+    const result=await db.query(`INSERT INTO field_map_points(organization_id,created_by,title,description,latitude,longitude,location)
+      VALUES($1,$2,$3,$4,$5,$6,ST_SetSRID(ST_MakePoint($6::double precision,$5::double precision),4326)::geography)
+      RETURNING id,title,description,latitude,longitude,created_at AS "createdAt"`,
+      [org,auth.userId,v.title,v.description,v.latitude,v.longitude]);
+    return reply.code(201).send(result.rows[0]);
+  });
+  app.delete("/api/v1/field/map-points/:id",{preHandler:requirePermission("field.location.update")},async(request,reply)=>{
+    const {id}=request.params as {id:string};
+    if(!z.string().uuid().safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+    const result=await db.query(`UPDATE field_map_points SET archived_at=now()
+      WHERE id=$1 AND organization_id=$2 AND archived_at IS NULL RETURNING id`,
+      [id,organization(authFrom(request).organizationId)]);
+    if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+    return {ok:true};
+  });
+  async function exportPoints(request: Parameters<typeof authFrom>[0]){
+    const org=organization(authFrom(request).organizationId);
+    const [points,incidents]=await Promise.all([
+      db.query(`SELECT title,description,latitude,longitude FROM field_map_points
+        WHERE organization_id=$1 AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1000`,[org]),
+      db.query(`SELECT protocol AS title,summary AS description,latitude,longitude FROM incidents
+        WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
+          AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY updated_at DESC LIMIT 500`,[org])
+    ]);
+    return [...points.rows,...incidents.rows] as Array<{title:string;description:string;latitude:number;longitude:number}>;
+  }
+  app.get("/api/v1/field/map-points.kml",{preHandler:requirePermission("field.read")},async(request,reply)=>{
+    const points=await exportPoints(request);
+    reply.header("content-type","application/vnd.google-earth.kml+xml; charset=utf-8")
+      .header("content-disposition",'attachment; filename="sigdec-pontos.kml"').header("cache-control","no-store");
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>SIGDEC - Ubatuba</name>${points.map(p=>
+      `<Placemark><name>${xml(p.title)}</name><description>${xml(p.description)}</description><Point><coordinates>${p.longitude},${p.latitude},0</coordinates></Point></Placemark>`
+    ).join("")}</Document></kml>`;
+  });
+  app.get("/api/v1/field/map-points.csv",{preHandler:requirePermission("field.read")},async(request,reply)=>{
+    const points=await exportPoints(request);
+    reply.header("content-type","text/csv; charset=utf-8")
+      .header("content-disposition",'attachment; filename="sigdec-pontos.csv"').header("cache-control","no-store");
+    return "\uFEFF"+["Nome,Descrição,Latitude,Longitude",...points.map(p=>
+      [p.title,p.description,p.latitude,p.longitude].map(csv).join(","))].join("\r\n")+"\r\n";
+  });
   app.get("/api/v1/field/map", {
     preHandler: requirePermission("field.read")
   }, async (request) => {

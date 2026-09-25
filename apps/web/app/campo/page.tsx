@@ -34,6 +34,7 @@ type FieldPosition = {
   accuracyMeters: number | null;
   recordedAt: string;
 };
+type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 
 export default function CampoPage() {
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
@@ -44,6 +45,12 @@ export default function CampoPage() {
   const [historyPositions, setHistoryPositions] = useState<FieldPosition[]>([]);
   const [historySignals, setHistorySignals] = useState<MonitoringSignal[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [points,setPoints]=useState<MapPoint[]>([]);
+  const [pointTitle,setPointTitle]=useState("");
+  const [pointDescription,setPointDescription]=useState("");
+  const [pointLatitude,setPointLatitude]=useState("");
+  const [pointLongitude,setPointLongitude]=useState("");
+  const [savingPoint,setSavingPoint]=useState(false);
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
   const [online,setOnline]=useState(true);
@@ -64,6 +71,8 @@ export default function CampoPage() {
     setIncidents(body.incidents ?? []);
     setPositions(body.positions ?? []);
     setMonitoringEvents(body.monitoringEvents ?? []);
+    const pointResponse=await fetch(`${API_URL}/api/v1/field/map-points`,{credentials:"include"});
+    if(pointResponse.ok){const pointBody=await pointResponse.json();setPoints(pointBody.items??[]);}
     const firstLocated = (body.incidents ?? []).find(
       (item: FieldIncident) => item.latitude !== null && item.longitude !== null
     );
@@ -118,15 +127,45 @@ export default function CampoPage() {
     () => incidents.find((item) => item.id === selectedId) ?? null,
     [incidents, selectedId]
   );
+  const selectedPoint=useMemo(()=>points.find(item=>`point:${item.id}`===selectedId)??null,[points,selectedId]);
 
   const mapUrl = useMemo(() => {
-    if (!selected || selected.latitude === null || selected.longitude === null) return "";
-    const lat = Number(selected.latitude);
-    const lon = Number(selected.longitude);
+    const target=selectedPoint??selected;
+    if (!target || target.latitude === null || target.longitude === null) return "";
+    const lat = Number(target.latitude);
+    const lon = Number(target.longitude);
     const delta = 0.012;
     const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join(",");
     return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lon}`;
-  }, [selected]);
+  }, [selected,selectedPoint]);
+
+  async function savePoint(event:React.FormEvent<HTMLFormElement>){
+    event.preventDefault();setSavingPoint(true);
+    try{
+      const response=await fetch(`${API_URL}/api/v1/field/map-points`,{method:"POST",credentials:"include",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({title:pointTitle,description:pointDescription,
+          latitude:Number(pointLatitude),longitude:Number(pointLongitude)})});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(body.message??"Confira o nome e as coordenadas do ponto.");
+      setSelectedId(`point:${body.id}`);setPointTitle("");setPointDescription("");setPointLatitude("");setPointLongitude("");
+      await load();setMessage("Ponto registrado e disponível no mapa operacional e na exportação para o My Maps.");
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha ao registrar ponto.");}
+    finally{setSavingPoint(false);}
+  }
+  function useCurrentCoordinates(){
+    if(!navigator.geolocation){setMessage("Este aparelho não disponibiliza geolocalização.");return;}
+    navigator.geolocation.getCurrentPosition(p=>{
+      setPointLatitude(String(p.coords.latitude));setPointLongitude(String(p.coords.longitude));
+    },()=>setMessage("Não foi possível obter as coordenadas do aparelho."),{enableHighAccuracy:true,timeout:15000});
+  }
+  async function downloadExport(format:"kml"|"csv"){
+    try{
+      const response=await fetch(`${API_URL}/api/v1/field/map-points.${format}`,{credentials:"include"});
+      if(!response.ok)throw new Error("Não foi possível gerar a exportação.");
+      const url=URL.createObjectURL(await response.blob());const anchor=document.createElement("a");
+      anchor.href=url;anchor.download=`sigdec-pontos.${format}`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha na exportação.");}
+  }
 
   function shareLocation() {
     if (!navigator.geolocation) {
@@ -179,9 +218,9 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.41</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.45</span>
           <h1>Mapa operacional</h1>
-          <p>Ocorrências ativas e últimas posições informadas pelas equipes.</p>
+          <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
         </div>
         <div className="headerActions">
           <span className={online?"secondaryLink":"warningCard"}>{online?"Online":"Offline"}</span>
@@ -204,19 +243,36 @@ export default function CampoPage() {
               <iframe
                 className="mapFrame"
                 src={mapUrl}
-                title={`Mapa da ocorrência ${selected?.protocol ?? ""}`}
+                title={`Mapa de ${selectedPoint?.title??selected?.protocol??"Ubatuba"}`}
                 loading="lazy"
               />
               <small>
-                Mapa © OpenStreetMap. Selecione uma ocorrência para centralizar.
+                Mapa © OpenStreetMap. Selecione um ponto ou ocorrência para centralizar.
               </small>
             </>
           ) : (
-            <div className="mapEmpty">Nenhuma ocorrência ativa possui coordenadas.</div>
+            <div className="mapEmpty">Nenhum ponto ou ocorrência ativa possui coordenadas.</div>
           )}
         </div>
 
         <aside className="fieldSidebar">
+          <div className="card fieldPointCard">
+            <span className="eyebrow">PONTOS DO MAPA</span>
+            <h2>Registrar ponto</h2>
+            <form onSubmit={savePoint} className="fieldPointForm">
+              <label>Nome <input required minLength={3} maxLength={160} value={pointTitle} onChange={e=>setPointTitle(e.target.value)} placeholder="Ex.: Área alagada"/></label>
+              <label>Descrição <textarea maxLength={2000} value={pointDescription} onChange={e=>setPointDescription(e.target.value)} placeholder="Referência operacional"/></label>
+              <div className="fieldPointCoords"><label>Latitude <input type="number" required min={-90} max={90} step="any" value={pointLatitude} onChange={e=>setPointLatitude(e.target.value)}/></label>
+              <label>Longitude <input type="number" required min={-180} max={180} step="any" value={pointLongitude} onChange={e=>setPointLongitude(e.target.value)}/></label></div>
+              <button type="button" className="secondaryLink" onClick={useCurrentCoordinates}>Usar minha localização</button>
+              <button className="primaryButton" disabled={savingPoint}>{savingPoint?"Registrando...":"Registrar no mapa"}</button>
+            </form>
+            <div className="fieldExportActions"><button type="button" className="secondaryLink" onClick={()=>void downloadExport("kml")}>Baixar KML</button><button type="button" className="secondaryLink" onClick={()=>void downloadExport("csv")}>Baixar CSV</button></div>
+            <p>Para visualizar no Google My Maps, importe o arquivo KML ou CSV em um mapa seu. Inclui pontos e ocorrências ativas com coordenadas.</p>
+            <a href="https://www.google.com/maps/d/" target="_blank" rel="noreferrer">Abrir Google My Maps ↗</a>
+            <h3>{points.length} ponto(s) registrado(s)</h3>
+            <div className="fieldIncidentList">{points.map(point=><button type="button" className={`fieldIncident ${selectedId===`point:${point.id}`?"fieldIncidentSelected":""}`} key={point.id} onClick={()=>setSelectedId(`point:${point.id}`)}><span className="priorityBadge">●</span><span><strong>{point.title}</strong><small>{point.description||`${point.latitude}, ${point.longitude}`}</small><small>{new Date(point.createdAt).toLocaleString("pt-BR")}</small></span></button>)}</div>
+          </div>
           <div>
             <span className="eyebrow">OCORRÊNCIAS ATIVAS</span>
             <h2>{incidents.length} atendimento(s)</h2>
