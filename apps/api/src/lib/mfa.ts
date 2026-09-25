@@ -34,8 +34,8 @@ export function totpCode(secret:string,at=Date.now()){
  const counterBytes=Buffer.alloc(8);
  counterBytes.writeBigUInt64BE(BigInt(counter));
  const digest=createHmac("sha1",base32Decode(secret)).update(counterBytes).digest();
- const offset=digest[digest.length-1]&0x0f;
- const value=((digest[offset]&0x7f)<<24)|((digest[offset+1]&0xff)<<16)|((digest[offset+2]&0xff)<<8)|(digest[offset+3]&0xff);
+ const offset=digest[digest.length-1]!&0x0f;
+ const value=((digest[offset]!&0x7f)<<24)|((digest[offset+1]!&0xff)<<16)|((digest[offset+2]!&0xff)<<8)|(digest[offset+3]!&0xff);
  return String(value%1_000_000).padStart(6,"0");
 }
 
