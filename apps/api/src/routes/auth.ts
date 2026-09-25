@@ -504,6 +504,109 @@ export async function authRoutes(app: FastifyInstance) {
     };
   });
 
+  app.post("/auth/mfa/setup", {
+    preHandler: requireAuth,
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } }
+  }, async (request, reply) => {
+    const auth=authFrom(request);
+    const userResult=await db.query<{
+      matricula:string;display_name:string;must_change_password:boolean;mfa_enabled:boolean
+    }>(
+      `SELECT matricula,display_name,must_change_password,mfa_enabled
+         FROM users WHERE id=$1 AND active=true`,
+      [auth.userId]
+    );
+    const user=userResult.rows[0];
+    if(!user)return reply.code(401).send({error:"UNAUTHENTICATED"});
+    if(user.must_change_password)return reply.code(403).send({
+      error:"PASSWORD_CHANGE_REQUIRED",message:"Altere a senha temporária antes de configurar o MFA."
+    });
+    if(user.mfa_enabled)return reply.code(409).send({
+      error:"MFA_ALREADY_ENABLED",message:"O segundo fator já está habilitado para esta conta."
+    });
+
+    const secret=generateTotpSecret();
+    const encrypted=encryptMfaSecret(secret);
+    await db.query(
+      `INSERT INTO mfa_totp_credentials(user_id,secret_ciphertext,created_at,verified_at)
+       VALUES($1,$2,now(),NULL)
+       ON CONFLICT(user_id) DO UPDATE SET secret_ciphertext=EXCLUDED.secret_ciphertext,created_at=now(),verified_at=NULL`,
+      [auth.userId,encrypted]
+    );
+    const otpauthUri=buildTotpUri({secret,account:user.matricula});
+    const qrDataUrl=await QRCode.toDataURL(otpauthUri,{errorCorrectionLevel:"M",margin:2,width:300});
+    await audit({
+      userId:auth.userId,action:"auth.mfa_setup_started",entityId:auth.userId,ip:request.ip,
+      userAgent:request.headers["user-agent"]
+    });
+    return {
+      secret,
+      otpauthUri,
+      qrDataUrl,
+      issuer:"SIGDEC",
+      account:user.matricula,
+      displayName:user.display_name
+    };
+  });
+
+  app.post("/auth/mfa/verify-setup", {
+    preHandler: requireAuth,
+    config: { rateLimit: { max: 10, timeWindow: "15 minutes" } }
+  }, async (request, reply) => {
+    const auth=authFrom(request),parsed=mfaVerifySchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",message:"Informe o código de 6 dígitos."});
+    const client=await db.connect();
+    let recoveryCodes:string[]=[];
+    try{
+      await client.query("BEGIN");
+      const credential=await client.query<{secret_ciphertext:string}>(
+        `SELECT secret_ciphertext FROM mfa_totp_credentials WHERE user_id=$1 FOR UPDATE`,
+        [auth.userId]
+      );
+      const encrypted=credential.rows[0]?.secret_ciphertext;
+      if(!encrypted){
+        await client.query("ROLLBACK");
+        return reply.code(409).send({error:"MFA_SETUP_NOT_STARTED",message:"Inicie a configuração do segundo fator."});
+      }
+      let valid=false;
+      try{valid=verifyTotp(decryptMfaSecret(encrypted),parsed.data.code)}catch{valid=false}
+      if(!valid){
+        await client.query("ROLLBACK");
+        await audit({
+          userId:auth.userId,action:"auth.mfa_setup_failed",entityId:auth.userId,ip:request.ip,
+          userAgent:request.headers["user-agent"]
+        });
+        return reply.code(400).send({error:"INVALID_MFA",message:"Código inválido. Confira o horário do aparelho autenticador."});
+      }
+      recoveryCodes=generateRecoveryCodes(10);
+      await client.query("UPDATE mfa_totp_credentials SET verified_at=now() WHERE user_id=$1",[auth.userId]);
+      await client.query("UPDATE users SET mfa_enabled=true,updated_at=now() WHERE id=$1",[auth.userId]);
+      await client.query("DELETE FROM recovery_codes WHERE user_id=$1",[auth.userId]);
+      for(const code of recoveryCodes){
+        await client.query("INSERT INTO recovery_codes(user_id,code_hash) VALUES($1,$2)",[auth.userId,hashRecoveryCode(code)]);
+      }
+      await client.query(
+        `UPDATE auth_sessions SET revoked_at=CASE WHEN id<>$2 THEN now() ELSE revoked_at END,
+            mfa_verified_at=CASE WHEN id=$2 THEN now() ELSE mfa_verified_at END
+          WHERE user_id=$1 AND revoked_at IS NULL`,
+        [auth.userId,auth.sessionId]
+      );
+      await client.query("COMMIT");
+    }catch(error){
+      await client.query("ROLLBACK");throw error;
+    }finally{client.release();}
+
+    await audit({
+      userId:auth.userId,action:"auth.mfa_enabled",entityId:auth.userId,ip:request.ip,
+      userAgent:request.headers["user-agent"],metadata:{recoveryCodesIssued:recoveryCodes.length}
+    });
+    return {
+      ok:true,
+      recoveryCodes,
+      message:"Segundo fator habilitado. Guarde os códigos de recuperação em local seguro."
+    };
+  });
+
   app.post("/auth/change-password", { preHandler: requireAuth }, async (request, reply) => {
     const parsed = changePasswordSchema.safeParse(request.body);
     if (!parsed.success) {
