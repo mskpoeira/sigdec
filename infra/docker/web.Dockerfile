@@ -4,10 +4,10 @@ RUN corepack enable
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
 
-RUN pnpm install --filter @sigdec/web... --no-frozen-lockfile
+RUN pnpm install --filter @sigdec/web... --frozen-lockfile
 
 COPY apps/web apps/web
 
