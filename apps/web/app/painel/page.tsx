@@ -40,7 +40,7 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <aside className="opsSide">
    <div className="opsSideBrand"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div>
-   <nav>{nav.filter(([, , ,feature])=>featureOn(feature)).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}</nav>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}</nav>
    <div className="opsUser"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div>
    <button onClick={logout}>↪ &nbsp; Sair</button>
   </aside>
