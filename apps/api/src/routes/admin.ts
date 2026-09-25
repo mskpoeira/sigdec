@@ -1,6 +1,6 @@
 import type {FastifyInstance} from "fastify";
 import {z} from "zod";
-import {authFrom,requireAuth,requirePermission,requireSecurityReady} from "../auth.js";
+import {authFrom,normalizeMatricula,requireAuth,requirePermission,requireSecurityReady} from "../auth.js";
 import {db} from "../db.js";
 
 const FEATURES=[
@@ -29,6 +29,7 @@ const integrationSchema=z.object({
  }
 });
 const activeSchema=z.object({active:z.boolean()});
+const mfaResetSchema=z.object({matricula:z.string().trim().min(1).max(32),reason:z.string().trim().min(5).max(1000)});
 
 function organizationId(value:string|null){if(!value)throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409});return value}
 
@@ -106,5 +107,33 @@ export async function adminRoutes(app:FastifyInstance){
    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(result.rows[0])
   ]);
   return result.rows[0];
+ }); app.post("/api/v1/admin/mfa/reset",{preHandler:requirePermission("auth.mfa.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),parsed=mfaResetSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const matricula=normalizeMatricula(parsed.data.matricula);
+  const target=await db.query<{id:string;matricula:string;display_name:string;mfa_required:boolean;mfa_enabled:boolean}>(
+   `SELECT id,matricula,display_name,mfa_required,mfa_enabled FROM users
+     WHERE organization_id=$1 AND matricula=$2 AND active=true LIMIT 1`,[org,matricula]
+  );
+  const user=target.rows[0];if(!user)return reply.code(404).send({error:"USER_NOT_FOUND"});
+  if(user.id===auth.userId)return reply.code(409).send({
+   error:"SELF_MFA_RESET_FORBIDDEN",message:"Por segurança, o MFA da própria sessão não pode ser resetado por esta rota administrativa."
+  });
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   await client.query("DELETE FROM recovery_codes WHERE user_id=$1",[user.id]);
+   await client.query("DELETE FROM mfa_totp_credentials WHERE user_id=$1",[user.id]);
+   await client.query("UPDATE users SET mfa_enabled=false,updated_at=now() WHERE id=$1",[user.id]);
+   await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[user.id]);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+    VALUES($1,'MFA_ADMIN_RESET','user',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+    auth.userId,user.id,request.ip,request.headers["user-agent"]??null,JSON.stringify(user),
+    JSON.stringify({...user,mfa_enabled:false}),JSON.stringify({reason:parsed.data.reason,targetMatricula:user.matricula})
+   ]);
+   await client.query("COMMIT");
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+  return {ok:true,matricula:user.matricula,displayName:user.display_name,mfaRequired:user.mfa_required,mfaEnabled:false};
  });
+
 }
