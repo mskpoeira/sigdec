@@ -623,6 +623,29 @@ test("SIGDEC v1.36 possui retry, drills PDF e condicoes de resiliencia dos relat
  assert.equal(trigger.rowCount,1);
 });
 
+test("SIGDEC v1.37 possui linhagem multipla e impactos estruturais explicitos",async()=>{
+ const table=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_continuity_step_lineage_links'`);
+ assert.equal(table.rowCount,1);
+
+ const cols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_change_impacts'
+   AND column_name='lineage_details'`);
+ assert.equal(cols.rowCount,1);
+
+ const linkDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_step_lineage_links'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(linkDefs,/SPLIT/);
+ assert.match(linkDefs,/MERGED/);
+ assert.match(linkDefs,/DERIVED/);
+
+ const impactDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_impacts'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(impactDefs,/SPLIT/);
+ assert.match(impactDefs,/MERGED/);
+ assert.match(impactDefs,/DERIVED/);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);

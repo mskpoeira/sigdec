@@ -14,6 +14,7 @@ const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY
 
 const runbookStepSchema=z.object({
  lineageKey:z.string().uuid().optional(),
+ sourceLineageKeys:z.array(z.string().uuid()).max(12).optional(),
  phase:phaseSchema,
  sortOrder:z.number().int().min(1).max(10000),
  title:z.string().trim().min(3).max(240),
@@ -216,7 +217,13 @@ async function loadRunbookPlan(org:string,id:string){
  if(!plan)return null;
  const steps=await db.query(`SELECT s.id,s.lineage_key AS "lineageKey",s.phase,s.sort_order AS "sortOrder",s.title,s.instructions,
    s.expected_minutes AS "expectedMinutes",s.owner_user_id AS "ownerUserId",s.required,
-   u.display_name AS "ownerName",u.matricula AS "ownerMatricula",u.job_title AS "ownerJobTitle"
+   u.display_name AS "ownerName",u.matricula AS "ownerMatricula",u.job_title AS "ownerJobTitle",
+   COALESCE(ARRAY(
+    SELECT src.lineage_key::text
+    FROM sidec_continuity_step_lineage_links l
+    JOIN sidec_continuity_steps src ON src.id=l.source_step_id
+    WHERE l.target_step_id=s.id ORDER BY src.sort_order,src.lineage_key
+   ),'{}'::text[]) AS "sourceLineageKeys"
   FROM sidec_continuity_steps s
   LEFT JOIN users u ON u.id=s.owner_user_id
   WHERE s.plan_id=$1
@@ -247,31 +254,79 @@ async function buildRunbookDiff(org:string,targetPlanId:string,basePlanId?:strin
  for(const step of base?.steps??[])baseMap.set(key(step),step);
  const targetMap=new Map<string,any>();
  for(const step of target.steps??[])targetMap.set(key(step),step);
- const keys=[...new Set([...baseMap.keys(),...targetMap.keys()])];
+
+ const links=resolvedBaseId?await db.query(`SELECT l.relation_type AS "relationType",
+   src.id AS "sourceStepId",src.lineage_key::text AS "sourceLineageKey",src.title AS "sourceTitle",
+   tgt.id AS "targetStepId",tgt.lineage_key::text AS "targetLineageKey",tgt.title AS "targetTitle",
+   tgt.phase,tgt.sort_order AS "sortOrder"
+  FROM sidec_continuity_step_lineage_links l
+  JOIN sidec_continuity_steps src ON src.id=l.source_step_id
+  JOIN sidec_continuity_steps tgt ON tgt.id=l.target_step_id
+  WHERE l.organization_id=$1 AND l.base_plan_id=$2 AND l.target_plan_id=$3
+  ORDER BY src.sort_order,tgt.sort_order`,[org,resolvedBaseId,targetPlanId]):{rows:[] as any[]};
+ const bySource=new Map<string,any[]>(),byTarget=new Map<string,any[]>();
+ for(const link of links.rows as Array<any>){
+  const s=String(link.sourceLineageKey),t=String(link.targetLineageKey);
+  bySource.set(s,[...(bySource.get(s)??[]),link]);
+  byTarget.set(t,[...(byTarget.get(t)??[]),link]);
+ }
+
  const steps:any[]=[];
- for(const stepKey of keys){
+ const common=[...baseMap.keys()].filter(k=>targetMap.has(k));
+ for(const stepKey of common){
   const before=baseMap.get(stepKey),after=targetMap.get(stepKey);
-  if(!before&&after){
-   steps.push({stepKey,changeType:"ADDED",baseStepId:null,targetStepId:after.id,phase:after.phase,sortOrder:after.sortOrder,title:after.title,changedFields:["step"]});
-   continue;
-  }
-  if(before&&!after){
-   steps.push({stepKey,changeType:"REMOVED",baseStepId:before.id,targetStepId:null,phase:before.phase,sortOrder:before.sortOrder,title:before.title,changedFields:["step"]});
-   continue;
-  }
-  if(!before||!after)continue;
   const changedFields=["phase","sortOrder","title","instructions","expectedMinutes","ownerUserId","required"].filter(field=>{
    const left=(before as any)[field]??null,right=(after as any)[field]??null;
    return left!==right;
   });
-  if(changedFields.length)steps.push({stepKey,changeType:"MODIFIED",baseStepId:before.id,targetStepId:after.id,phase:after.phase,sortOrder:after.sortOrder,title:after.title,changedFields});
+  if(changedFields.length)steps.push({stepKey,changeType:"MODIFIED",baseStepId:before.id,targetStepId:after.id,
+   phase:after.phase,sortOrder:after.sortOrder,title:after.title,changedFields,lineageDetails:{}});
  }
+
+ for(const [stepKey,before] of baseMap){
+  if(targetMap.has(stepKey))continue;
+  const outgoing=bySource.get(stepKey)??[];
+  if(outgoing.length>1){
+   const targets=outgoing.map(x=>({id:x.targetStepId,lineageKey:x.targetLineageKey,title:x.targetTitle,sortOrder:x.sortOrder}));
+   steps.push({stepKey:`split:${stepKey}`,changeType:"SPLIT",baseStepId:before.id,targetStepId:targets[0]?.id??null,
+    phase:before.phase,sortOrder:Math.min(...targets.map(x=>Number(x.sortOrder))),title:before.title,
+    changedFields:["lineage"],lineageDetails:{sourceLineageKey:stepKey,targets}});
+  }else if(outgoing.length===1){
+   const link=outgoing[0],incoming=byTarget.get(String(link.targetLineageKey))??[];
+   if(incoming.length===1){
+    steps.push({stepKey:`derive:${String(link.targetLineageKey)}`,changeType:"DERIVED",baseStepId:before.id,targetStepId:link.targetStepId,
+     phase:link.phase,sortOrder:link.sortOrder,title:link.targetTitle,changedFields:["lineage"],
+     lineageDetails:{sourceLineageKey:stepKey,targetLineageKey:link.targetLineageKey}});
+   }
+  }else{
+   steps.push({stepKey,changeType:"REMOVED",baseStepId:before.id,targetStepId:null,phase:before.phase,
+    sortOrder:before.sortOrder,title:before.title,changedFields:["step"],lineageDetails:{}});
+  }
+ }
+
+ for(const [stepKey,after] of targetMap){
+  if(baseMap.has(stepKey))continue;
+  const incoming=byTarget.get(stepKey)??[];
+  if(incoming.length>1){
+   const sources=incoming.map(x=>({id:x.sourceStepId,lineageKey:x.sourceLineageKey,title:x.sourceTitle}));
+   steps.push({stepKey:`merge:${stepKey}`,changeType:"MERGED",baseStepId:sources[0]?.id??null,targetStepId:after.id,
+    phase:after.phase,sortOrder:after.sortOrder,title:after.title,changedFields:["lineage"],
+    lineageDetails:{sourceLineageKeys:sources.map(x=>x.lineageKey),sources,targetLineageKey:stepKey}});
+  }else if(incoming.length===0){
+   steps.push({stepKey,changeType:"ADDED",baseStepId:null,targetStepId:after.id,phase:after.phase,
+    sortOrder:after.sortOrder,title:after.title,changedFields:["step"],lineageDetails:{}});
+  }
+ }
+
  steps.sort((a,b)=>Number(a.sortOrder)-Number(b.sortOrder)||String(a.stepKey).localeCompare(String(b.stepKey)));
  const summary={
   fieldsChanged:fields.length,
   stepsAdded:steps.filter(x=>x.changeType==="ADDED").length,
   stepsModified:steps.filter(x=>x.changeType==="MODIFIED").length,
   stepsRemoved:steps.filter(x=>x.changeType==="REMOVED").length,
+  stepsSplit:steps.filter(x=>x.changeType==="SPLIT").length,
+  stepsMerged:steps.filter(x=>x.changeType==="MERGED").length,
+  stepsDerived:steps.filter(x=>x.changeType==="DERIVED").length,
   totalChanges:fields.length+steps.length
  };
  return {
@@ -1092,20 +1147,52 @@ export async function continuityRoutes(app:FastifyInstance){
    ]);
    const lineageKeys=parsed.data.steps.map(step=>step.lineageKey).filter((value):value is string=>Boolean(value));
    if(new Set(lineageKeys).size!==lineageKeys.length)throw Object.assign(new Error("Identidade de etapa duplicada no rascunho."),{statusCode:400,code:"DUPLICATE_STEP_LINEAGE"});
+   for(const step of parsed.data.steps){
+    const sources=step.sourceLineageKeys??[];
+    if(step.lineageKey&&sources.length)throw Object.assign(new Error("Etapa não pode manter identidade direta e declarar múltiplas origens ao mesmo tempo."),{statusCode:400,code:"AMBIGUOUS_STEP_LINEAGE"});
+    if(new Set(sources).size!==sources.length)throw Object.assign(new Error("Origem de linhagem duplicada na etapa."),{statusCode:400,code:"DUPLICATE_SOURCE_LINEAGE"});
+   }
+   const parentPlanId=before.parentPlanId?String(before.parentPlanId):null;
    if(lineageKeys.length){
     const allowed=await client.query(`SELECT DISTINCT lineage_key::text AS key FROM sidec_continuity_steps
-      WHERE plan_id=$1 OR plan_id=$2`,[id,before.parentPlanId??id]);
+      WHERE plan_id=$1 OR plan_id=$2`,[id,parentPlanId??id]);
     const allowedSet=new Set(allowed.rows.map((row:any)=>String(row.key)));
     const invalid=lineageKeys.filter(value=>!allowedSet.has(value));
     if(invalid.length)throw Object.assign(new Error("Identidade de etapa não pertence à linhagem deste runbook."),{statusCode:400,code:"INVALID_STEP_LINEAGE"});
    }
+   const requestedSources=[...new Set(parsed.data.steps.flatMap(step=>step.sourceLineageKeys??[]))];
+   let sourceRows:Array<any>=[];
+   if(requestedSources.length){
+    if(!parentPlanId)throw Object.assign(new Error("Linhagem múltipla exige uma revisão-base."),{statusCode:400,code:"PARENT_PLAN_REQUIRED_FOR_MULTILINEAGE"});
+    const sourceResult=await client.query(`SELECT id,lineage_key::text AS "lineageKey",sort_order AS "sortOrder"
+      FROM sidec_continuity_steps WHERE plan_id=$1 AND lineage_key=ANY($2::uuid[])`,[parentPlanId,requestedSources]);
+    sourceRows=sourceResult.rows;
+    if(sourceRows.length!==requestedSources.length)throw Object.assign(new Error("Uma ou mais origens não pertencem à revisão-base."),{statusCode:400,code:"INVALID_SOURCE_LINEAGE"});
+   }
    await client.query("DELETE FROM sidec_continuity_steps WHERE plan_id=$1",[id]);
+   const insertedSteps:Array<{id:string;lineageKey:string;sourceLineageKeys:string[]}>=[]; 
    for(const step of parsed.data.steps){
-    await client.query(`INSERT INTO sidec_continuity_steps(
+    const inserted=await client.query(`INSERT INTO sidec_continuity_steps(
       plan_id,lineage_key,phase,sort_order,title,instructions,expected_minutes,owner_user_id,required
-     ) VALUES($1,COALESCE($2::uuid,gen_random_uuid()),$3,$4,$5,$6,$7,$8,$9)`,[
+     ) VALUES($1,COALESCE($2::uuid,gen_random_uuid()),$3,$4,$5,$6,$7,$8,$9)
+     RETURNING id,lineage_key::text AS "lineageKey"`,[
       id,step.lineageKey??null,step.phase,step.sortOrder,step.title,step.instructions,step.expectedMinutes,step.ownerUserId??null,step.required
     ]);
+    insertedSteps.push({id:String(inserted.rows[0].id),lineageKey:String(inserted.rows[0].lineageKey),sourceLineageKeys:step.sourceLineageKeys??[]});
+   }
+   if(parentPlanId&&requestedSources.length){
+    const sourceByKey=new Map(sourceRows.map((row:any)=>[String(row.lineageKey),String(row.id)]));
+    const targetCountBySource=new Map<string,number>();
+    for(const step of insertedSteps)for(const source of step.sourceLineageKeys)targetCountBySource.set(source,(targetCountBySource.get(source)??0)+1);
+    for(const step of insertedSteps){
+     if(!step.sourceLineageKeys.length)continue;
+     for(const source of step.sourceLineageKeys){
+      const relationType=step.sourceLineageKeys.length>1?"MERGED":(targetCountBySource.get(source)??0)>1?"SPLIT":"DERIVED";
+      await client.query(`INSERT INTO sidec_continuity_step_lineage_links(
+       organization_id,base_plan_id,target_plan_id,source_step_id,target_step_id,relation_type
+      ) VALUES($1,$2,$3,$4,$5,$6)`,[org,parentPlanId,id,sourceByKey.get(source),step.id,relationType]);
+     }
+    }
    }
    const afterSnapshot={...parsed.data,id,version:before.version,status:"DRAFT"};
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
@@ -1898,7 +1985,7 @@ export async function continuityRoutes(app:FastifyInstance){
      WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence,
     COALESCE((SELECT json_agg(json_build_object(
       'id',ci.id,'stepKey',ci.step_key,'changeType',ci.change_type,'phase',ci.phase,'sortOrder',ci.sort_order,
-      'title',ci.title,'changedFields',ci.changed_fields
+      'title',ci.title,'changedFields',ci.changed_fields,'lineageDetails',ci.lineage_details
     ) ORDER BY ci.sort_order,ci.change_type)
      FROM sidec_continuity_change_impacts ci WHERE ci.proposal_id=cp.id),'[]'::json) AS impacts,
     COALESCE((SELECT json_agg(json_build_object(
@@ -2127,10 +2214,10 @@ export async function continuityRoutes(app:FastifyInstance){
     await client.query("DELETE FROM sidec_continuity_change_impacts WHERE proposal_id=$1",[id]);
     for(const impact of diff.steps){
      await client.query(`INSERT INTO sidec_continuity_change_impacts(
-       proposal_id,base_step_id,target_step_id,step_key,change_type,phase,sort_order,title,changed_fields
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,[
+       proposal_id,base_step_id,target_step_id,step_key,change_type,phase,sort_order,title,changed_fields,lineage_details
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)`,[
        id,impact.baseStepId??null,impact.targetStepId??null,impact.stepKey,impact.changeType,
-       impact.phase,impact.sortOrder,impact.title,JSON.stringify(impact.changedFields??[])
+       impact.phase,impact.sortOrder,impact.title,JSON.stringify(impact.changedFields??[]),JSON.stringify(impact.lineageDetails??{})
       ]);
     }
     await client.query(`UPDATE sidec_continuity_runbook_recommendations
