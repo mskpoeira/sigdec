@@ -7,7 +7,8 @@ import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSid
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
 import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
-import { archiveSidecContinuityChangeReport,archiveSidecContinuityChangeReportReplica,enableSidecArchiveLegalHold,enableSidecReplicaLegalHold,extendSidecArchiveRetention,extendSidecReplicaRetention,verifySidecArchive,verifySidecReplica,wormMode,wormReplicaEnabled,wormReplicaMode } from "../lib/sidec-worm.js";
+import { archiveSidecContinuityChangeReport,archiveSidecContinuityChangeReportReplica,enableSidecArchiveLegalHold,enableSidecReplicaLegalHold,extendSidecArchiveRetention,extendSidecReplicaRetention,restoreSidecArchiveObject,restoreSidecReplicaObject,verifySidecArchive,verifySidecReplica,wormMode,wormReplicaEnabled,wormReplicaMode } from "../lib/sidec-worm.js";
+import { hasPdfSignature,nextResilienceRetryAt,shouldAlertResilience } from "../lib/sidec-resilience.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
@@ -146,6 +147,10 @@ const reportRetentionExtensionSchema=z.object({
 
 const reportLegalHoldSchema=z.object({
  reason:z.string().trim().min(5).max(4000)
+});
+
+const reportRestoreDrillSchema=z.object({
+ destination:z.enum(["PRIMARY","REPLICA"])
 });
 
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
@@ -703,6 +708,246 @@ export async function evaluateContinuityActionAlerts(organizationId?:string){
   if(inserted.rows[0])created++;
  }
  return {created,dueSoonHours};
+}
+
+async function runContinuityChangeReportRestoreDrill(input:{
+ org:string;proposalId:string;destination:"PRIMARY"|"REPLICA";trigger:"SCHEDULED"|"MANUAL";userId?:string|null;
+}){
+ const started=Date.now();
+ const source=input.destination==="PRIMARY"
+  ?await db.query(`SELECT s.report_hash AS "expectedHash",octet_length(s.report_bytes)::bigint AS "expectedSize",
+     a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId"
+    FROM sidec_continuity_change_report_seals s
+    JOIN sidec_continuity_change_report_archives a ON a.proposal_id=s.proposal_id
+    WHERE s.proposal_id=$1 AND s.organization_id=$2`,[input.proposalId,input.org])
+  :await db.query(`SELECT s.report_hash AS "expectedHash",octet_length(s.report_bytes)::bigint AS "expectedSize",
+     r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId"
+    FROM sidec_continuity_change_report_seals s
+    JOIN sidec_continuity_change_report_replicas r ON r.proposal_id=s.proposal_id
+    WHERE s.proposal_id=$1 AND s.organization_id=$2`,[input.proposalId,input.org]);
+ const row=source.rows[0] as any;
+ if(!row)throw Object.assign(new Error(`Destino ${input.destination} não disponível para drill do relatório.`),{statusCode:404,code:"REPORT_RESTORE_SOURCE_NOT_FOUND"});
+ let observedHash:string|null=null,observedSize:number|null=null,pdfHeaderValid:boolean|null=null,errorMessage:string|null=null;
+ try{
+  const restored=input.destination==="PRIMARY"
+   ?await restoreSidecArchiveObject({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null})
+   :await restoreSidecReplicaObject({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null});
+  observedHash=createHash("sha256").update(restored.bytes).digest("hex");
+  observedSize=restored.bytes.length;
+  pdfHeaderValid=hasPdfSignature(restored.bytes);
+ }catch(error){
+  errorMessage=error instanceof Error?error.message:String(error);
+ }
+ const success=observedHash===String(row.expectedHash)&&observedSize===Number(row.expectedSize)&&pdfHeaderValid===true;
+ const durationMs=Math.max(0,Date.now()-started);
+ const inserted=await db.query(`INSERT INTO sidec_continuity_change_report_restore_drills(
+   proposal_id,organization_id,destination,expected_hash,observed_hash,expected_size,observed_size,pdf_header_valid,
+   success,duration_ms,trigger_source,error_message,performed_by
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+  RETURNING id,destination,expected_hash AS "expectedHash",observed_hash AS "observedHash",
+   expected_size AS "expectedSize",observed_size AS "observedSize",pdf_header_valid AS "pdfHeaderValid",
+   success,duration_ms AS "durationMs",trigger_source AS "triggerSource",error_message AS "errorMessage",
+   performed_at AS "performedAt"`,[
+   input.proposalId,input.org,input.destination,row.expectedHash,observedHash,Number(row.expectedSize),observedSize,
+   pdfHeaderValid,success,durationMs,input.trigger,errorMessage,input.userId??null
+  ]);
+ return inserted.rows[0];
+}
+
+async function queueContinuityChangeReportRetry(org:string,proposalId:string,operation:"REPLICATE"|"SYNC_POLICY",lastError?:string|null){
+ await db.query(`INSERT INTO sidec_continuity_change_report_retry_jobs(
+   proposal_id,organization_id,operation,attempts,next_retry_at,last_error,succeeded_at
+  ) VALUES($1,$2,$3,0,now(),$4,NULL)
+  ON CONFLICT(proposal_id,operation) DO UPDATE SET
+   succeeded_at=NULL,
+   next_retry_at=CASE WHEN sidec_continuity_change_report_retry_jobs.succeeded_at IS NOT NULL THEN now()
+     ELSE LEAST(sidec_continuity_change_report_retry_jobs.next_retry_at,now()) END,
+   last_error=COALESCE(EXCLUDED.last_error,sidec_continuity_change_report_retry_jobs.last_error),
+   updated_at=now()`,[proposalId,org,operation,lastError??null]);
+}
+
+async function processContinuityChangeReportRetries(organizationId?:string){
+ if(!wormReplicaEnabled())return {attempted:0,succeeded:0,failed:0,disabled:true};
+ const baseMinutes=Math.max(1,Math.min(1440,Number(process.env.SIDEC_REPLICA_RETRY_BASE_MINUTES??15)));
+ const maxMinutes=Math.max(baseMinutes,Math.min(10080,Number(process.env.SIDEC_REPLICA_RETRY_MAX_MINUTES??1440)));
+ const params:unknown[]=[];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=` AND organization_id=${params.length}`;}
+ const jobs=await db.query(`SELECT id,proposal_id AS "proposalId",organization_id AS "organizationId",operation,attempts
+  FROM sidec_continuity_change_report_retry_jobs
+  WHERE succeeded_at IS NULL AND next_retry_at<=now()${orgFilter}
+  ORDER BY next_retry_at LIMIT 50`,params);
+ let attempted=0,succeeded=0,failed=0;
+ for(const job of jobs.rows as Array<any>){
+  attempted++;
+  try{
+   const org=String(job.organizationId),proposalId=String(job.proposalId);
+   if(job.operation==="REPLICATE"){
+    const result=await createChangeReportReplica(org,proposalId,null) as any;
+    if(result.enabled!==true||result.verification?.hashValid!==true)throw new Error(result.error??"Réplica do relatório não confirmada.");
+   }else{
+    const result=await syncChangeReportReplicaPolicy(org,proposalId,null,"Retry automático de sincronização WORM.") as any;
+    if(result.synced!==true)throw new Error(result.error??"Política da réplica do relatório não sincronizada.");
+   }
+   await db.query(`UPDATE sidec_continuity_change_report_retry_jobs SET succeeded_at=now(),last_attempt_at=now(),
+    last_error=NULL,updated_at=now() WHERE id=$1`,[job.id]);
+   succeeded++;
+  }catch(error){
+   const attempts=Number(job.attempts??0);
+   const next=nextResilienceRetryAt(attempts,new Date(),baseMinutes,maxMinutes);
+   await db.query(`UPDATE sidec_continuity_change_report_retry_jobs SET attempts=attempts+1,last_attempt_at=now(),
+    next_retry_at=$1,last_error=$2,updated_at=now() WHERE id=$3`,[
+    next,error instanceof Error?error.message:String(error),job.id
+   ]);
+   failed++;
+  }
+ }
+ return {attempted,succeeded,failed};
+}
+
+async function currentContinuityChangeReportResilienceHealth(organizationId?:string){
+ const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
+ const params:unknown[]=[staleHours];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=" AND p.organization_id=$2";}
+ const result=await db.query(`SELECT p.proposal_id AS "proposalId",p.organization_id AS "organizationId",
+   (r.proposal_id IS NOT NULL) AS "replicaCreated",
+   COALESCE(pv.retain_until,p.retain_until) AS "primaryRetainUntil",
+   COALESCE(pv.legal_hold,p.legal_hold) AS "primaryLegalHold",
+   COALESCE(rv.retain_until,r.retain_until) AS "replicaRetainUntil",
+   COALESCE(rv.legal_hold,r.legal_hold) AS "replicaLegalHold",
+   pv.exists_remote AS "primaryExistsRemote",pv.hash_valid AS "primaryHashValid",pv.observed_hash AS "primaryObservedHash",
+   pv.verified_at AS "primaryVerifiedAt",
+   rv.exists_remote AS "replicaExistsRemote",rv.hash_valid AS "replicaHashValid",rv.observed_hash AS "replicaObservedHash",
+   rv.verified_at AS "replicaVerifiedAt",
+   d.success AS "latestDrillSuccess",d.destination AS "latestDrillDestination",d.performed_at AS "latestDrillAt",
+   CASE
+    WHEN d.success=false THEN 'RESTORE_FAILURE'
+    WHEN pv.exists_remote=false OR pv.hash_valid=false OR rv.exists_remote=false OR rv.hash_valid=false
+      OR (pv.observed_hash IS NOT NULL AND rv.observed_hash IS NOT NULL AND pv.observed_hash<>rv.observed_hash) THEN 'CRITICAL'
+    WHEN r.proposal_id IS NULL THEN 'MISSING_REPLICA'
+    WHEN (COALESCE(pv.legal_hold,p.legal_hold)=true AND COALESCE(rv.legal_hold,r.legal_hold,false)=false)
+      OR (COALESCE(pv.retain_until,p.retain_until) IS NOT NULL AND
+        (COALESCE(rv.retain_until,r.retain_until) IS NULL OR COALESCE(rv.retain_until,r.retain_until)<COALESCE(pv.retain_until,p.retain_until))) THEN 'POLICY_DRIFT'
+    WHEN pv.id IS NULL OR rv.id IS NULL
+      OR pv.verified_at<now()-($1::text||' hours')::interval
+      OR rv.verified_at<now()-($1::text||' hours')::interval THEN 'STALE'
+    ELSE 'HEALTHY'
+   END AS health
+  FROM sidec_continuity_change_report_archives p
+  LEFT JOIN sidec_continuity_change_report_replicas r ON r.proposal_id=p.proposal_id
+  LEFT JOIN LATERAL (
+   SELECT id,exists_remote,hash_valid,observed_hash,retain_until,legal_hold,verified_at
+   FROM sidec_continuity_change_report_archive_verifications x
+   WHERE x.proposal_id=p.proposal_id ORDER BY verified_at DESC LIMIT 1
+  ) pv ON true
+  LEFT JOIN LATERAL (
+   SELECT id,exists_remote,hash_valid,observed_hash,retain_until,legal_hold,verified_at
+   FROM sidec_continuity_change_report_replica_verifications x
+   WHERE x.proposal_id=p.proposal_id ORDER BY verified_at DESC LIMIT 1
+  ) rv ON true
+  LEFT JOIN LATERAL (
+   SELECT success,destination,performed_at FROM sidec_continuity_change_report_restore_drills x
+   WHERE x.proposal_id=p.proposal_id ORDER BY performed_at DESC LIMIT 1
+  ) d ON true
+  WHERE true${orgFilter}
+  ORDER BY p.archived_at`,params);
+ return result.rows as Array<any>;
+}
+
+async function updateContinuityChangeReportResilienceConditions(organizationId?:string){
+ const thresholdHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_RESILIENCE_ALERT_AFTER_HOURS??6)));
+ const staleHours=Math.max(1,Math.min(8760,Number(process.env.SIDEC_WORM_STALE_HOURS??48)));
+ const replicaEnabled=wormReplicaEnabled();
+ const rows=await currentContinuityChangeReportResilienceHealth(organizationId);
+ let opened=0,alerted=0,resolved=0;
+ for(const row of rows){
+  const org=String(row.organizationId),proposalId=String(row.proposalId);
+  let health=String(row.health);
+  if(!replicaEnabled&&health==="MISSING_REPLICA"){
+   const primaryCritical=row.primaryExistsRemote===false||row.primaryHashValid===false;
+   const primaryStale=!row.primaryVerifiedAt||new Date(row.primaryVerifiedAt).getTime()<Date.now()-staleHours*3600000;
+   health=primaryCritical?"CRITICAL":primaryStale?"STALE":"HEALTHY";
+  }
+  if(health==="HEALTHY"){
+   const rr=await db.query(`UPDATE sidec_continuity_change_report_resilience_conditions
+    SET resolved_at=now(),last_detected_at=now()
+    WHERE proposal_id=$1 AND organization_id=$2 AND resolved_at IS NULL RETURNING id`,[proposalId,org]);
+   resolved+=rr.rowCount??0;
+   continue;
+  }
+  const rr=await db.query(`UPDATE sidec_continuity_change_report_resilience_conditions SET resolved_at=now()
+   WHERE proposal_id=$1 AND organization_id=$2 AND resolved_at IS NULL AND condition<>$3 RETURNING id`,[proposalId,org,health]);
+  resolved+=rr.rowCount??0;
+  const before=await db.query(`SELECT id,first_detected_at AS "firstDetectedAt",alerted_at AS "alertedAt"
+   FROM sidec_continuity_change_report_resilience_conditions
+   WHERE proposal_id=$1 AND organization_id=$2 AND condition=$3 AND resolved_at IS NULL`,[proposalId,org,health]);
+  if(!before.rows[0]){
+   await db.query(`INSERT INTO sidec_continuity_change_report_resilience_conditions(
+    proposal_id,organization_id,condition,details
+   ) VALUES($1,$2,$3,$4::jsonb)`,[proposalId,org,health,JSON.stringify(row)]);
+   opened++;
+  }else{
+   await db.query(`UPDATE sidec_continuity_change_report_resilience_conditions
+    SET last_detected_at=now(),details=$1::jsonb WHERE id=$2`,[JSON.stringify(row),before.rows[0].id]);
+  }
+  const current=(before.rows[0]??(await db.query(`SELECT id,first_detected_at AS "firstDetectedAt",alerted_at AS "alertedAt"
+   FROM sidec_continuity_change_report_resilience_conditions
+   WHERE proposal_id=$1 AND organization_id=$2 AND condition=$3 AND resolved_at IS NULL`,[proposalId,org,health])).rows[0]) as any;
+  if(current&&!current.alertedAt&&shouldAlertResilience(new Date(current.firstDetectedAt),thresholdHours)){
+   await db.query("UPDATE sidec_continuity_change_report_resilience_conditions SET alerted_at=now() WHERE id=$1",[current.id]);
+   alerted++;
+  }
+  if(replicaEnabled&&health==="MISSING_REPLICA")await queueContinuityChangeReportRetry(org,proposalId,"REPLICATE");
+  if(replicaEnabled&&health==="POLICY_DRIFT")await queueContinuityChangeReportRetry(org,proposalId,"SYNC_POLICY");
+ }
+ return {opened,alerted,resolved,thresholdHours,items:rows};
+}
+
+async function runScheduledContinuityChangeReportRestoreDrills(organizationId?:string){
+ const drillHours=Math.max(24,Math.min(8760,Number(process.env.SIDEC_RESTORE_DRILL_HOURS??168)));
+ const replicaEnabled=wormReplicaEnabled();
+ const params:unknown[]=[drillHours];
+ let orgFilter="";
+ if(organizationId){params.push(organizationId);orgFilter=" AND a.organization_id=$2";}
+ const due=await db.query(`SELECT a.proposal_id AS "proposalId",a.organization_id AS "organizationId",
+   (r.proposal_id IS NOT NULL) AS "replicaCreated",
+   pd.performed_at AS "primaryLastSuccess",rd.performed_at AS "replicaLastSuccess"
+  FROM sidec_continuity_change_report_archives a
+  LEFT JOIN sidec_continuity_change_report_replicas r ON r.proposal_id=a.proposal_id
+  LEFT JOIN LATERAL (
+   SELECT performed_at FROM sidec_continuity_change_report_restore_drills d
+   WHERE d.proposal_id=a.proposal_id AND d.destination='PRIMARY' AND d.success=true
+   ORDER BY performed_at DESC LIMIT 1
+  ) pd ON true
+  LEFT JOIN LATERAL (
+   SELECT performed_at FROM sidec_continuity_change_report_restore_drills d
+   WHERE d.proposal_id=a.proposal_id AND d.destination='REPLICA' AND d.success=true
+   ORDER BY performed_at DESC LIMIT 1
+  ) rd ON true
+  WHERE (pd.performed_at IS NULL OR pd.performed_at<now()-($1::text||' hours')::interval
+    OR (r.proposal_id IS NOT NULL AND (rd.performed_at IS NULL OR rd.performed_at<now()-($1::text||' hours')::interval)))${orgFilter}
+  ORDER BY a.archived_at LIMIT 25`,params);
+ let performed=0,failed=0;
+ for(const row of due.rows as Array<any>){
+  const org=String(row.organizationId),proposalId=String(row.proposalId);
+  if(!row.primaryLastSuccess||new Date(row.primaryLastSuccess).getTime()<Date.now()-drillHours*3600000){
+   const drill=await runContinuityChangeReportRestoreDrill({org,proposalId,destination:"PRIMARY",trigger:"SCHEDULED"});
+   performed++;if(!drill.success)failed++;
+  }
+  if(replicaEnabled&&row.replicaCreated&&(!row.replicaLastSuccess||new Date(row.replicaLastSuccess).getTime()<Date.now()-drillHours*3600000)){
+   const drill=await runContinuityChangeReportRestoreDrill({org,proposalId,destination:"REPLICA",trigger:"SCHEDULED"});
+   performed++;if(!drill.success)failed++;
+  }
+ }
+ return {performed,failed,drillHours};
+}
+
+export async function evaluateContinuityChangeReportResilience(organizationId?:string){
+ const conditions=await updateContinuityChangeReportResilienceConditions(organizationId);
+ const retries=await processContinuityChangeReportRetries(organizationId);
+ const drills=await runScheduledContinuityChangeReportRestoreDrills(organizationId);
+ return {conditions,retries,drills};
 }
 
 export async function evaluateContinuityChangeReportArchives(organizationId?:string){
