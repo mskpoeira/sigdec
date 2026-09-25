@@ -349,6 +349,7 @@ async function loadChangeReportPayload(org:string,id:string){
     WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence,
    COALESCE((SELECT json_agg(json_build_object(
      'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
+     'validUntil',ca.valid_until,'revalidatedAt',ca.revalidated_at,
      'decidedById',ca.decided_by,'decidedByName',cu.display_name
    ) ORDER BY ca.decided_at)
     FROM sidec_continuity_change_approvals ca
@@ -1684,7 +1685,10 @@ export async function continuityRoutes(app:FastifyInstance){
      id,org,archived.bucket,archived.key,archived.versionId,archived.etag,archived.storageClass,
      archived.objectLockMode,archived.retainUntil,archived.legalHold,item.reportHash,auth.userId
     ]);
-  const receipt=inserted.rows[0]??existing.rows[0];
+  const receipt=inserted.rows[0]??(await db.query(`SELECT proposal_id AS "proposalId",bucket,object_key AS "objectKey",
+    version_id AS "versionId",etag,storage_class AS "storageClass",object_lock_mode AS "objectLockMode",
+    retain_until AS "retainUntil",legal_hold AS "legalHold",content_hash AS "contentHash",archived_at AS "archivedAt"
+   FROM sidec_continuity_change_report_archives WHERE proposal_id=$1 AND organization_id=$2`,[id,org])).rows[0];
   const verification=await recordChangeReportArchiveVerification({
    org,proposalId:id,source:"ARCHIVE",bucket:receipt.bucket,key:receipt.objectKey,
    versionId:receipt.versionId??null,expectedHash:String(item.reportHash)
