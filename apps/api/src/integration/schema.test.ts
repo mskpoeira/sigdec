@@ -27,6 +27,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0034_sidec_continuity_evidence_aar.sql"));
  assert.ok(files.includes("0035_sidec_continuity_schedule_escalation_lessons.sql"));
  assert.ok(files.includes("0036_sidec_continuity_action_effectiveness.sql"));
+ assert.ok(files.includes("0037_sidec_continuity_improvement_loop.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -335,6 +336,30 @@ test("SIDEC v1.29 possui vinculos e avaliacao de eficacia das acoes",async()=>{
  assert.match(defs,/PARTIAL/);
  assert.match(defs,/INEFFECTIVE/);
  assert.match(defs,/effectiveness.*NOT_EVALUATED.*OR.*status.*DONE/s);
+});
+
+test("SIDEC v1.30 possui ciclo de melhoria continua controlado",async()=>{
+ const actionColumns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_action_items'
+   AND column_name='recurrence_key'`);
+ assert.equal(actionColumns.rowCount,1);
+ const recoveryColumns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='recovery_actions'
+   AND column_name='source_continuity_action_id'`);
+ assert.equal(recoveryColumns.rowCount,1);
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_continuity_runbook_recommendations'`);
+ assert.equal(tables.rowCount,1);
+ const defs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_runbook_recommendations'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/OPEN/);
+ assert.match(defs,/ACCEPTED/);
+ assert.match(defs,/IMPLEMENTED/);
+ assert.match(defs,/DISMISSED/);
+ assert.match(defs,/CRITICAL/);
+ const uniqueIndexes=await db.query(`SELECT indexdef FROM pg_indexes
+  WHERE schemaname='public' AND tablename='recovery_actions' AND indexname='recovery_actions_source_continuity_action_uidx'`);
+ assert.equal(uniqueIndexes.rowCount,1);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
