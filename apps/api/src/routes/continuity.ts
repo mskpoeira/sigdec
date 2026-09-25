@@ -998,6 +998,163 @@ export async function continuityRoutes(app:FastifyInstance){
   return {items:r.rows};
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/change-proposals",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const r=await db.query(`SELECT cp.id,cp.recommendation_id AS "recommendationId",rr.recurrence_key AS "recurrenceKey",
+    rr.title AS "recommendationTitle",rr.status AS "recommendationStatus",cp.target_plan_id AS "targetPlanId",
+    p.version AS "targetPlanVersion",p.title AS "targetPlanTitle",p.status AS "targetPlanStatus",
+    cp.proposal_text AS "proposalText",cp.status,cp.status_notes AS "statusNotes",
+    cp.applied_at AS "appliedAt",cp.verified_at AS "verifiedAt",cp.verification_exercise_id AS "verificationExerciseId",
+    ve.result AS "verificationExerciseResult",ve.started_at AS "verificationExerciseStartedAt",
+    cp.created_at AS "createdAt",cp.updated_at AS "updatedAt",
+    creator.display_name AS "createdByName",applier.display_name AS "appliedByName",verifier.display_name AS "verifiedByName",
+    COALESCE((SELECT json_agg(json_build_object(
+      'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
+      'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
+    ) ORDER BY ev.created_at)
+     FROM sidec_continuity_change_evidence ev
+     LEFT JOIN users eu ON eu.id=ev.created_by
+     WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence
+   FROM sidec_continuity_change_proposals cp
+   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   JOIN sidec_continuity_plans p ON p.id=cp.target_plan_id
+   LEFT JOIN sidec_continuity_exercises ve ON ve.id=cp.verification_exercise_id
+   LEFT JOIN users creator ON creator.id=cp.created_by
+   LEFT JOIN users applier ON applier.id=cp.applied_by
+   LEFT JOIN users verifier ON verifier.id=cp.verified_by
+   WHERE cp.organization_id=$1
+   ORDER BY CASE cp.status WHEN 'PROPOSED' THEN 1 WHEN 'APPLIED' THEN 2 WHEN 'VERIFIED' THEN 3 ELSE 4 END,cp.created_at DESC`,[org]);
+  return {items:r.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/recommendations/:id/change-proposal",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=changeProposalCreateSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const recommendation=await db.query(`SELECT id,status,title,recurrence_key AS "recurrenceKey"
+    FROM sidec_continuity_runbook_recommendations WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const rec=recommendation.rows[0] as any;
+  if(!rec)return reply.code(404).send({error:"RECOMMENDATION_NOT_FOUND"});
+  if(rec.status!=="ACCEPTED")return reply.code(409).send({error:"ACCEPTED_RECOMMENDATION_REQUIRED",status:rec.status});
+  const plan=await db.query(`SELECT id,version,title,status FROM sidec_continuity_plans
+    WHERE id=$1 AND organization_id=$2`,[parsed.data.targetPlanId,org]);
+  const target=plan.rows[0] as any;
+  if(!target)return reply.code(404).send({error:"TARGET_PLAN_NOT_FOUND"});
+  if(target.status!=="DRAFT")return reply.code(409).send({error:"DRAFT_TARGET_PLAN_REQUIRED",status:target.status});
+  const existing=await db.query(`SELECT id,status FROM sidec_continuity_change_proposals
+    WHERE recommendation_id=$1 AND organization_id=$2 AND status<>'CANCELLED' LIMIT 1`,[id,org]);
+  if(existing.rows[0])return reply.code(409).send({error:"ACTIVE_CHANGE_PROPOSAL_EXISTS",proposalId:existing.rows[0].id,status:existing.rows[0].status});
+  const created=await db.query(`INSERT INTO sidec_continuity_change_proposals(
+     organization_id,recommendation_id,target_plan_id,proposal_text,created_by
+    ) VALUES($1,$2,$3,$4,$5)
+    RETURNING id,recommendation_id AS "recommendationId",target_plan_id AS "targetPlanId",proposal_text AS "proposalText",
+      status,created_at AS "createdAt"`,[org,id,target.id,parsed.data.proposalText,auth.userId]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_proposal_create','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),
+    JSON.stringify({recommendationId:id,targetPlanId:target.id,targetPlanVersion:target.version})
+  ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/evidence",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=changeEvidenceSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const proposal=await db.query(`SELECT id,status FROM sidec_continuity_change_proposals WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const row=proposal.rows[0] as any;
+  if(!row)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
+  if(row.status==="VERIFIED"||row.status==="CANCELLED")return reply.code(409).send({error:"PROPOSAL_IMMUTABLE",status:row.status});
+  const created=await db.query(`INSERT INTO sidec_continuity_change_evidence(
+     proposal_id,evidence_type,title,reference,content_hash,created_by
+    ) VALUES($1,$2,$3,$4,$5,$6)
+    RETURNING id,evidence_type AS "evidenceType",title,reference,content_hash AS "contentHash",created_at AS "createdAt"`,[
+    id,parsed.data.evidenceType,parsed.data.title,parsed.data.reference,parsed.data.contentHash??null,auth.userId
+  ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_evidence_create','sidec_continuity_change_evidence',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0]),JSON.stringify({proposalId:id})
+  ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.patch("/api/v1/sidec/continuity/runbook/change-proposals/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=changeProposalTransitionSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const currentResult=await db.query(`SELECT cp.*,rr.status AS recommendation_status,p.status AS plan_status,p.activated_at,
+    p.version AS plan_version,rr.id AS recommendation_id_value
+   FROM sidec_continuity_change_proposals cp
+   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   JOIN sidec_continuity_plans p ON p.id=cp.target_plan_id
+   WHERE cp.id=$1 AND cp.organization_id=$2`,[id,org]);
+  const current=currentResult.rows[0] as any;
+  if(!current)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
+
+  if(parsed.data.status==="CANCELLED"){
+   if(current.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:current.status});
+   const updated=await db.query(`UPDATE sidec_continuity_change_proposals
+     SET status='CANCELLED',status_notes=$1,updated_at=now()
+     WHERE id=$2 AND organization_id=$3
+     RETURNING id,status,status_notes AS "statusNotes",updated_at AS "updatedAt"`,[parsed.data.notes,id,org]);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+     VALUES($1,'sidec_continuity.change_proposal_cancel','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),JSON.stringify(updated.rows[0])
+   ]);
+   return updated.rows[0];
+  }
+
+  if(parsed.data.status==="APPLIED"){
+   if(current.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:current.status});
+   if(current.recommendation_status!=="ACCEPTED")return reply.code(409).send({error:"ACCEPTED_RECOMMENDATION_REQUIRED",status:current.recommendation_status});
+   if(!current.activated_at||!["ACTIVE","RETIRED"].includes(String(current.plan_status))){
+    return reply.code(409).send({error:"ACTIVATED_TARGET_PLAN_REQUIRED",status:current.plan_status});
+   }
+   const evidence=await db.query(`SELECT count(*)::int AS count FROM sidec_continuity_change_evidence WHERE proposal_id=$1`,[id]);
+   if(Number(evidence.rows[0]?.count??0)<1)return reply.code(409).send({error:"CHANGE_EVIDENCE_REQUIRED"});
+   const client=await db.connect();
+   try{
+    await client.query("BEGIN");
+    const updated=await client.query(`UPDATE sidec_continuity_change_proposals
+      SET status='APPLIED',status_notes=$1,applied_by=$2,applied_at=now(),updated_at=now()
+      WHERE id=$3 AND organization_id=$4
+      RETURNING id,status,status_notes AS "statusNotes",applied_at AS "appliedAt"`,[parsed.data.notes,auth.userId,id,org]);
+    await client.query(`UPDATE sidec_continuity_runbook_recommendations
+      SET status='IMPLEMENTED',resolution_notes=$1,resolved_by=$2,resolved_at=now(),updated_at=now()
+      WHERE id=$3 AND organization_id=$4 AND status='ACCEPTED'`,[parsed.data.notes,auth.userId,current.recommendation_id,org]);
+    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+      VALUES($1,'sidec_continuity.change_proposal_apply','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+      auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),JSON.stringify(updated.rows[0]),
+      JSON.stringify({recommendationId:current.recommendation_id,targetPlanId:current.target_plan_id,targetPlanVersion:current.plan_version,evidenceCount:Number(evidence.rows[0]?.count??0)})
+    ]);
+    await client.query("COMMIT");
+    return updated.rows[0];
+   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+  }
+
+  if(current.status!=="APPLIED")return reply.code(409).send({error:"APPLIED_STATUS_REQUIRED",status:current.status});
+  const exercise=await db.query(`SELECT e.id,e.plan_id AS "planId",e.status,e.result,e.completed_at AS "completedAt",a.status AS "aarStatus"
+    FROM sidec_continuity_exercises e
+    LEFT JOIN sidec_continuity_aars a ON a.exercise_id=e.id AND a.organization_id=e.organization_id
+    WHERE e.id=$1 AND e.organization_id=$2`,[parsed.data.verificationExerciseId,org]);
+  const validation=exercise.rows[0] as any;
+  if(!validation)return reply.code(404).send({error:"VERIFICATION_EXERCISE_NOT_FOUND"});
+  if(String(validation.planId)!==String(current.target_plan_id))return reply.code(409).send({error:"VERIFICATION_EXERCISE_WRONG_PLAN"});
+  if(validation.status!=="COMPLETED")return reply.code(409).send({error:"COMPLETED_VERIFICATION_EXERCISE_REQUIRED",status:validation.status});
+  if(validation.aarStatus!=="FINAL")return reply.code(409).send({error:"FINAL_AAR_REQUIRED_FOR_VERIFICATION",aarStatus:validation.aarStatus??null});
+  const updated=await db.query(`UPDATE sidec_continuity_change_proposals
+    SET status='VERIFIED',status_notes=$1,verification_exercise_id=$2,verified_by=$3,verified_at=now(),updated_at=now()
+    WHERE id=$4 AND organization_id=$5
+    RETURNING id,status,status_notes AS "statusNotes",verification_exercise_id AS "verificationExerciseId",
+      verified_at AS "verifiedAt"`,[parsed.data.notes,validation.id,auth.userId,id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_proposal_verify','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),JSON.stringify(updated.rows[0]),
+    JSON.stringify({verificationExerciseId:validation.id,result:validation.result,targetPlanId:current.target_plan_id,targetPlanVersion:current.plan_version})
+  ]);
+  return updated.rows[0];
+ });
+
  app.patch("/api/v1/sidec/continuity/runbook/recommendations/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=recommendationUpdateSchema.safeParse(request.body);
