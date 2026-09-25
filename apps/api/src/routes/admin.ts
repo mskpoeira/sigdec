@@ -80,7 +80,7 @@ export async function adminRoutes(app:FastifyInstance){
    e.active,e.config,e.created_at AS "createdAt",
    (e.webhook_secret_ciphertext IS NOT NULL) AS "webhookSecretConfigured",
    e.last_delivery_at AS "lastDeliveryAt",e.delivery_failure_count AS "deliveryFailureCount",
-   (SELECT count(*)::int FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status='PENDING') AS "pendingDeliveries",
+   (SELECT count(*)::int FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status IN ('PENDING','PROCESSING')) AS "pendingDeliveries",
    (SELECT count(*)::int FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status='FAILED') AS "failedDeliveries"
    FROM integration_endpoints e WHERE e.organization_id=$1 ORDER BY e.name`,[org]);
   return {items:result.rows};

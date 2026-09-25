@@ -89,39 +89,57 @@ async function enqueueWebhookEvents(){
   ON CONFLICT(endpoint_id,audit_log_id) DO NOTHING`);
 }
 
+export async function claimWebhookDelivery(id:string){
+ const result=await db.query(`WITH candidate AS (
+    SELECT d.id FROM webhook_deliveries d
+    JOIN integration_endpoints e ON e.id=d.endpoint_id
+    WHERE d.id=$1 AND d.status IN ('PENDING','PROCESSING')
+      AND d.next_attempt_at<=now() AND d.attempts<10
+      AND e.active=true AND e.integration_type='WEBHOOK'
+    FOR UPDATE OF d SKIP LOCKED
+   ), claimed AS (
+    UPDATE webhook_deliveries d SET status='PROCESSING',claim_token=gen_random_uuid(),
+      attempts=attempts+1,last_attempt_at=now(),next_attempt_at=now()+interval '5 minutes'
+    FROM candidate c WHERE d.id=c.id RETURNING d.*
+   )
+   SELECT d.id,d.endpoint_id AS "endpointId",d.event_action AS "eventAction",d.payload,
+     d.attempts,d.claim_token AS "claimToken",
+     e.endpoint_url AS "endpointUrl",e.webhook_secret_ciphertext AS "secretCiphertext"
+   FROM claimed d JOIN integration_endpoints e ON e.id=d.endpoint_id`,[id]);
+ return result.rows[0] as any|undefined;
+}
+
 export async function deliverWebhookById(id:string){
- const result=await db.query(`SELECT d.id,d.endpoint_id AS "endpointId",d.event_action AS "eventAction",d.payload,d.attempts,
-   e.endpoint_url AS "endpointUrl",e.webhook_secret_ciphertext AS "secretCiphertext"
-  FROM webhook_deliveries d
-  JOIN integration_endpoints e ON e.id=d.endpoint_id
-  WHERE d.id=$1 AND d.status='PENDING' AND e.active=true AND e.integration_type='WEBHOOK'`,[id]);
- const item=result.rows[0] as any;
+ const item=await claimWebhookDelivery(id);
  if(!item)return {processed:false};
  try{
   const body=JSON.stringify(item.payload);
   const timestamp=String(Math.floor(Date.now()/1000));
   const signature=createHmac("sha256",decryptApplicationSecret(String(item.secretCiphertext))).update(timestamp+"."+body).digest("hex");
   const response=await postWebhook(String(item.endpointUrl),body,{
-     "content-type":"application/json","user-agent":"SIGDEC-Webhook/1.42",
+     "content-type":"application/json","user-agent":"SIGDEC-Webhook/1.43",
      "x-sigdec-event":String(item.eventAction),"x-sigdec-delivery":String(item.id),
      "x-sigdec-timestamp":timestamp,"x-sigdec-signature":"sha256="+signature
   });
   const excerpt=response.excerpt;
   if(response.status<200||response.status>=300)throw Object.assign(new Error(`HTTP ${response.status}`),{status:response.status,excerpt});
-  await db.query(`UPDATE webhook_deliveries SET status='SUCCEEDED',attempts=attempts+1,last_attempt_at=now(),
-    delivered_at=now(),response_status=$2,response_excerpt=$3,last_error=NULL WHERE id=$1`,[id,response.status,excerpt]);
+  const settled=await db.query(`UPDATE webhook_deliveries SET status='SUCCEEDED',claim_token=NULL,
+    delivered_at=now(),response_status=$2,response_excerpt=$3,last_error=NULL
+    WHERE id=$1 AND status='PROCESSING' AND claim_token=$4`,[id,response.status,excerpt,item.claimToken]);
+  if(!settled.rowCount)return {processed:false,stale:true};
   await db.query("UPDATE integration_endpoints SET last_delivery_at=now(),delivery_failure_count=0 WHERE id=$1",[item.endpointId]);
   return {processed:true,success:true,status:response.status};
  }catch(error:any){
-  const attempts=Number(item.attempts??0)+1;
+  const attempts=Number(item.attempts??0);
   const terminal=attempts>=10;
   const delaySeconds=Math.min(3600,15*Math.pow(2,Math.max(0,attempts-1)));
-  await db.query(`UPDATE webhook_deliveries SET status=$2,attempts=$3,last_attempt_at=now(),
-    next_attempt_at=now()+($4::text||' seconds')::interval,response_status=$5,response_excerpt=$6,last_error=$7
-    WHERE id=$1`,[
-    id,terminal?"FAILED":"PENDING",attempts,delaySeconds,error?.status??null,error?.excerpt??null,
-    error instanceof Error?error.message:String(error)
+  const settled=await db.query(`UPDATE webhook_deliveries SET status=$2,claim_token=NULL,
+    next_attempt_at=now()+($3::text||' seconds')::interval,response_status=$4,response_excerpt=$5,last_error=$6
+    WHERE id=$1 AND status='PROCESSING' AND claim_token=$7`,[
+    id,terminal?"FAILED":"PENDING",delaySeconds,error?.status??null,error?.excerpt??null,
+    error instanceof Error?error.message:String(error),item.claimToken
    ]);
+  if(!settled.rowCount)return {processed:false,stale:true};
   await db.query("UPDATE integration_endpoints SET delivery_failure_count=delivery_failure_count+1 WHERE id=$1",[item.endpointId]);
   return {processed:true,success:false,terminal,error:error instanceof Error?error.message:String(error)};
  }
@@ -129,12 +147,16 @@ export async function deliverWebhookById(id:string){
 
 export async function dispatchWebhooks(){
  await enqueueWebhookEvents();
+ await db.query(`UPDATE webhook_deliveries SET status='FAILED',claim_token=NULL,
+   last_error='Entrega interrompida após atingir o limite de tentativas.'
+   WHERE status='PROCESSING' AND attempts>=10 AND next_attempt_at<=now()`);
  const due=await db.query<{id:string}>(`SELECT id FROM webhook_deliveries
-  WHERE status='PENDING' AND next_attempt_at<=now() ORDER BY next_attempt_at LIMIT 20`);
+  WHERE status IN ('PENDING','PROCESSING') AND attempts<10
+    AND next_attempt_at<=now() ORDER BY next_attempt_at LIMIT 20`);
  let success=0,failed=0;
  for(const row of due.rows){
   const r=await deliverWebhookById(row.id);
-  if((r as any).success)success++;else failed++;
+  if((r as any).success)success++;else if(r.processed)failed++;
  }
  return {queued:due.rowCount??0,success,failed};
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { db } from "../db.js";
+import {claimWebhookDelivery} from "../lib/webhooks.js";
 
 after(async()=>{await db.end();});
 
@@ -714,6 +715,33 @@ test("SIGDEC v1.41 possui MFA efetivo e fila persistente de webhooks",async()=>{
    AND column_name IN ('webhook_secret_ciphertext','webhook_active_from','last_delivery_at','delivery_failure_count')
   ORDER BY column_name`);
  assert.deepEqual(integrationCols.rows.map(x=>x.column_name),["delivery_failure_count","last_delivery_at","webhook_active_from","webhook_secret_ciphertext"]);
+});
+
+test("entrega webhook tem posse exclusiva e recuperação após expiração",async()=>{
+ const org=await db.query<{id:string}>("INSERT INTO organizations(name) VALUES('SIGDEC webhook claim test') RETURNING id");
+ const orgId=org.rows[0]!.id;
+ try{
+  const endpoint=await db.query<{id:string}>(`INSERT INTO integration_endpoints(
+   organization_id,name,integration_type,endpoint_url,webhook_secret_ciphertext)
+   VALUES($1,'Test claim','WEBHOOK','https://example.com/hook','test') RETURNING id`,[orgId]);
+  const delivery=await db.query<{id:string}>(`INSERT INTO webhook_deliveries(endpoint_id,event_action,payload)
+   VALUES($1,'webhook.test','{}') RETURNING id`,[endpoint.rows[0]!.id]);
+  const id=delivery.rows[0]!.id;
+  const claims=await Promise.all([claimWebhookDelivery(id),claimWebhookDelivery(id)]);
+  assert.equal(claims.filter(Boolean).length,1);
+  const first=claims.find(Boolean)!;
+  assert.equal(first.attempts,1);
+  assert.equal(await claimWebhookDelivery(id),undefined);
+  await db.query("UPDATE webhook_deliveries SET next_attempt_at=now()-interval '1 second' WHERE id=$1",[id]);
+  const second=await claimWebhookDelivery(id);
+  assert.ok(second);
+  assert.notEqual(second.claimToken,first.claimToken);
+  assert.equal(second.attempts,2);
+  const stale=await db.query("UPDATE webhook_deliveries SET status='SUCCEEDED' WHERE id=$1 AND claim_token=$2",[id,first.claimToken]);
+  assert.equal(stale.rowCount,0);
+ }finally{
+  await db.query("DELETE FROM organizations WHERE id=$1",[orgId]);
+ }
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
