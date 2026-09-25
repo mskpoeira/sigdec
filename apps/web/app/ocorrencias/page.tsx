@@ -18,6 +18,8 @@ type Incident = {
   teamCode: string | null;
   vehicleCode: string | null;
   createdAt: string;
+  createdByMatricula: string | null;
+  createdByName: string | null;
 };
 
 const priorityLabel: Record<string, string> = {
@@ -92,7 +94,7 @@ export default function OcorrenciasPage() {
             </div>
             <div className="incidentSide">
               <span className="statusTag">{item.status}</span>
-              <time>{formatDateTimeBR(item.createdAt)}</time>
+              <time>{formatDateTimeBR(item.createdAt)}</time><small>Matrícula {item.createdByMatricula??"—"}</small>
             </div>
           </Link>
         ))}
