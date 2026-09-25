@@ -3,6 +3,10 @@ ALTER TABLE sidec_continuity_change_approvals
   ADD COLUMN IF NOT EXISTS revalidated_at timestamptz,
   ADD COLUMN IF NOT EXISTS revalidated_by uuid REFERENCES users(id) ON DELETE SET NULL;
 
+UPDATE sidec_continuity_change_approvals
+SET valid_until=decided_at+interval '168 hours'
+WHERE decision='APPROVED' AND valid_until IS NULL;
+
 CREATE TABLE IF NOT EXISTS sidec_continuity_change_policies (
   organization_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
   approval_valid_hours integer NOT NULL DEFAULT 168 CHECK(approval_valid_hours BETWEEN 1 AND 2160),
