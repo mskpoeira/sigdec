@@ -34,6 +34,7 @@ type FieldPosition = {
   longitude: number;
   accuracyMeters: number | null;
   recordedAt: string;
+  capturedAt?: string | null;
 };
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 
@@ -181,7 +182,7 @@ export default function CampoPage() {
         latitude:position.coords.latitude,
         longitude:position.coords.longitude,
         accuracyMeters:position.coords.accuracy,
-        recordedAt:new Date(position.timestamp).toISOString()
+        capturedAt:new Date(position.timestamp).toISOString()
       };
       if(!navigator.onLine){
         sessionStorage.setItem(PENDING_LOCATION_KEY,JSON.stringify(payload));
@@ -219,7 +220,7 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.47</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.48</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
         </div>
@@ -337,7 +338,8 @@ export default function CampoPage() {
             <article className="card" key={position.userId}>
               <h2>{position.teamCode ? `Equipe ${position.teamCode}` : position.displayName}</h2>
               <p>{position.teamCode ? position.displayName : "Agente em campo"}</p>
-              <p>Atualizada em {formatDateTimeBR(position.recordedAt)}</p>
+              <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)}</p>
+              {position.capturedAt&&<p><small>Coletada pelo dispositivo em {formatDateTimeBR(position.capturedAt)}</small></p>}
               <a
                 className="secondaryLink"
                 href={`https://www.openstreetmap.org/?mlat=${position.latitude}&mlon=${position.longitude}#map=17/${position.latitude}/${position.longitude}`}
