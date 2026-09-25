@@ -138,6 +138,7 @@ export async function readSessionToken(token: string): Promise<AuthContext> {
     throw new Error("Sessão inválida.");
   }
 
+  const strategicLevel=Math.max(1,Math.min(100,Number(process.env.MFA_STRATEGIC_ROLE_LEVEL??80)));
   const active = await db.query(
     `SELECT 1
        FROM auth_sessions s
@@ -146,8 +147,17 @@ export async function readSessionToken(token: string): Promise<AuthContext> {
         AND s.user_id = $2
         AND s.revoked_at IS NULL
         AND s.expires_at > now()
-        AND (u.mfa_required=false OR s.mfa_verified_at IS NOT NULL)`,
-    [payload.sid, payload.sub]
+        AND (
+          (
+            u.mfa_required=false
+            AND NOT EXISTS(
+              SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+              WHERE ur.user_id=u.id AND r.level >= $3
+            )
+          )
+          OR s.mfa_verified_at IS NOT NULL
+        )`,
+    [payload.sid, payload.sub, strategicLevel]
   );
 
   if (active.rowCount !== 1) {
