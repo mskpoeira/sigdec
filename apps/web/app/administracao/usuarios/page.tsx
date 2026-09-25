@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../../lib/datetime";
 import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
@@ -14,7 +15,7 @@ const paths=["/painel","/ocorrencias","/ocorrencias/nova","/campo","/monitoramen
 const blankUser={matricula:"",displayName:"",email:"",phone:"",jobTitle:"",department:"",roleIds:[] as string[],active:true};
 const blankItem={code:"",name:"",unit:"un",category:"Geral",active:true};
 const blankMenu={label:"",path:"/painel",permissionCode:"",sortOrder:100,active:true};
-const fmt=(value:string|null)=>value?new Date(value).toLocaleString("pt-BR"):"Nunca";
+const fmt=(value:string|null)=>value?formatDateTimeBR(value):"Nunca";
 
 export default function UsersAdministrationPage(){
  const[tab,setTab]=useState<Tab>("users"),[users,setUsers]=useState<User[]>([]),[roles,setRoles]=useState<Role[]>([]),[permissions,setPermissions]=useState<Permission[]>([]),
