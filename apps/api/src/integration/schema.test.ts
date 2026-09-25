@@ -29,6 +29,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0036_sidec_continuity_action_effectiveness.sql"));
  assert.ok(files.includes("0037_sidec_continuity_improvement_loop.sql"));
  assert.ok(files.includes("0038_sidec_continuity_change_governance.sql"));
+ assert.ok(files.includes("0039_sidec_continuity_change_effectiveness.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -391,6 +392,34 @@ test("SIDEC v1.31 possui governanca de propostas mudanca e evidencias",async()=>
   WHERE schemaname='public' AND indexname='sidec_continuity_change_proposals_active_uidx'`);
  assert.equal(index.rowCount,1);
  assert.match(String(index.rows[0]?.indexdef??""),/CANCELLED/);
+});
+
+test("SIDEC v1.32 possui linhagem diff impactos e eficacia de mudancas",async()=>{
+ const planColumns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_plans'
+   AND column_name='parent_plan_id'`);
+ assert.equal(planColumns.rowCount,1);
+ const proposalColumns=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_change_proposals'
+   AND column_name IN ('base_plan_id','baseline_exercise_id','diff_snapshot','effectiveness_outcome','effectiveness_snapshot')
+  ORDER BY column_name`);
+ assert.deepEqual(proposalColumns.rows.map(x=>x.column_name),[
+  "base_plan_id","baseline_exercise_id","diff_snapshot","effectiveness_outcome","effectiveness_snapshot"
+ ]);
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_continuity_change_impacts'`);
+ assert.equal(tables.rowCount,1);
+ const impactDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_impacts'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(impactDefs,/ADDED/);
+ assert.match(impactDefs,/MODIFIED/);
+ assert.match(impactDefs,/REMOVED/);
+ const proposalDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_proposals'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(proposalDefs,/NO_BASELINE/);
+ assert.match(proposalDefs,/IMPROVED/);
+ assert.match(proposalDefs,/STABLE/);
+ assert.match(proposalDefs,/REGRESSED/);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
