@@ -104,6 +104,24 @@ const recommendationUpdateSchema=z.object({
  notes:z.string().trim().min(5).max(8000)
 });
 
+const changeProposalCreateSchema=z.object({
+ targetPlanId:z.string().uuid(),
+ proposalText:z.string().trim().min(10).max(12000)
+});
+
+const changeEvidenceSchema=z.object({
+ evidenceType:z.enum(["NOTE","LINK","DOCUMENT","HASH"]),
+ title:z.string().trim().min(3).max(240),
+ reference:z.string().trim().min(1).max(12000),
+ contentHash:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional()
+});
+
+const changeProposalTransitionSchema=z.discriminatedUnion("status",[
+ z.object({status:z.literal("APPLIED"),notes:z.string().trim().min(5).max(8000)}),
+ z.object({status:z.literal("VERIFIED"),verificationExerciseId:z.string().uuid(),notes:z.string().trim().min(5).max(8000)}),
+ z.object({status:z.literal("CANCELLED"),notes:z.string().trim().min(5).max(8000)})
+]);
+
 const scheduleCreateSchema=z.object({
  name:z.string().trim().min(3).max(240),
  intervalDays:z.number().int().min(7).max(1095),
@@ -987,8 +1005,13 @@ export async function continuityRoutes(app:FastifyInstance){
   const before=await db.query(`SELECT * FROM sidec_continuity_runbook_recommendations WHERE id=$1 AND organization_id=$2`,[id,org]);
   const row=before.rows[0] as any;if(!row)return reply.code(404).send({error:"NOT_FOUND"});
   if(row.status==="IMPLEMENTED"||row.status==="DISMISSED")return reply.code(409).send({error:"RECOMMENDATION_ALREADY_RESOLVED"});
-  if(row.status==="OPEN"&&parsed.data.status==="IMPLEMENTED")return reply.code(409).send({error:"ACCEPT_RECOMMENDATION_FIRST"});
-  const resolved=parsed.data.status==="IMPLEMENTED"||parsed.data.status==="DISMISSED";
+  if(parsed.data.status==="IMPLEMENTED")return reply.code(409).send({error:"CHANGE_PROPOSAL_REQUIRED"});
+  if(parsed.data.status==="DISMISSED"){
+   const activeProposal=await db.query(`SELECT id FROM sidec_continuity_change_proposals
+     WHERE recommendation_id=$1 AND organization_id=$2 AND status<>'CANCELLED' LIMIT 1`,[id,org]);
+   if(activeProposal.rows[0])return reply.code(409).send({error:"ACTIVE_CHANGE_PROPOSAL_EXISTS",proposalId:activeProposal.rows[0].id});
+  }
+  const resolved=parsed.data.status==="DISMISSED";
   const updated=await db.query(`UPDATE sidec_continuity_runbook_recommendations SET status=$1,resolution_notes=$2,
     resolved_by=CASE WHEN $3 THEN $4 ELSE NULL END,resolved_at=CASE WHEN $3 THEN now() ELSE NULL END,updated_at=now()
     WHERE id=$5 AND organization_id=$6
