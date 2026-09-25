@@ -1,6 +1,6 @@
 import type {FastifyInstance} from "fastify";
 import {z} from "zod";
-import {authFrom,requireAuth,requirePermission} from "../auth.js";
+import {authFrom,requireAuth,requirePermission,requireSecurityReady} from "../auth.js";
 import {db} from "../db.js";
 
 const FEATURES=[
@@ -33,7 +33,7 @@ const activeSchema=z.object({active:z.boolean()});
 function organizationId(value:string|null){if(!value)throw Object.assign(new Error("Usuário sem organização vinculada."),{statusCode:409});return value}
 
 export async function adminRoutes(app:FastifyInstance){
- app.get("/api/v1/dashboard/summary",{preHandler:requireAuth},async request=>{
+ app.get("/api/v1/dashboard/summary",{preHandler:requireSecurityReady},async request=>{
   const org=organizationId(authFrom(request).organizationId);
   const result=await db.query(`SELECT
    (SELECT count(*)::int FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE')) AS "activeIncidents",
