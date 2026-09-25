@@ -6,7 +6,8 @@ import {decryptApplicationSecret,encryptApplicationSecret} from "./app-secrets.j
 function privateIpv4(address:string){
  const p=address.split(".").map(Number);
  if(p.length!==4||p.some(x=>!Number.isInteger(x)))return false;
- return p[0]===10||p[0]===127||p[0]===0||(p[0]===169&&p[1]===254)||(p[0]===192&&p[1]===168)||(p[0]===172&&p[1]>=16&&p[1]<=31);
+ const a=p[0]!,b=p[1]!;
+ return a===10||a===127||a===0||(a===169&&b===254)||(a===192&&b===168)||(a===172&&b>=16&&b<=31);
 }
 function privateIpv6(address:string){
  const a=address.toLowerCase();
@@ -121,5 +122,7 @@ export async function queueWebhookTest(endpointId:string,actorUserId:string){
   VALUES($1,NULL,'webhook.test',$2::jsonb) RETURNING id`,[
   endpointId,JSON.stringify({eventId:null,occurredAt:new Date().toISOString(),action:"webhook.test",entityType:"integration_endpoint",entityId:endpointId,data:{actorUserId}})
  ]);
- return deliverWebhookById(String(inserted.rows[0].id));
+ const deliveryId=inserted.rows[0]?.id;
+ if(!deliveryId)throw new Error("Falha ao criar entrega de teste.");
+ return deliverWebhookById(String(deliveryId));
 }
