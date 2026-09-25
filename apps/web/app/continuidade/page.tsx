@@ -27,6 +27,7 @@ type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";titl
 type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;validUntil?:string|null;revalidatedAt?:string|null;decidedById:string;decidedByName?:string|null;authorityUserId?:string|null;authorityUserName?:string|null;delegationId?:string|null;delegated?:boolean};
 type ApprovalDelegation={id:string;delegatorUserId:string;delegatorName?:string|null;delegatorMatricula?:string|null;delegateUserId:string;delegateName?:string|null;delegateMatricula?:string|null;validFrom:string;validUntil:string;reason:string;revokedAt?:string|null;createdAt:string;status:"ACTIVE"|"SCHEDULED"|"EXPIRED"|"REVOKED"};
 type ChangePolicy={approvalValidHours:number;reportWormRetentionDays?:number|null;reportWormLegalHold:boolean;updatedAt?:string|null};
+type EffectivenessTarget={id?:string;scopeType:"DEFAULT"|"CATEGORY"|"RECURRENCE";scopeValue:string;minVerifiedRate?:number|null;minImprovedRate?:number|null;maxAvgApplyHours?:number|null;maxAvgVerificationHours?:number|null;enabled:boolean;state?:"PASS"|"FAIL"|"NO_DATA"|"DISABLED";actual?:{total:number;verified:number;improved:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null}};
 type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;archived:number;archiveHealthy:number;replicated:number;replicaHealthy:number;activeDelegations:number;reportResilienceOpen:number;reportRetryPending:number;reportRestoreFailures30d:number;approvalsExpiring24h:number;approvalsExpired:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>;byRecurrence:Array<{recurrenceKey:string;proposals:number;verified:number;improved:number;regressed:number;lastProposalAt:string}>};
 type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;stepsSplit?:number;stepsMerged?:number;stepsDerived?:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;reportReplicaCreated:boolean;reportReplicaHealthy:boolean;reportReplicationHealthy:boolean;reportReplicaBucket?:string|null;reportReplicaObjectKey?:string|null;reportReplicaRetainUntil?:string|null;reportReplicaLegalHold?:boolean|null;reportReplicatedAt?:string|null;reportReplicaVerifiedAt?:string|null;reportReplicaErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED"|"SPLIT"|"MERGED"|"DERIVED";phase:string;sortOrder:number;title:string;changedFields:string[];lineageDetails?:Record<string,unknown>}>};
 
@@ -50,6 +51,9 @@ export default function ContinuidadePage(){
  const [changeMetrics,setChangeMetrics]=useState<ChangeMetrics|null>(null);
  const [changePolicy,setChangePolicy]=useState<ChangePolicy|null>(null);
  const [approvalDelegations,setApprovalDelegations]=useState<ApprovalDelegation[]>([]);
+ const [effectivenessTargets,setEffectivenessTargets]=useState<EffectivenessTarget[]>([]);
+ const [targetDraft,setTargetDraft]=useState({scopeType:"DEFAULT" as "DEFAULT"|"CATEGORY"|"RECURRENCE",scopeValue:"*",minVerifiedRate:"",minImprovedRate:"",maxAvgApplyHours:"",maxAvgVerificationHours:""});
+ const [governancePeriod,setGovernancePeriod]=useState({from:"",to:""});
  const [delegationDraft,setDelegationDraft]=useState({delegateUserId:"",validUntil:"",reason:"Substituição temporária formal para decisões críticas do runbook SIDEC."});
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
@@ -79,7 +83,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats,policy,delegations]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats,policy,delegations,targets]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -93,7 +97,8 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/runbook/change-proposals"),
     request("/api/v1/sidec/continuity/runbook/change-metrics"),
     request("/api/v1/sidec/continuity/runbook/change-policy"),
-    request("/api/v1/sidec/continuity/runbook/approval-delegations")
+    request("/api/v1/sidec/continuity/runbook/approval-delegations"),
+    request("/api/v1/sidec/continuity/runbook/effectiveness-targets")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -109,6 +114,7 @@ export default function ContinuidadePage(){
    if(changeStats)setChangeMetrics(changeStats);
    if(policy)setChangePolicy(policy);
    if(delegations)setApprovalDelegations(delegations.items??[]);
+   if(targets)setEffectivenessTargets(targets.items??[]);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -165,6 +171,33 @@ export default function ContinuidadePage(){
   const next=[...draft.steps.slice(0,index),merged,...draft.steps.slice(index+2)];
   patchDraft({steps:resequenceSteps(next)});
  }
+
+ const numericOrNull=(value:string)=>value.trim()===""?null:Number(value);
+
+ const saveEffectivenessTarget=()=>act(async()=>{
+  const scopeValue=targetDraft.scopeType==="DEFAULT"?"*":targetDraft.scopeValue.trim();
+  if(targetDraft.scopeType!=="DEFAULT"&&scopeValue.length<2)throw new Error("Informe o valor do escopo da meta.");
+  const item={
+   scopeType:targetDraft.scopeType,scopeValue,
+   minVerifiedRate:numericOrNull(targetDraft.minVerifiedRate),
+   minImprovedRate:numericOrNull(targetDraft.minImprovedRate),
+   maxAvgApplyHours:numericOrNull(targetDraft.maxAvgApplyHours),
+   maxAvgVerificationHours:numericOrNull(targetDraft.maxAvgVerificationHours),enabled:true
+  };
+  if([item.minVerifiedRate,item.minImprovedRate,item.maxAvgApplyHours,item.maxAvgVerificationHours].every(x=>x===null))throw new Error("Informe pelo menos uma meta quantitativa.");
+  const existing=effectivenessTargets.filter(x=>!(x.scopeType===item.scopeType&&x.scopeValue.toLowerCase()===item.scopeValue.toLowerCase()));
+  const clean=existing.map(x=>({scopeType:x.scopeType,scopeValue:x.scopeValue,minVerifiedRate:x.minVerifiedRate??null,minImprovedRate:x.minImprovedRate??null,maxAvgApplyHours:x.maxAvgApplyHours??null,maxAvgVerificationHours:x.maxAvgVerificationHours??null,enabled:x.enabled}));
+  await request("/api/v1/sidec/continuity/runbook/effectiveness-targets",{method:"PUT",body:JSON.stringify({items:[...clean,item]})});
+  setTargetDraft({scopeType:"DEFAULT",scopeValue:"*",minVerifiedRate:"",minImprovedRate:"",maxAvgApplyHours:"",maxAvgVerificationHours:""});
+  setMessage("Meta quantitativa salva.");
+ });
+
+ const deleteEffectivenessTarget=(target:EffectivenessTarget)=>act(async()=>{
+  if(!window.confirm(`Excluir a meta ${target.scopeType} · ${target.scopeValue}?`))return;
+  const clean=effectivenessTargets.filter(x=>x!==target).map(x=>({scopeType:x.scopeType,scopeValue:x.scopeValue,minVerifiedRate:x.minVerifiedRate??null,minImprovedRate:x.minImprovedRate??null,maxAvgApplyHours:x.maxAvgApplyHours??null,maxAvgVerificationHours:x.maxAvgVerificationHours??null,enabled:x.enabled}));
+  await request("/api/v1/sidec/continuity/runbook/effectiveness-targets",{method:"PUT",body:JSON.stringify({items:clean})});
+  setMessage("Meta quantitativa excluída.");
+ });
 
  const createSchedule=()=>act(async()=>{
   await request("/api/v1/sidec/continuity/schedules",{method:"POST",body:JSON.stringify({
@@ -482,10 +515,15 @@ export default function ContinuidadePage(){
 
  const active=runbook?.active??null,draft=runbook?.draft??null;
  const activeExercise=exercises.find(x=>x.status==="IN_PROGRESS")??null;
+ const governanceParams=[
+  governancePeriod.from?`from=${encodeURIComponent(governancePeriod.from+"T00:00:00-03:00")}`:"",
+  governancePeriod.to?`to=${encodeURIComponent(governancePeriod.to+"T23:59:59.999-03:00")}`:""
+ ].filter(Boolean).join("&");
+ const governanceSuffix=governanceParams?"?"+governanceParams:"";
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.37</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.38</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
@@ -602,6 +640,31 @@ export default function ContinuidadePage(){
      <p><small>Última proposta: {new Date(item.lastProposalAt).toLocaleString("pt-BR")}</small></p>
     </article>)}</div>
    </div>}
+  </section>
+
+  <section style={{marginTop:18}}>
+   <div className="listHeader"><div><h2>Metas e relatório executivo</h2><p>Metas administrativas quantitativas e exportação consolidada de governança. A avaliação exibida usa a janela padrão de 90 dias; o PDF/CSV usa o período selecionado abaixo.</p></div></div>
+   <div className="incidentForm">
+    <label>Escopo<select value={targetDraft.scopeType} onChange={e=>setTargetDraft(v=>({...v,scopeType:e.target.value as "DEFAULT"|"CATEGORY"|"RECURRENCE",scopeValue:e.target.value==="DEFAULT"?"*":""}))}><option value="DEFAULT">Padrão da organização</option><option value="CATEGORY">Categoria</option><option value="RECURRENCE">Recorrência</option></select></label>
+    {targetDraft.scopeType==="CATEGORY"?<label>Categoria<select value={targetDraft.scopeValue} onChange={e=>setTargetDraft(v=>({...v,scopeValue:e.target.value}))}><option value="">Selecionar</option>{["PROCESS","PEOPLE","TECHNOLOGY","COMMUNICATION","DATA","STORAGE","CONNECTIVITY","OTHER"].map(x=><option key={x} value={x}>{x}</option>)}</select></label>:targetDraft.scopeType==="RECURRENCE"?<label>Chave de recorrência<input value={targetDraft.scopeValue} onChange={e=>setTargetDraft(v=>({...v,scopeValue:e.target.value}))}/></label>:null}
+    <label>Taxa mínima de verificação (%)<input type="number" min="0" max="100" step="0.1" value={targetDraft.minVerifiedRate} onChange={e=>setTargetDraft(v=>({...v,minVerifiedRate:e.target.value}))}/></label>
+    <label>Taxa mínima de melhora (%)<input type="number" min="0" max="100" step="0.1" value={targetDraft.minImprovedRate} onChange={e=>setTargetDraft(v=>({...v,minImprovedRate:e.target.value}))}/></label>
+    <label>Tempo máximo até aplicação (h)<input type="number" min="0.1" step="0.1" value={targetDraft.maxAvgApplyHours} onChange={e=>setTargetDraft(v=>({...v,maxAvgApplyHours:e.target.value}))}/></label>
+    <label>Tempo máximo aplicação → verificação (h)<input type="number" min="0.1" step="0.1" value={targetDraft.maxAvgVerificationHours} onChange={e=>setTargetDraft(v=>({...v,maxAvgVerificationHours:e.target.value}))}/></label>
+    <button type="button" className="primaryButton" disabled={busy} onClick={()=>void saveEffectivenessTarget()}>Salvar meta</button>
+   </div>
+   <div className="dataGrid" style={{marginTop:12}}>{effectivenessTargets.length===0?<div className="infoCard">Nenhuma meta quantitativa configurada.</div>:effectivenessTargets.map(target=><article className={target.state==="FAIL"?"warningCard":"card"} key={target.scopeType+":"+target.scopeValue}>
+    <h2>{target.scopeType+" · "+target.scopeValue}</h2><p><strong>{target.state??"—"}</strong> · {target.actual?.total??0} proposta(s) na janela.</p>
+    <p>Verificação {target.actual?.verifiedRate==null?"—":Number(target.actual.verifiedRate).toFixed(1)+"%"}{target.minVerifiedRate!=null?" · meta ≥ "+target.minVerifiedRate+"%":""}</p>
+    <p>Melhora {target.actual?.improvedRate==null?"—":Number(target.actual.improvedRate).toFixed(1)+"%"}{target.minImprovedRate!=null?" · meta ≥ "+target.minImprovedRate+"%":""}</p>
+    <p>Aplicação {target.actual?.avgApplyHours==null?"—":Number(target.actual.avgApplyHours).toFixed(1)+" h"}{target.maxAvgApplyHours!=null?" · máx. "+target.maxAvgApplyHours+" h":""} · verificação {target.actual?.avgVerificationHours==null?"—":Number(target.actual.avgVerificationHours).toFixed(1)+" h"}{target.maxAvgVerificationHours!=null?" · máx. "+target.maxAvgVerificationHours+" h":""}</p>
+    <button type="button" className="secondaryLink" disabled={busy} onClick={()=>void deleteEffectivenessTarget(target)}>Excluir meta</button>
+   </article>)}</div>
+   <div className="incidentForm" style={{marginTop:12}}>
+    <label>Período inicial<input type="date" value={governancePeriod.from} onChange={e=>setGovernancePeriod(v=>({...v,from:e.target.value}))}/></label>
+    <label>Período final<input type="date" value={governancePeriod.to} onChange={e=>setGovernancePeriod(v=>({...v,to:e.target.value}))}/></label>
+    <div className="headerActions"><a className="primaryButton" href={`${API}/api/v1/sidec/continuity/runbook/governance-report.pdf${governanceSuffix}`}>Baixar relatório executivo PDF</a><a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/governance-export.csv${governanceSuffix}`}>Exportar CSV</a></div>
+   </div>
   </section>
 
   <section style={{marginTop:18}}>

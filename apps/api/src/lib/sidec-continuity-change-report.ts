@@ -45,7 +45,7 @@ export async function buildContinuityChangeReportPdf(input:any){
   section("DIFF ESTRUTURAL");
   if(!diff){p("Diff não disponível.");}else{
    const s=diff.summary??{};
-   p(`Campos gerais alterados: ${s.fieldsChanged??0}. Etapas adicionadas: ${s.stepsAdded??0}. Etapas modificadas: ${s.stepsModified??0}. Etapas removidas: ${s.stepsRemoved??0}. Total de alterações estruturais: ${s.totalChanges??0}.`);
+   p(`Campos gerais alterados: ${s.fieldsChanged??0}. Etapas adicionadas: ${s.stepsAdded??0}. Etapas modificadas: ${s.stepsModified??0}. Etapas removidas: ${s.stepsRemoved??0}. Divisões: ${s.stepsSplit??0}. Fusões: ${s.stepsMerged??0}. Derivações: ${s.stepsDerived??0}. Total de alterações estruturais: ${s.totalChanges??0}.`);
    for(const field of diff.fields??[]){
     pdf.font("Helvetica-Bold").fontSize(8).fillColor("#102033").text(`• Campo: ${field.field}`);
     pdf.font("Helvetica").fontSize(7.5).fillColor("#334e68").text(`Antes: ${String(field.before??"—")}`,{indent:10});
