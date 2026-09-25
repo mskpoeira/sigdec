@@ -13,9 +13,12 @@ CREATE TABLE sidec_continuity_change_proposals (
   verified_at timestamptz,
   created_by uuid NOT NULL REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(recommendation_id)
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX sidec_continuity_change_proposals_active_uidx
+  ON sidec_continuity_change_proposals(recommendation_id)
+  WHERE status<>'CANCELLED';
 
 CREATE INDEX sidec_continuity_change_proposals_org_idx
   ON sidec_continuity_change_proposals(organization_id,status,created_at DESC);
