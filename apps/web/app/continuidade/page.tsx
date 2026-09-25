@@ -5,7 +5,7 @@ import { useCallback,useEffect,useState } from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
 type Operator={id:string;matricula:string;displayName:string;jobTitle?:string|null};
-type RunbookStep={id?:string;phase:"DECLARATION"|"COMMUNICATION"|"PRESERVATION"|"RECOVERY"|"VALIDATION"|"RETURN";sortOrder:number;title:string;instructions:string;expectedMinutes:number;ownerUserId?:string|null;ownerName?:string|null;ownerMatricula?:string|null;required:boolean};
+type RunbookStep={id?:string;lineageKey?:string;phase:"DECLARATION"|"COMMUNICATION"|"PRESERVATION"|"RECOVERY"|"VALIDATION"|"RETURN";sortOrder:number;title:string;instructions:string;expectedMinutes:number;ownerUserId?:string|null;ownerName?:string|null;ownerMatricula?:string|null;required:boolean};
 type RunbookPlan={id:string;version:number;title:string;status:"DRAFT"|"ACTIVE"|"RETIRED";activationCriteria:string;recoveryStrategy:string;communicationPlan:string;returnToNormal:string;updatedAt:string;activatedAt?:string|null;activatedByName?:string|null;steps:RunbookStep[]};
 type RunbookData={active:RunbookPlan|null;draft:RunbookPlan|null;revisions:Array<{id:string;version:number;title:string;status:string;updatedAt:string}>;operators:Operator[]};
 type Evidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
@@ -24,7 +24,9 @@ type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks
 type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
 type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
 type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
-type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
+type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;decidedById:string;decidedByName?:string|null};
+type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -43,6 +45,7 @@ export default function ContinuidadePage(){
  const [runbookRecommendations,setRunbookRecommendations]=useState<RunbookRecommendation[]>([]);
  const [effectivenessHistory,setEffectivenessHistory]=useState<EffectivenessHistory[]>([]);
  const [changeProposals,setChangeProposals]=useState<ChangeProposal[]>([]);
+ const [changeMetrics,setChangeMetrics]=useState<ChangeMetrics|null>(null);
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
  const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
@@ -71,7 +74,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -82,7 +85,8 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/actions/metrics"),
     request("/api/v1/sidec/continuity/runbook/recommendations"),
     request("/api/v1/sidec/continuity/actions/effectiveness-history"),
-    request("/api/v1/sidec/continuity/runbook/change-proposals")
+    request("/api/v1/sidec/continuity/runbook/change-proposals"),
+    request("/api/v1/sidec/continuity/runbook/change-metrics")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -95,6 +99,7 @@ export default function ContinuidadePage(){
    if(recommendations)setRunbookRecommendations(recommendations.items??[]);
    if(history)setEffectivenessHistory(history.items??[]);
    if(proposals)setChangeProposals(proposals.items??[]);
+   if(changeStats)setChangeMetrics(changeStats);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -168,7 +173,7 @@ export default function ContinuidadePage(){
    body:JSON.stringify({
     title:draft.title,activationCriteria:draft.activationCriteria,recoveryStrategy:draft.recoveryStrategy,
     communicationPlan:draft.communicationPlan,returnToNormal:draft.returnToNormal,
-    steps:draft.steps.map(step=>({phase:step.phase,sortOrder:step.sortOrder,title:step.title,instructions:step.instructions,expectedMinutes:step.expectedMinutes,ownerUserId:step.ownerUserId||null,required:step.required}))
+    steps:draft.steps.map(step=>({lineageKey:step.lineageKey,phase:step.phase,sortOrder:step.sortOrder,title:step.title,instructions:step.instructions,expectedMinutes:step.expectedMinutes,ownerUserId:step.ownerUserId||null,required:step.required}))
    })
   });
   setMessage("Rascunho salvo.");
@@ -278,6 +283,27 @@ export default function ContinuidadePage(){
   setMessage("Evidência de implementação registrada.");
  });
 
+ const decideCriticalProposal=(proposal:ChangeProposal,decision:"APPROVED"|"REJECTED")=>act(async()=>{
+  const defaultNote=decision==="APPROVED"?"Mudança crítica analisada e aprovada para aplicação controlada.":"Mudança crítica rejeitada após análise.";
+  const notes=window.prompt("Fundamentação da decisão:",defaultNote);
+  if(notes===null||notes.trim().length<5)throw new Error("Informe a fundamentação da decisão.");
+  await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/approval`,{
+   method:"POST",body:JSON.stringify({decision,notes})
+  });
+  setMessage(decision==="APPROVED"?"Aprovação crítica registrada.":"Rejeição crítica registrada.");
+ });
+
+ const sealChangeReport=(proposal:ChangeProposal)=>act(async()=>{
+  if(!window.confirm(`Selar definitivamente o relatório da mudança da revisão v${proposal.targetPlanVersion}? O PDF armazenado e a assinatura serão imutáveis.`))return;
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/seal`,{method:"POST",body:"{}"});
+  setMessage(result?.valid?"Relatório selado com SHA-256 e assinatura Ed25519 válida.":"Relatório selado.");
+ });
+
+ const verifyChangeReportSeal=(proposal:ChangeProposal)=>act(async()=>{
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/seal`);
+  setMessage(result?.valid?`Selo íntegro e assinatura válida · ${String(result.publicKeyFingerprint??"").slice(0,16)}…`:"A verificação do selo falhou.");
+ });
+
  const applyChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
   const notes=window.prompt("Fundamentação para marcar a mudança como aplicada:","Revisão ativada e evidências conferidas pelo operador.");
   if(notes===null||notes.trim().length<5)throw new Error("Informe a fundamentação.");
@@ -324,7 +350,7 @@ export default function ContinuidadePage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.32</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.33</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
@@ -405,28 +431,46 @@ export default function ContinuidadePage(){
   </section>
 
   <section style={{marginTop:18}}>
+   <h2>Governança e eficácia das mudanças</h2>
+   <p>Indicadores do ciclo recomendação → alteração → aplicação → exercício → verificação → selagem.</p>
+   {changeMetrics&&<div className="dataGrid">
+    <article className="card"><h2>Total de propostas</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.total}</p><p>{changeMetrics.summary.proposed} proposta(s) · {changeMetrics.summary.applied} aplicada(s) · {changeMetrics.summary.verified} verificada(s)</p></article>
+    <article className="card"><h2>Verificação</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.verifiedRate==null?"—":Number(changeMetrics.summary.verifiedRate).toFixed(1)+"%"}</p><p>{changeMetrics.summary.sealed} relatório(s) selado(s)</p></article>
+    <article className={changeMetrics.summary.regressed>0?"warningCard":"card"}><h2>Eficácia</h2><p>{changeMetrics.summary.improved} melhorou · {changeMetrics.summary.stable} estável · {changeMetrics.summary.regressed} regrediu</p><p>{changeMetrics.summary.noBaseline} sem baseline · taxa de melhora {changeMetrics.summary.improvedRate==null?"—":Number(changeMetrics.summary.improvedRate).toFixed(1)+"%"}</p></article>
+    <article className="card"><h2>Governança crítica</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.critical}</p><p>proposta(s) crítica(s) sob dupla aprovação independente.</p></article>
+    <article className="card"><h2>Tempo médio</h2><p>Aplicação: {changeMetrics.summary.avgApplyHours==null?"—":Number(changeMetrics.summary.avgApplyHours).toFixed(1)+" h"}</p><p>Aplicação → verificação: {changeMetrics.summary.avgVerificationHours==null?"—":Number(changeMetrics.summary.avgVerificationHours).toFixed(1)+" h"}</p></article>
+   </div>}
+  </section>
+
+  <section style={{marginTop:18}}>
    <h2>Propostas de mudança controlada</h2>
    <p>A proposta liga uma recomendação aceita a uma revisão específica. O SIGDEC não altera o runbook automaticamente.</p>
    <div className="dataGrid">{changeProposals.length===0?<div className="infoCard">Nenhuma proposta de mudança registrada.</div>:changeProposals.map(proposal=><article className={proposal.status==="PROPOSED"?"warningCard":"card"} key={proposal.id}>
     <h2>{proposal.recommendationTitle}</h2>
-    <p><strong>{proposal.status}</strong> · revisão v{proposal.targetPlanVersion} · {proposal.targetPlanStatus}</p>
+    <p><strong>{proposal.status}</strong> · revisão v{proposal.targetPlanVersion} · {proposal.targetPlanStatus} · severidade {proposal.recommendationSeverity}</p>
     <p><strong>Linhagem:</strong> {proposal.basePlanVersion?"v"+proposal.basePlanVersion:"sem baseline"} → v{proposal.targetPlanVersion}</p>
     <p><strong>Recorrência:</strong> {proposal.recurrenceKey}</p>
     <p>{proposal.proposalText}</p>
     <p><strong>Diff:</strong> {proposal.diffSummary.totalChanges} alteração(ões) · {proposal.diffSummary.fieldsChanged} campo(s) gerais · {proposal.diffSummary.stepsAdded} etapa(s) adicionada(s) · {proposal.diffSummary.stepsModified} modificada(s) · {proposal.diffSummary.stepsRemoved} removida(s)</p>
     {proposal.status==="PROPOSED"&&proposal.diffSummary.totalChanges===0&&<p><strong>Atenção:</strong> nenhuma alteração estrutural foi detectada entre a revisão-base e o rascunho-alvo.</p>}
     {proposal.effectivenessOutcome&&<p><strong>Eficácia:</strong> {proposal.effectivenessOutcome==="IMPROVED"?"Melhorou":proposal.effectivenessOutcome==="REGRESSED"?"Regrediu":proposal.effectivenessOutcome==="STABLE"?"Estável":"Sem baseline"}{proposal.baselineExerciseResult?" · antes "+proposal.baselineExerciseResult:""}{proposal.verificationExerciseResult?" · depois "+proposal.verificationExerciseResult:""}</p>}
+    {proposal.recommendationSeverity==="CRITICAL"&&<p><strong>Dupla aprovação:</strong> {proposal.approvedCount}/2 aprovações · {proposal.rejectedCount} rejeição(ões) · {proposal.criticalApprovalSatisfied?"liberada":"pendente"}</p>}
+    {proposal.approvals?.map(item=><p key={item.id}><small>{item.decision} · {item.decidedByName??"Usuário"} · {new Date(item.decidedAt).toLocaleString("pt-BR")} · {item.notes}</small></p>)}
     <p><strong>Evidências:</strong> {proposal.evidence.length}</p>
     {proposal.evidence.slice(-5).map(ev=><p key={ev.id}><small>{ev.evidenceType} · {ev.title} · {ev.reference}</small></p>)}
     {proposal.statusNotes&&<p><strong>Fundamentação:</strong> {proposal.statusNotes}</p>}
     {proposal.appliedAt&&<p>Aplicada em {new Date(proposal.appliedAt).toLocaleString("pt-BR")}{proposal.appliedByName?" · "+proposal.appliedByName:""}</p>}
     {proposal.verifiedAt&&<p>Verificada em {new Date(proposal.verifiedAt).toLocaleString("pt-BR")}{proposal.verifiedByName?" · "+proposal.verifiedByName:""}{proposal.verificationExerciseResult?" · exercício "+proposal.verificationExerciseResult:""}</p>}
+    {proposal.reportSealed&&<p><strong>Relatório selado:</strong> {proposal.reportSealedAt?new Date(proposal.reportSealedAt).toLocaleString("pt-BR"):"sim"}{proposal.reportSealedByName?" · "+proposal.reportSealedByName:""} · SHA-256 {proposal.reportHash?.slice(0,16)}… · chave {proposal.reportSealKeyId}</p>}
     <div className="headerActions">
      {(proposal.status==="PROPOSED"||proposal.status==="APPLIED")&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void addChangeEvidence(proposal)}>Adicionar evidência</button>}
-     {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&proposal.diffSummary.totalChanges>0&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
+     {proposal.status==="PROPOSED"&&proposal.recommendationSeverity==="CRITICAL"&&<><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"APPROVED")}>Aprovar mudança crítica</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"REJECTED")}>Rejeitar mudança crítica</button></>}
+     {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&proposal.diffSummary.totalChanges>0&&proposal.criticalApprovalSatisfied&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
      {proposal.status==="PROPOSED"&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void cancelChangeProposal(proposal)}>Cancelar proposta</button>}
      {proposal.status==="APPLIED"&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void verifyChangeProposal(proposal)}>Verificar por exercício/AAR</button>}
-     <a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report.pdf`}>Relatório da mudança PDF</a>
+     {proposal.status==="VERIFIED"&&!proposal.reportSealed&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void sealChangeReport(proposal)}>Selar relatório</button>}
+     {proposal.reportSealed&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyChangeReportSeal(proposal)}>Verificar selo</button>}
+     <a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report.pdf`}>{proposal.reportSealed?"Relatório selado PDF":"Relatório da mudança PDF"}</a>
     </div>
    </article>)}</div>
   </section>

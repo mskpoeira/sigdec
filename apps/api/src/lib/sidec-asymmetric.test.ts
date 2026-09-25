@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after,test } from "node:test";
-import { signSidecIntegrity,signSidecTimestamp,verifySidecIntegrity,verifySidecTimestamp } from "./sidec-asymmetric.js";
+import { signSidecContinuityChangeReport,signSidecIntegrity,signSidecTimestamp,verifySidecContinuityChangeReport,verifySidecIntegrity,verifySidecTimestamp } from "./sidec-asymmetric.js";
 
 const previousSeed=process.env.SIDEC_ED25519_PRIVATE_SEED_BASE64;
 const previousId=process.env.SIDEC_ED25519_KEY_ID;
@@ -65,5 +65,35 @@ test("carimbo interno vincula hashes atestacao e instante",()=>{
   signature:timestamp.signature,
   publicKey:timestamp.publicKey,
   publicKeyFingerprint:timestamp.publicKeyFingerprint
+ }),false);
+});
+
+
+test("relatorio de mudanca SIDEC possui assinatura Ed25519 vinculada ao contexto",()=>{
+ const sealedAt="2026-09-25T02:00:00.000Z";
+ const signed=signSidecContinuityChangeReport({
+  reportHash:"9".repeat(64),
+  proposalId:"11111111-1111-4111-8111-111111111111",
+  targetPlanId:"22222222-2222-4222-8222-222222222222",
+  sealedAt
+ });
+ assert.equal(signed.algorithm,"Ed25519");
+ assert.equal(verifySidecContinuityChangeReport({
+  reportHash:"9".repeat(64),
+  proposalId:"11111111-1111-4111-8111-111111111111",
+  targetPlanId:"22222222-2222-4222-8222-222222222222",
+  sealedAt,
+  signature:signed.signature,
+  publicKey:signed.publicKey,
+  publicKeyFingerprint:signed.publicKeyFingerprint
+ }),true);
+ assert.equal(verifySidecContinuityChangeReport({
+  reportHash:"8".repeat(64),
+  proposalId:"11111111-1111-4111-8111-111111111111",
+  targetPlanId:"22222222-2222-4222-8222-222222222222",
+  sealedAt,
+  signature:signed.signature,
+  publicKey:signed.publicKey,
+  publicKeyFingerprint:signed.publicKeyFingerprint
  }),false);
 });

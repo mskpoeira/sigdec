@@ -19,11 +19,26 @@ export async function buildContinuityChangeReportPdf(input:any){
   pdf.fontSize(10).text(`Runbook v${proposal.targetPlanVersion} · ${proposal.targetPlanTitle}`,{align:"center"});pdf.moveDown(1);
   for(const [label,value] of [
    ["Proposta",proposal.id],["Status",proposal.status],["Recomendação",proposal.recommendationTitle],
-   ["Recorrência",proposal.recurrenceKey],["Revisão-base",proposal.basePlanVersion?`v${proposal.basePlanVersion} · ${proposal.basePlanTitle}`:"—"],
+   ["Severidade",proposal.recommendationSeverity??"—"],["Recorrência",proposal.recurrenceKey],["Revisão-base",proposal.basePlanVersion?`v${proposal.basePlanVersion} · ${proposal.basePlanTitle}`:"—"],
    ["Revisão-alvo",`v${proposal.targetPlanVersion} · ${proposal.targetPlanTitle}`],["Criada em",when(proposal.createdAt)],
    ["Aplicada em",when(proposal.appliedAt)],["Verificada em",when(proposal.verifiedAt)]
   ]){pdf.font("Helvetica-Bold").fontSize(8.4).text(`${label}:`,{continued:true});pdf.font("Helvetica").text(` ${value}`)}
   section("PROPOSTA E FUNDAMENTAÇÃO");p(proposal.proposalText);if(proposal.statusNotes)p(proposal.statusNotes);
+
+  section("APROVAÇÕES DE GOVERNANÇA");
+  const approvals=proposal.approvals??[];
+  if(proposal.recommendationSeverity!=="CRITICAL"){
+   p("A proposta não está classificada como crítica e não exige dupla aprovação independente.");
+  }else{
+   const approved=approvals.filter((item:any)=>item.decision==="APPROVED").length;
+   const rejected=approvals.filter((item:any)=>item.decision==="REJECTED").length;
+   p(`Mudança crítica: ${approved} aprovação(ões) e ${rejected} rejeição(ões) registradas. A aplicação exige duas aprovações de usuários distintos do proponente e nenhuma rejeição vigente.`);
+   if(!approvals.length)p("Nenhuma decisão de aprovação registrada.");
+   for(const item of approvals){
+    pdf.font("Helvetica-Bold").fontSize(8).fillColor("#102033").text(`• ${item.decision} · ${item.decidedByName??"Usuário"} · ${when(item.decidedAt)}`);
+    p(item.notes);
+   }
+  }
 
   section("DIFF ESTRUTURAL");
   if(!diff){p("Diff não disponível.");}else{
@@ -61,7 +76,7 @@ export async function buildContinuityChangeReportPdf(input:any){
   section("RASTREABILIDADE");
   p(`Criada por: ${proposal.createdByName??"—"}. Aplicada por: ${proposal.appliedByName??"—"}. Verificada por: ${proposal.verifiedByName??"—"}.`);
   section("NOTA DE GOVERNANÇA");
-  p("Este relatório documenta a relação entre recomendação, revisão do runbook, diferenças estruturais, evidências de implementação e exercício de verificação. O SIGDEC não altera o runbook automaticamente; edição, ativação, aplicação e verificação permanecem atos humanos auditáveis.");
+  p("Este relatório documenta a relação entre recomendação, revisão do runbook, diferenças estruturais, aprovações, evidências de implementação e exercício de verificação. A identidade persistente das etapas preserva a rastreabilidade entre revisões. O SIGDEC não altera o runbook automaticamente; edição, aprovação, ativação, aplicação, verificação e selagem permanecem atos humanos auditáveis. Quando selado, o PDF é armazenado de forma imutável no banco com SHA-256 e assinatura Ed25519 verificável.");
   const range=pdf.bufferedPageRange();for(let i=range.start;i<range.start+range.count;i++){pdf.switchToPage(i);pdf.font("Helvetica").fontSize(7).fillColor("#607388").text(`SIGDEC · Mudança controlada · proposta ${proposal.id} · página ${i+1} de ${range.count}`,pdf.page.margins.left,pdf.page.height-36,{width,align:"center",lineBreak:false})}
   pdf.end();
  });

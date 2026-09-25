@@ -30,6 +30,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0037_sidec_continuity_improvement_loop.sql"));
  assert.ok(files.includes("0038_sidec_continuity_change_governance.sql"));
  assert.ok(files.includes("0039_sidec_continuity_change_effectiveness.sql"));
+ assert.ok(files.includes("0040_sidec_continuity_step_identity_critical_seals.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -420,6 +421,54 @@ test("SIDEC v1.32 possui linhagem diff impactos e eficacia de mudancas",async()=
  assert.match(proposalDefs,/IMPROVED/);
  assert.match(proposalDefs,/STABLE/);
  assert.match(proposalDefs,/REGRESSED/);
+});
+
+test("SIDEC v1.33 possui identidade persistente dupla aprovacao e selo imutavel",async()=>{
+ const lineage=await db.query(`SELECT is_nullable,data_type FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_steps' AND column_name='lineage_key'`);
+ assert.equal(lineage.rowCount,1);
+ assert.equal(lineage.rows[0]?.is_nullable,"NO");
+ assert.equal(lineage.rows[0]?.data_type,"uuid");
+
+ const lineageIndex=await db.query(`SELECT indexdef FROM pg_indexes
+  WHERE schemaname='public' AND indexname='sidec_continuity_steps_plan_lineage_uidx'`);
+ assert.equal(lineageIndex.rowCount,1);
+ assert.match(String(lineageIndex.rows[0]?.indexdef??""),/UNIQUE/);
+ assert.match(String(lineageIndex.rows[0]?.indexdef??""),/lineage_key/);
+
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_change_approvals','sidec_continuity_change_report_seals'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_change_approvals","sidec_continuity_change_report_seals"
+ ]);
+
+ const approvalDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_approvals'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(approvalDefs,/APPROVED/);
+ assert.match(approvalDefs,/REJECTED/);
+ assert.match(approvalDefs,/proposal_id, decided_by/);
+
+ const sealDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_seals'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(sealDefs,/Ed25519/);
+ assert.match(sealDefs,/report_hash/);
+
+ const immutable=await db.query(`SELECT tgname FROM pg_trigger
+  WHERE tgrelid='sidec_continuity_change_report_seals'::regclass AND NOT tgisinternal
+   AND tgname='sidec_continuity_change_report_seals_immutable'`);
+ assert.equal(immutable.rowCount,1);
+
+ const role=await db.query(`SELECT r.code,count(p.id)::int AS permissions
+  FROM roles r
+  LEFT JOIN role_permissions rp ON rp.role_id=r.id
+  LEFT JOIN permissions p ON p.id=rp.permission_id
+   AND p.code IN ('sidec_continuity.read','sidec_continuity_change.approve')
+  WHERE r.code='SIDEC_CONTINUITY_APPROVER'
+  GROUP BY r.code`);
+ assert.equal(role.rowCount,1);
+ assert.equal(Number(role.rows[0]?.permissions??0),2);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
