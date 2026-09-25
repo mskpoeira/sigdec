@@ -24,7 +24,7 @@ type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks
 type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
 type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
 type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
-type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;createdAt:string;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;evidence:ChangeEvidence[]};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -324,7 +324,7 @@ export default function ContinuidadePage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.31</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.32</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
@@ -410,8 +410,12 @@ export default function ContinuidadePage(){
    <div className="dataGrid">{changeProposals.length===0?<div className="infoCard">Nenhuma proposta de mudança registrada.</div>:changeProposals.map(proposal=><article className={proposal.status==="PROPOSED"?"warningCard":"card"} key={proposal.id}>
     <h2>{proposal.recommendationTitle}</h2>
     <p><strong>{proposal.status}</strong> · revisão v{proposal.targetPlanVersion} · {proposal.targetPlanStatus}</p>
+    <p><strong>Linhagem:</strong> {proposal.basePlanVersion?"v"+proposal.basePlanVersion:"sem baseline"} → v{proposal.targetPlanVersion}</p>
     <p><strong>Recorrência:</strong> {proposal.recurrenceKey}</p>
     <p>{proposal.proposalText}</p>
+    <p><strong>Diff:</strong> {proposal.diffSummary.totalChanges} alteração(ões) · {proposal.diffSummary.fieldsChanged} campo(s) gerais · {proposal.diffSummary.stepsAdded} etapa(s) adicionada(s) · {proposal.diffSummary.stepsModified} modificada(s) · {proposal.diffSummary.stepsRemoved} removida(s)</p>
+    {proposal.status==="PROPOSED"&&proposal.diffSummary.totalChanges===0&&<p><strong>Atenção:</strong> nenhuma alteração estrutural foi detectada entre a revisão-base e o rascunho-alvo.</p>}
+    {proposal.effectivenessOutcome&&<p><strong>Eficácia:</strong> {proposal.effectivenessOutcome==="IMPROVED"?"Melhorou":proposal.effectivenessOutcome==="REGRESSED"?"Regrediu":proposal.effectivenessOutcome==="STABLE"?"Estável":"Sem baseline"}{proposal.baselineExerciseResult?" · antes "+proposal.baselineExerciseResult:""}{proposal.verificationExerciseResult?" · depois "+proposal.verificationExerciseResult:""}</p>}
     <p><strong>Evidências:</strong> {proposal.evidence.length}</p>
     {proposal.evidence.slice(-5).map(ev=><p key={ev.id}><small>{ev.evidenceType} · {ev.title} · {ev.reference}</small></p>)}
     {proposal.statusNotes&&<p><strong>Fundamentação:</strong> {proposal.statusNotes}</p>}
@@ -419,9 +423,10 @@ export default function ContinuidadePage(){
     {proposal.verifiedAt&&<p>Verificada em {new Date(proposal.verifiedAt).toLocaleString("pt-BR")}{proposal.verifiedByName?" · "+proposal.verifiedByName:""}{proposal.verificationExerciseResult?" · exercício "+proposal.verificationExerciseResult:""}</p>}
     <div className="headerActions">
      {(proposal.status==="PROPOSED"||proposal.status==="APPLIED")&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void addChangeEvidence(proposal)}>Adicionar evidência</button>}
-     {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
+     {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&proposal.diffSummary.totalChanges>0&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
      {proposal.status==="PROPOSED"&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void cancelChangeProposal(proposal)}>Cancelar proposta</button>}
      {proposal.status==="APPLIED"&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void verifyChangeProposal(proposal)}>Verificar por exercício/AAR</button>}
+     <a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report.pdf`}>Relatório da mudança PDF</a>
     </div>
    </article>)}</div>
   </section>
