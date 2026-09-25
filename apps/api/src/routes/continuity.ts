@@ -1455,20 +1455,23 @@ export async function continuityRoutes(app:FastifyInstance){
   if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
   if(String(proposal.createdById)===String(auth.userId))return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
   const policy=await loadChangePolicy(org);
-  const validUntil=parsed.data.decision==="APPROVED"
-   ?new Date(Date.now()+Number(policy.approvalValidHours)*60*60*1000):null;
   const existingDecision=await db.query(`SELECT decision FROM sidec_continuity_change_approvals
     WHERE proposal_id=$1 AND decided_by=$2`,[id,auth.userId]);
   const revalidating=existingDecision.rows[0]?.decision==="APPROVED"&&parsed.data.decision==="APPROVED";
   const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(
      proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by
-    ) VALUES($1,$2,$3,$4,$5,$6,$7)
+    ) VALUES(
+     $1,$2,$3,$4,
+     CASE WHEN $2='APPROVED' THEN now()+($5::text||' hours')::interval ELSE NULL END,
+     CASE WHEN $6 THEN now() ELSE NULL END,
+     CASE WHEN $6 THEN $4 ELSE NULL END
+    )
     ON CONFLICT(proposal_id,decided_by) DO UPDATE
       SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),valid_until=EXCLUDED.valid_until,
         revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,updated_at=now()
     RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt",
       valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
-     id,parsed.data.decision,parsed.data.notes,auth.userId,validUntil,revalidating?new Date():null,revalidating?auth.userId:null
+     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating
     ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
     VALUES($1,'sidec_continuity.change_approval','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
