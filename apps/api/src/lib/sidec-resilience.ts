@@ -15,6 +15,10 @@ export function hasZipSignature(data:Buffer){
  return sig==="504b0304"||sig==="504b0506"||sig==="504b0708";
 }
 
+export function hasPdfSignature(data:Buffer){
+ return data.length>=5&&data.subarray(0,5).toString("ascii")==="%PDF-";
+}
+
 export function shouldAlertResilience(firstDetectedAt:Date,thresholdHours:number,now=new Date()){
  const hours=Math.max(1,Math.min(8760,thresholdHours));
  return now.getTime()-firstDetectedAt.getTime()>=hours*60*60*1000;

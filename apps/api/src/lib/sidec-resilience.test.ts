@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasZipSignature,nextResilienceRetryAt,resilienceBackoffMinutes,shouldAlertResilience } from "./sidec-resilience.js";
+import { hasPdfSignature,hasZipSignature,nextResilienceRetryAt,resilienceBackoffMinutes,shouldAlertResilience } from "./sidec-resilience.js";
 
 test("backoff exponencial possui teto",()=>{
  assert.equal(resilienceBackoffMinutes(0),15);
@@ -18,6 +18,11 @@ test("assinatura ZIP reconhece headers PK validos",()=>{
  assert.equal(hasZipSignature(Buffer.from([0x50,0x4b,0x03,0x04,0x00])),true);
  assert.equal(hasZipSignature(Buffer.from([0x50,0x4b,0x05,0x06])),true);
  assert.equal(hasZipSignature(Buffer.from("NOTZIP")),false);
+});
+
+test("assinatura PDF reconhece cabecalho esperado",()=>{
+ assert.equal(hasPdfSignature(Buffer.from("%PDF-1.7\n")),true);
+ assert.equal(hasPdfSignature(Buffer.from("NOTPDF")),false);
 });
 
 test("alerta exige degradacao persistente",()=>{
