@@ -10,6 +10,8 @@ export default function LoginForm() {
   const [message, setMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mfaRequired,setMfaRequired]=useState(false);
+  const [mfaCode,setMfaCode]=useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -21,19 +23,31 @@ export default function LoginForm() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matricula, password })
+        body: JSON.stringify({ matricula, password, ...(mfaRequired&&mfaCode?{mfaCode}:{}) })
       });
 
       const body = await response.json().catch(() => ({}));
 
+      if (response.status===202&&body.mfaRequired) {
+        setMfaRequired(true);
+        setMfaCode("");
+        setMessage(body.message??"Informe o segundo fator.");
+        return;
+      }
+
       if (!response.ok) {
-        setPassword("");
+        if(!mfaRequired)setPassword("");
+        setMfaCode("");
         setShowPassword(false);
         setMessage(body.message ?? "Não foi possível autenticar.");
         return;
       }
 
-      window.location.href = body.user?.mustChangePassword ? "/alterar-senha" : "/painel";
+      window.location.href = body.user?.mustChangePassword
+        ? "/alterar-senha"
+        : body.user?.mfaRequired&&!body.user?.mfaEnabled
+          ? "/configurar-mfa"
+          : "/painel";
     } catch {
       setPassword("");
       setShowPassword(false);
@@ -87,10 +101,23 @@ export default function LoginForm() {
         </button>
       </div>
 
+      {mfaRequired&&<label>
+        Segundo fator
+        <input
+          autoComplete="one-time-code"
+          inputMode="numeric"
+          value={mfaCode}
+          onChange={(event)=>setMfaCode(event.target.value)}
+          placeholder="000000 ou código de recuperação"
+          required
+          autoFocus
+        />
+      </label>}
+
       {message && <p className="errorMessage" role="alert">{message}</p>}
 
       <button type="submit" disabled={loading}>
-        {loading ? "Autenticando..." : "Entrar"}
+        {loading ? "Autenticando..." : mfaRequired ? "Validar segundo fator" : "Entrar"}
       </button>
 
       <a className="loginLink" href="/esqueci-senha">Esqueci minha senha</a>
