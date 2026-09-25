@@ -1,30 +1,66 @@
 import {createHmac,randomBytes} from "node:crypto";
 import {lookup} from "node:dns/promises";
+import {request as httpRequest} from "node:http";
+import {request as httpsRequest} from "node:https";
+import {isIP} from "node:net";
 import {db} from "../db.js";
 import {decryptApplicationSecret,encryptApplicationSecret} from "./app-secrets.js";
 
-function privateIpv4(address:string){
- const p=address.split(".").map(Number);
- if(p.length!==4||p.some(x=>!Number.isInteger(x)))return false;
- const a=p[0]!,b=p[1]!;
- return a===10||a===127||a===0||(a===169&&b===254)||(a===192&&b===168)||(a===172&&b>=16&&b<=31);
+export function publicWebhookAddress(address:string){
+ const family=isIP(address);
+ if(family===4){
+  const [a=0,b=0,c=0]=address.split(".").map(Number);
+  return !(
+   a===0||a===10||a===127||a>=224||
+   (a===100&&b>=64&&b<=127)||
+   (a===169&&b===254)||(a===172&&b>=16&&b<=31)||
+   (a===192&&(b===0&&c===0||b===0&&c===2||b===88&&c===99||b===168))||
+   (a===198&&(b===18||b===19||b===51&&c===100))||
+   (a===203&&b===0&&c===113)
+  );
+ }
+ // Only IPv6 global unicast is routable to webhook destinations. This also
+ // excludes IPv4-mapped IPv6, unique-local, link-local and documentation ranges.
+ if(family===6)return /^[23][0-9a-f]{3}:/i.test(address)&&
+  !/^2001:(?:0:|db8:)/i.test(address)&&!/^2002:/i.test(address);
+ return false;
 }
-function privateIpv6(address:string){
- const a=address.toLowerCase();
- return a==="::1"||a.startsWith("fc")||a.startsWith("fd")||a.startsWith("fe8")||a.startsWith("fe9")||a.startsWith("fea")||a.startsWith("feb");
+
+async function resolveWebhookDestination(value:string){
+ const url=new URL(value);
+ if(url.username||url.password)throw new Error("Credenciais na URL do webhook não são permitidas.");
+ const localDev=process.env.NODE_ENV!=="production"&&url.protocol==="http:"&&["localhost","127.0.0.1","[::1]"].includes(url.hostname);
+ if(url.protocol!=="https:"&&!localDev)throw new Error("Webhook remoto deve usar HTTPS.");
+ const hostname=url.hostname.replace(/^\[|\]$/g,"");
+ const addresses=await lookup(hostname,{all:true,verbatim:true});
+ if(!addresses.length||process.env.NODE_ENV==="production"&&addresses.some(x=>!publicWebhookAddress(x.address))){
+  throw new Error("Webhook não pode apontar para rede privada/local.");
+ }
+ return {url,address:addresses[0]!.address,family:addresses[0]!.family};
 }
 
 export async function assertSafeWebhookUrl(value:string){
- const url=new URL(value);
- if(url.protocol!=="https:"&&!(process.env.NODE_ENV!=="production"&&url.protocol==="http:"&&["localhost","127.0.0.1","::1"].includes(url.hostname))){
-  throw new Error("Webhook remoto deve usar HTTPS.");
- }
- if(["localhost","0.0.0.0","127.0.0.1","::1"].includes(url.hostname)&&process.env.NODE_ENV==="production")throw new Error("Destino local não permitido.");
- const addresses=await lookup(url.hostname,{all:true,verbatim:true});
- if(process.env.NODE_ENV==="production"&&addresses.some(x=>x.family===4?privateIpv4(x.address):privateIpv6(x.address))){
-  throw new Error("Webhook não pode apontar para rede privada/local.");
- }
- return url;
+ return (await resolveWebhookDestination(value)).url;
+}
+
+async function postWebhook(value:string,body:string,headers:Record<string,string>){
+ const {url,address,family}=await resolveWebhookDestination(value);
+ return new Promise<{status:number,excerpt:string}>((resolve,reject)=>{
+  const request=(url.protocol==="https:"?httpsRequest:httpRequest)(url,{
+   method:"POST",headers:{...headers,"content-length":String(Buffer.byteLength(body))},
+   // Pin the validated address for the actual connection: a second DNS lookup
+   // here would permit DNS rebinding between validation and delivery.
+   lookup:(_hostname,_options,callback)=>callback(null,address,family),
+   signal:AbortSignal.timeout(10000)
+  },response=>{
+   let excerpt="";
+   response.on("data",(chunk:Buffer)=>{if(excerpt.length<1000)excerpt+=chunk.toString("utf8").slice(0,1000-excerpt.length)});
+   response.on("end",()=>resolve({status:response.statusCode??0,excerpt}));
+   response.on("error",reject);
+  });
+  request.on("error",reject);
+  request.end(body);
+ });
 }
 
 export function newWebhookSecret(){return randomBytes(32).toString("base64url");}
@@ -62,24 +98,16 @@ export async function deliverWebhookById(id:string){
  const item=result.rows[0] as any;
  if(!item)return {processed:false};
  try{
-  await assertSafeWebhookUrl(String(item.endpointUrl));
   const body=JSON.stringify(item.payload);
   const timestamp=String(Math.floor(Date.now()/1000));
   const signature=createHmac("sha256",decryptApplicationSecret(String(item.secretCiphertext))).update(timestamp+"."+body).digest("hex");
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),10000);
-  let response:Response;
-  try{
-   response=await fetch(String(item.endpointUrl),{
-    method:"POST",headers:{
-     "content-type":"application/json","user-agent":"SIGDEC-Webhook/1.41",
+  const response=await postWebhook(String(item.endpointUrl),body,{
+     "content-type":"application/json","user-agent":"SIGDEC-Webhook/1.42",
      "x-sigdec-event":String(item.eventAction),"x-sigdec-delivery":String(item.id),
      "x-sigdec-timestamp":timestamp,"x-sigdec-signature":"sha256="+signature
-    },body,signal:controller.signal,redirect:"error"
-   });
-  }finally{clearTimeout(timer)}
-  const excerpt=(await response.text().catch(()=>"")).slice(0,1000);
-  if(!response.ok)throw Object.assign(new Error(`HTTP ${response.status}`),{status:response.status,excerpt});
+  });
+  const excerpt=response.excerpt;
+  if(response.status<200||response.status>=300)throw Object.assign(new Error(`HTTP ${response.status}`),{status:response.status,excerpt});
   await db.query(`UPDATE webhook_deliveries SET status='SUCCEEDED',attempts=attempts+1,last_attempt_at=now(),
     delivered_at=now(),response_status=$2,response_excerpt=$3,last_error=NULL WHERE id=$1`,[id,response.status,excerpt]);
   await db.query("UPDATE integration_endpoints SET last_delivery_at=now(),delivery_failure_count=0 WHERE id=$1",[item.endpointId]);
