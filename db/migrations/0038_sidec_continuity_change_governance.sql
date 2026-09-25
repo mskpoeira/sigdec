@@ -9,6 +9,7 @@ CREATE TABLE sidec_continuity_change_proposals (
   applied_by uuid REFERENCES users(id),
   applied_at timestamptz,
   verification_exercise_id uuid REFERENCES sidec_continuity_exercises(id) ON DELETE SET NULL,
+  status_notes text,
   verified_by uuid REFERENCES users(id),
   verified_at timestamptz,
   created_by uuid NOT NULL REFERENCES users(id),
