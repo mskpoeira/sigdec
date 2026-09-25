@@ -449,6 +449,29 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     const access = await loadAccess(user.id);
+    const mfaRequired=user.mfa_required||user.mfa_enabled||access.roles.includes("MASTER");
+    if(mfaRequired){
+      if(!user.mfa_required)await db.query("UPDATE users SET mfa_required=true,updated_at=now() WHERE id=$1",[user.id]);
+      const challenge=await issueMfaChallenge({
+        userId:user.id,purpose:user.mfa_enabled?"LOGIN":"SETUP",
+        ip:request.ip,userAgent:request.headers["user-agent"]
+      });
+      await audit({
+        userId:user.id,action:"auth.mfa_challenge_issued",entityId:user.id,ip:request.ip,
+        userAgent:request.headers["user-agent"],metadata:{purpose:user.mfa_enabled?"LOGIN":"SETUP"}
+      });
+      return reply.code(202).send({
+        mfa:{
+          required:true,setupRequired:!user.mfa_enabled,
+          challengeToken:challenge.token,expiresAt:challenge.expiresAt
+        },
+        user:{
+          id:user.id,matricula:user.matricula,displayName:user.display_name,
+          mustChangePassword:user.must_change_password,mfaRequired:true,mfaEnabled:user.mfa_enabled
+        }
+      });
+    }
+
     const session = await createSession({
       userId: user.id,
       organizationId: user.organization_id,
@@ -466,7 +489,7 @@ export async function authRoutes(app: FastifyInstance) {
       entityId: user.id,
       ip: request.ip,
       userAgent: request.headers["user-agent"],
-      metadata: { sessionId: session.sessionId }
+      metadata: { sessionId: session.sessionId, mfa:false }
     });
 
     return {
@@ -484,6 +507,91 @@ export async function authRoutes(app: FastifyInstance) {
         mfaEnabled: user.mfa_enabled
       }
     };
+  });
+
+  app.post("/auth/mfa/setup", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaChallengeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"SETUP");
+    if(!challenge)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE",message:"A solicitação de MFA expirou. Entre novamente."});
+    let secret:string;
+    if(challenge.secretCiphertext&&!challenge.mfaVerifiedAt)secret=decryptTotpSecret(String(challenge.secretCiphertext));
+    else{
+      secret=generateTotpSecret();
+      await db.query(`INSERT INTO mfa_totp_credentials(user_id,secret_ciphertext,created_at,verified_at)
+        VALUES($1,$2,now(),NULL)
+        ON CONFLICT(user_id) DO UPDATE SET secret_ciphertext=EXCLUDED.secret_ciphertext,created_at=now(),verified_at=NULL`,[
+        challenge.userId,encryptTotpSecret(secret)
+      ]);
+    }
+    const issuer="SIGDEC";
+    const label=encodeURIComponent(`${issuer}:${challenge.matricula}`);
+    const uri=`otpauth://totp/${label}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+    const qrDataUrl=await QRCode.toDataURL(uri,{margin:1,width:240,errorCorrectionLevel:"M"});
+    await audit({userId:String(challenge.userId),action:"auth.mfa_setup_started",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return {manualKey:secret,otpauthUri:uri,qrDataUrl};
+  });
+
+  app.post("/auth/mfa/confirm-setup", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaCodeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"SETUP");
+    if(!challenge?.secretCiphertext)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE"});
+    const secret=decryptTotpSecret(String(challenge.secretCiphertext));
+    if(!verifyTotp(secret,parsed.data.code)){
+      await failMfaChallenge(String(challenge.id));
+      await audit({userId:String(challenge.userId),action:"auth.mfa_setup_failed",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+      return reply.code(401).send({error:"INVALID_MFA_CODE",message:"Código do autenticador inválido."});
+    }
+    const codes=Array.from({length:10},()=>recoveryCode());
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      await client.query("UPDATE mfa_totp_credentials SET verified_at=now() WHERE user_id=$1",[challenge.userId]);
+      await client.query("UPDATE users SET mfa_enabled=true,mfa_required=true,updated_at=now() WHERE id=$1",[challenge.userId]);
+      await client.query("DELETE FROM recovery_codes WHERE user_id=$1",[challenge.userId]);
+      for(const code of codes)await client.query("INSERT INTO recovery_codes(user_id,code_hash) VALUES($1,$2)",[challenge.userId,recoveryCodeHash(code)]);
+      await client.query("UPDATE mfa_login_challenges SET used_at=now() WHERE id=$1",[challenge.id]);
+      await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[challenge.userId]);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
+    await audit({userId:String(challenge.userId),action:"auth.mfa_enabled",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return finalizeMfaLogin({challenge:{...challenge,mfaEnabled:true},request,reply,recoveryCodes:codes});
+  });
+
+  app.post("/auth/mfa/verify", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaCodeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"LOGIN");
+    if(!challenge?.secretCiphertext||!challenge.mfaVerifiedAt)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE"});
+    let valid=verifyTotp(decryptTotpSecret(String(challenge.secretCiphertext)),parsed.data.code);
+    let recoveryId:string|null=null;
+    if(!valid){
+      const hash=recoveryCodeHash(parsed.data.code);
+      const recovery=await db.query<{id:string}>("SELECT id FROM recovery_codes WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL LIMIT 1",[challenge.userId,hash]);
+      recoveryId=recovery.rows[0]?.id??null;
+      valid=Boolean(recoveryId);
+    }
+    if(!valid){
+      await failMfaChallenge(String(challenge.id));
+      await audit({userId:String(challenge.userId),action:"auth.mfa_failed",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+      return reply.code(401).send({error:"INVALID_MFA_CODE",message:"Código MFA inválido."});
+    }
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      await client.query("UPDATE mfa_login_challenges SET used_at=now() WHERE id=$1",[challenge.id]);
+      if(recoveryId)await client.query("UPDATE recovery_codes SET used_at=now() WHERE id=$1",[recoveryId]);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
+    await audit({userId:String(challenge.userId),action:recoveryId?"auth.mfa_recovery_used":"auth.mfa_verified",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return finalizeMfaLogin({challenge,request,reply});
   });
 
   app.post("/auth/change-password", { preHandler: requireAuth }, async (request, reply) => {
