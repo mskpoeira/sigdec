@@ -523,7 +523,7 @@ export default function ContinuidadePage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.37</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.38</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
