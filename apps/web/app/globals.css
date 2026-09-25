@@ -104,3 +104,45 @@
 .documentStatus-CANCELLED{background:#ffe0e0;color:#8d1616}
 @media(max-width:900px){.documentLayout{grid-template-columns:1fr}.documentForm{position:static}.documentEditor{min-height:260px!important}}
 .fieldPointCard{padding:20px}.fieldPointForm{display:grid;gap:10px;margin:14px 0}.fieldPointForm label{display:grid;gap:5px;font-size:.85rem}.fieldPointForm input,.fieldPointForm textarea{width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#132638}.fieldPointForm textarea{min-height:60px}.fieldPointCoords{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fieldExportActions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.fieldPointCard p{font-size:.78rem;line-height:1.4}
+
+
+/* v1.47 — menu lateral recolhível: hover no desktop e toque no celular */
+.opsCompactMark{width:38px;height:38px;flex:0 0 38px;border:1px solid rgba(255,255,255,.45);border-radius:10px;display:grid;place-items:center;font-weight:900;font-size:.78rem;letter-spacing:.04em}
+.opsSideBrandText,.opsUserText{display:grid;min-width:0}
+.opsMenuIcon{width:32px;flex:0 0 32px;display:inline-grid;place-items:center;text-align:center;font-size:1.08rem}
+.opsMenuLabel{white-space:nowrap}
+.opsUserIcon{width:32px;height:32px;flex:0 0 32px;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;font-size:.52rem;color:#fff}
+.opsLogout{display:flex!important;align-items:center;gap:10px;width:100%;border-radius:8px}
+.opsLogout:hover{background:#1762b5!important}
+.opsMenuClose{display:none!important}
+
+@media(min-width:801px){
+ .opsDashboard{grid-template-columns:72px minmax(0,1fr)}
+ .opsSide{width:72px;padding:16px 10px;overflow:hidden;z-index:30;box-shadow:2px 0 8px rgba(3,25,48,.08);transition:width .2s ease,box-shadow .2s ease}
+ .opsSide:hover,.opsSide:focus-within{width:292px;box-shadow:10px 0 28px rgba(3,25,48,.2)}
+ .opsSideBrand{display:flex;align-items:center;gap:10px;padding:4px 7px 18px;min-height:62px}
+ .opsSideBrandText,.opsUserText,.opsMenuLabel{opacity:0;visibility:hidden;transition:opacity .14s ease}
+ .opsSide:hover .opsSideBrandText,.opsSide:focus-within .opsSideBrandText,
+ .opsSide:hover .opsUserText,.opsSide:focus-within .opsUserText,
+ .opsSide:hover .opsMenuLabel,.opsSide:focus-within .opsMenuLabel{opacity:1;visibility:visible}
+ .opsSide nav{grid-template-columns:1fr;overflow-y:auto;overflow-x:hidden;padding:12px 0}
+ .opsSide nav a{padding:10px 5px;gap:10px;min-height:44px;white-space:nowrap}
+ .opsSide nav a .opsMenuLabel{font-size:.92rem}
+ .opsUser{display:flex;align-items:center;gap:10px;padding:14px 5px 10px;white-space:nowrap}
+ .opsLogout{padding:10px 5px!important;white-space:nowrap}
+}
+
+@media(max-width:800px){
+ .opsDashboard{grid-template-columns:62px minmax(0,1fr)}
+ .opsSide{position:sticky;top:0;width:62px;height:100dvh;padding:12px 7px;overflow:hidden;z-index:50;transition:width .2s ease,box-shadow .2s ease}
+ .opsSide.mobileOpen{width:min(292px,88vw);box-shadow:12px 0 30px rgba(3,25,48,.28)}
+ .opsSideBrand{display:flex;align-items:center;gap:9px;padding:4px 4px 14px;min-height:58px}
+ .opsSideBrandText,.opsUserText,.opsMenuLabel{opacity:0;visibility:hidden}
+ .opsSide.mobileOpen .opsSideBrandText,.opsSide.mobileOpen .opsUserText,.opsSide.mobileOpen .opsMenuLabel{opacity:1;visibility:visible}
+ .opsMenuClose{margin-left:auto!important;width:34px;height:34px;padding:0!important;display:none!important;place-items:center;text-align:center;border-radius:8px!important;background:rgba(255,255,255,.1)!important;font-size:1.35rem!important}
+ .opsSide.mobileOpen .opsMenuClose{display:grid!important}
+ .opsSide nav{grid-template-columns:1fr;gap:3px;overflow-y:auto;overflow-x:hidden;padding:10px 0}
+ .opsSide nav a{padding:10px 4px;gap:9px;min-height:44px;white-space:nowrap;font-size:.92rem}
+ .opsUser{display:flex;align-items:center;gap:9px;padding:12px 4px 9px;white-space:nowrap}
+ .opsLogout{padding:10px 4px!important;white-space:nowrap}
+}
