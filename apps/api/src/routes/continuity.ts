@@ -207,8 +207,10 @@ async function buildRunbookDiff(org:string,targetPlanId:string,basePlanId?:strin
   return before===after?[]:[{field,label,before,after}];
  });
  const key=(step:any)=>`${String(step.phase)}:${Number(step.sortOrder)}`;
- const baseMap=new Map<string,any>((base?.steps??[]).map((step:any)=>[key(step),step]));
- const targetMap=new Map<string,any>((target.steps??[]).map((step:any)=>[key(step),step]));
+ const baseMap=new Map<string,any>();
+ for(const step of base?.steps??[])baseMap.set(key(step),step);
+ const targetMap=new Map<string,any>();
+ for(const step of target.steps??[])targetMap.set(key(step),step);
  const keys=[...new Set([...baseMap.keys(),...targetMap.keys()])].sort((a,b)=>{
   const ao=Number(a.split(":").at(-1)??0),bo=Number(b.split(":").at(-1)??0);
   return ao-bo||a.localeCompare(b);
