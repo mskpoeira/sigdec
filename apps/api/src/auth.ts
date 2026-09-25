@@ -102,6 +102,7 @@ export async function createSession(params: {
   permissions: string[];
   ip?: string;
   userAgent?: string;
+  mfaVerified?: boolean;
 }) {
   const sessionId = randomUUID();
   const sessionHours = Math.max(1, Math.min(24, Number(process.env.SESSION_HOURS ?? 8)));
@@ -109,9 +110,9 @@ export async function createSession(params: {
 
   await db.query(
     `INSERT INTO auth_sessions
-       (id, user_id, expires_at, ip, user_agent)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [sessionId, params.userId, expiresAt, params.ip ?? null, params.userAgent ?? null]
+       (id, user_id, expires_at, ip, user_agent, mfa_verified_at)
+     VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END)`,
+    [sessionId, params.userId, expiresAt, params.ip ?? null, params.userAgent ?? null, params.mfaVerified === true]
   );
 
   const token = await new SignJWT({
@@ -137,14 +138,26 @@ export async function readSessionToken(token: string): Promise<AuthContext> {
     throw new Error("Sessão inválida.");
   }
 
+  const strategicLevel=Math.max(1,Math.min(100,Number(process.env.MFA_STRATEGIC_ROLE_LEVEL??80)));
   const active = await db.query(
     `SELECT 1
-       FROM auth_sessions
-      WHERE id = $1
-        AND user_id = $2
-        AND revoked_at IS NULL
-        AND expires_at > now()`,
-    [payload.sid, payload.sub]
+       FROM auth_sessions s
+       JOIN users u ON u.id=s.user_id AND u.active=true
+      WHERE s.id = $1
+        AND s.user_id = $2
+        AND s.revoked_at IS NULL
+        AND s.expires_at > now()
+        AND (
+          (
+            u.mfa_required=false
+            AND NOT EXISTS(
+              SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+              WHERE ur.user_id=u.id AND r.level >= $3
+            )
+          )
+          OR s.mfa_verified_at IS NOT NULL
+        )`,
+    [payload.sid, payload.sub, strategicLevel]
   );
 
   if (active.rowCount !== 1) {

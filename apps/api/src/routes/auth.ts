@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import argon2 from "argon2";
+import QRCode from "qrcode";
 import { z } from "zod";
 import {
   authFrom,
@@ -13,6 +14,7 @@ import {
 } from "../auth.js";
 import { db } from "../db.js";
 import { isMailConfigured, sendPasswordResetEmail } from "../mail.js";
+import { challengeHash, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, newChallengeToken, recoveryCode, recoveryCodeHash, verifyTotp } from "../lib/mfa.js";
 
 const loginSchema = z.object({
   matricula: z.string().min(1).max(32),
@@ -44,6 +46,12 @@ const resetPasswordSchema = z.object({
   newPassword: strongPasswordSchema
 });
 
+const mfaChallengeSchema=z.object({challengeToken:z.string().min(40).max(256)});
+const mfaCodeSchema=z.object({
+ challengeToken:z.string().min(40).max(256),
+ code:z.string().trim().min(6).max(40)
+});
+
 async function audit(params: {
   userId?: string | null;
   action: string;
@@ -65,6 +73,62 @@ async function audit(params: {
       JSON.stringify(params.metadata ?? {})
     ]
   );
+}
+
+async function issueMfaChallenge(input:{userId:string;purpose:"SETUP"|"LOGIN";ip?:string;userAgent?:string}){
+ const token=newChallengeToken();
+ const expiresAt=new Date(Date.now()+10*60*1000);
+ await db.query(`UPDATE mfa_login_challenges SET used_at=now()
+  WHERE user_id=$1 AND used_at IS NULL`,[input.userId]);
+ await db.query(`INSERT INTO mfa_login_challenges(user_id,token_hash,purpose,expires_at,requested_ip,user_agent)
+  VALUES($1,$2,$3,$4,$5,$6)`,[
+  input.userId,challengeHash(token),input.purpose,expiresAt,input.ip??null,input.userAgent??null
+ ]);
+ return {token,expiresAt};
+}
+
+async function loadMfaChallenge(token:string,purpose:"SETUP"|"LOGIN"){
+ const result=await db.query(`SELECT c.id,c.user_id AS "userId",c.purpose,c.attempts,c.expires_at AS "expiresAt",
+   u.organization_id AS "organizationId",u.matricula,u.display_name AS "displayName",u.email,
+   u.job_title AS "jobTitle",u.department,u.must_change_password AS "mustChangePassword",
+   u.mfa_required AS "mfaRequired",u.mfa_enabled AS "mfaEnabled",
+   m.secret_ciphertext AS "secretCiphertext",m.verified_at AS "mfaVerifiedAt"
+  FROM mfa_login_challenges c
+  JOIN users u ON u.id=c.user_id AND u.active=true
+  LEFT JOIN mfa_totp_credentials m ON m.user_id=u.id
+  WHERE c.token_hash=$1 AND c.purpose=$2 AND c.used_at IS NULL AND c.expires_at>now()
+  LIMIT 1`,[challengeHash(token),purpose]);
+ return result.rows[0] as any??null;
+}
+
+async function failMfaChallenge(id:string){
+ await db.query(`UPDATE mfa_login_challenges
+  SET attempts=attempts+1,used_at=CASE WHEN attempts+1>=5 THEN now() ELSE used_at END
+  WHERE id=$1`,[id]);
+}
+
+async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recoveryCodes?:string[]}){
+ const access=await loadAccess(String(input.challenge.userId));
+ const session=await createSession({
+  userId:String(input.challenge.userId),organizationId:input.challenge.organizationId??null,
+  roles:access.roles,permissions:access.permissions,ip:input.request.ip,
+  userAgent:input.request.headers["user-agent"],mfaVerified:true
+ });
+ setSessionCookie(input.reply,session.token,session.expiresAt);
+ await audit({
+  userId:String(input.challenge.userId),action:"auth.login_success",entityId:String(input.challenge.userId),
+  ip:input.request.ip,userAgent:input.request.headers["user-agent"],
+  metadata:{sessionId:session.sessionId,mfa:true}
+ });
+ return {
+  user:{
+   id:input.challenge.userId,matricula:input.challenge.matricula,displayName:input.challenge.displayName,
+   email:input.challenge.email,jobTitle:input.challenge.jobTitle,department:input.challenge.department,
+   roles:access.roles,permissions:access.permissions,mustChangePassword:Boolean(input.challenge.mustChangePassword),
+   mfaRequired:true,mfaEnabled:true
+  },
+  recoveryCodes:input.recoveryCodes
+ };
 }
 
 export async function authRoutes(app: FastifyInstance) {
@@ -385,6 +449,32 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     const access = await loadAccess(user.id);
+    const strategicLevel=Math.max(1,Math.min(100,Number(process.env.MFA_STRATEGIC_ROLE_LEVEL??80)));
+    const strategic=await db.query(`SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+      WHERE ur.user_id=$1 AND r.level>=$2 LIMIT 1`,[user.id,strategicLevel]);
+    const mfaRequired=user.mfa_required||user.mfa_enabled||strategic.rowCount===1;
+    if(mfaRequired){
+      if(!user.mfa_required)await db.query("UPDATE users SET mfa_required=true,updated_at=now() WHERE id=$1",[user.id]);
+      const challenge=await issueMfaChallenge({
+        userId:user.id,purpose:user.mfa_enabled?"LOGIN":"SETUP",
+        ip:request.ip,userAgent:request.headers["user-agent"]
+      });
+      await audit({
+        userId:user.id,action:"auth.mfa_challenge_issued",entityId:user.id,ip:request.ip,
+        userAgent:request.headers["user-agent"],metadata:{purpose:user.mfa_enabled?"LOGIN":"SETUP"}
+      });
+      return reply.code(202).send({
+        mfa:{
+          required:true,setupRequired:!user.mfa_enabled,
+          challengeToken:challenge.token,expiresAt:challenge.expiresAt
+        },
+        user:{
+          id:user.id,matricula:user.matricula,displayName:user.display_name,
+          mustChangePassword:user.must_change_password,mfaRequired:true,mfaEnabled:user.mfa_enabled
+        }
+      });
+    }
+
     const session = await createSession({
       userId: user.id,
       organizationId: user.organization_id,
@@ -402,7 +492,7 @@ export async function authRoutes(app: FastifyInstance) {
       entityId: user.id,
       ip: request.ip,
       userAgent: request.headers["user-agent"],
-      metadata: { sessionId: session.sessionId }
+      metadata: { sessionId: session.sessionId, mfa:false }
     });
 
     return {
@@ -420,6 +510,91 @@ export async function authRoutes(app: FastifyInstance) {
         mfaEnabled: user.mfa_enabled
       }
     };
+  });
+
+  app.post("/auth/mfa/setup", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaChallengeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"SETUP");
+    if(!challenge)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE",message:"A solicitação de MFA expirou. Entre novamente."});
+    let secret:string;
+    if(challenge.secretCiphertext&&!challenge.mfaVerifiedAt)secret=decryptTotpSecret(String(challenge.secretCiphertext));
+    else{
+      secret=generateTotpSecret();
+      await db.query(`INSERT INTO mfa_totp_credentials(user_id,secret_ciphertext,created_at,verified_at)
+        VALUES($1,$2,now(),NULL)
+        ON CONFLICT(user_id) DO UPDATE SET secret_ciphertext=EXCLUDED.secret_ciphertext,created_at=now(),verified_at=NULL`,[
+        challenge.userId,encryptTotpSecret(secret)
+      ]);
+    }
+    const issuer="SIGDEC";
+    const label=encodeURIComponent(`${issuer}:${challenge.matricula}`);
+    const uri=`otpauth://totp/${label}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+    const qrDataUrl=await QRCode.toDataURL(uri,{margin:1,width:240,errorCorrectionLevel:"M"});
+    await audit({userId:String(challenge.userId),action:"auth.mfa_setup_started",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return {manualKey:secret,otpauthUri:uri,qrDataUrl};
+  });
+
+  app.post("/auth/mfa/confirm-setup", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaCodeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"SETUP");
+    if(!challenge?.secretCiphertext)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE"});
+    const secret=decryptTotpSecret(String(challenge.secretCiphertext));
+    if(!verifyTotp(secret,parsed.data.code)){
+      await failMfaChallenge(String(challenge.id));
+      await audit({userId:String(challenge.userId),action:"auth.mfa_setup_failed",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+      return reply.code(401).send({error:"INVALID_MFA_CODE",message:"Código do autenticador inválido."});
+    }
+    const codes=Array.from({length:10},()=>recoveryCode());
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      await client.query("UPDATE mfa_totp_credentials SET verified_at=now() WHERE user_id=$1",[challenge.userId]);
+      await client.query("UPDATE users SET mfa_enabled=true,mfa_required=true,updated_at=now() WHERE id=$1",[challenge.userId]);
+      await client.query("DELETE FROM recovery_codes WHERE user_id=$1",[challenge.userId]);
+      for(const code of codes)await client.query("INSERT INTO recovery_codes(user_id,code_hash) VALUES($1,$2)",[challenge.userId,recoveryCodeHash(code)]);
+      await client.query("UPDATE mfa_login_challenges SET used_at=now() WHERE id=$1",[challenge.id]);
+      await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[challenge.userId]);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
+    await audit({userId:String(challenge.userId),action:"auth.mfa_enabled",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return finalizeMfaLogin({challenge:{...challenge,mfaEnabled:true},request,reply,recoveryCodes:codes});
+  });
+
+  app.post("/auth/mfa/verify", {
+    config:{rateLimit:{max:10,timeWindow:"10 minutes"}}
+  }, async(request,reply)=>{
+    const parsed=mfaCodeSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+    const challenge=await loadMfaChallenge(parsed.data.challengeToken,"LOGIN");
+    if(!challenge?.secretCiphertext||!challenge.mfaVerifiedAt)return reply.code(401).send({error:"INVALID_OR_EXPIRED_MFA_CHALLENGE"});
+    let valid=verifyTotp(decryptTotpSecret(String(challenge.secretCiphertext)),parsed.data.code);
+    let recoveryId:string|null=null;
+    if(!valid){
+      const hash=recoveryCodeHash(parsed.data.code);
+      const recovery=await db.query<{id:string}>("SELECT id FROM recovery_codes WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL LIMIT 1",[challenge.userId,hash]);
+      recoveryId=recovery.rows[0]?.id??null;
+      valid=Boolean(recoveryId);
+    }
+    if(!valid){
+      await failMfaChallenge(String(challenge.id));
+      await audit({userId:String(challenge.userId),action:"auth.mfa_failed",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+      return reply.code(401).send({error:"INVALID_MFA_CODE",message:"Código MFA inválido."});
+    }
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      await client.query("UPDATE mfa_login_challenges SET used_at=now() WHERE id=$1",[challenge.id]);
+      if(recoveryId)await client.query("UPDATE recovery_codes SET used_at=now() WHERE id=$1",[recoveryId]);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
+    await audit({userId:String(challenge.userId),action:recoveryId?"auth.mfa_recovery_used":"auth.mfa_verified",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
+    return finalizeMfaLogin({challenge,request,reply});
   });
 
   app.post("/auth/change-password", { preHandler: requireAuth }, async (request, reply) => {

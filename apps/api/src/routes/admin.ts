@@ -2,6 +2,7 @@ import type {FastifyInstance} from "fastify";
 import {z} from "zod";
 import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
+import {assertSafeWebhookUrl,encryptWebhookSecret,newWebhookSecret,queueWebhookTest} from "../lib/webhooks.js";
 
 const FEATURES=[
  ["incidents","Ocorrências"],["dispatch","Despacho"],["field","Operação de campo"],["inspections","Vistorias"],
@@ -75,25 +76,78 @@ export async function adminRoutes(app:FastifyInstance){
  });
  app.get("/api/v1/admin/integrations",{preHandler:requirePermission("integrations.manage")},async request=>{
   const org=organizationId(authFrom(request).organizationId);
-  const result=await db.query(`SELECT id,name,integration_type AS "integrationType",endpoint_url AS "endpointUrl",active,config,created_at AS "createdAt"
-   FROM integration_endpoints WHERE organization_id=$1 ORDER BY name`,[org]);
+  const result=await db.query(`SELECT e.id,e.name,e.integration_type AS "integrationType",e.endpoint_url AS "endpointUrl",
+   e.active,e.config,e.created_at AS "createdAt",
+   (e.webhook_secret_ciphertext IS NOT NULL) AS "webhookSecretConfigured",
+   e.last_delivery_at AS "lastDeliveryAt",e.delivery_failure_count AS "deliveryFailureCount",
+   (SELECT count(*)::int FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status='PENDING') AS "pendingDeliveries",
+   (SELECT count(*)::int FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status='FAILED') AS "failedDeliveries"
+   FROM integration_endpoints e WHERE e.organization_id=$1 ORDER BY e.name`,[org]);
   return {items:result.rows};
  });
  app.post("/api/v1/admin/integrations",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),parsed=integrationSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data;
-  const result=await db.query(`INSERT INTO integration_endpoints(organization_id,name,integration_type,endpoint_url,active,config)
-   VALUES($1,$2,$3,$4,$5,$6::jsonb)
-   RETURNING id,name,integration_type AS "integrationType",endpoint_url AS "endpointUrl",active,config,created_at AS "createdAt"`,[
-   org,v.name,v.integrationType,v.endpointUrl??null,v.active,JSON.stringify(v.config)
+  if(v.integrationType==="WEBHOOK"&&v.endpointUrl){
+   try{await assertSafeWebhookUrl(v.endpointUrl)}catch(error){return reply.code(400).send({error:"UNSAFE_WEBHOOK_URL",message:error instanceof Error?error.message:String(error)})}
+  }
+  const webhookSecret=v.integrationType==="WEBHOOK"?newWebhookSecret():null;
+  const result=await db.query(`INSERT INTO integration_endpoints(
+    organization_id,name,integration_type,endpoint_url,active,config,webhook_secret_ciphertext,webhook_active_from
+   ) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,CASE WHEN $3='WEBHOOK' THEN now() ELSE NULL END)
+   RETURNING id,name,integration_type AS "integrationType",endpoint_url AS "endpointUrl",active,config,created_at AS "createdAt",
+    (webhook_secret_ciphertext IS NOT NULL) AS "webhookSecretConfigured"`,[
+   org,v.name,v.integrationType,v.endpointUrl??null,v.active,JSON.stringify(v.config),
+   webhookSecret?encryptWebhookSecret(webhookSecret):null
   ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
    VALUES($1,'INTEGRATION_ENDPOINT_CREATED','integration_endpoint',$2,$3,$4,$5::jsonb)`,[
    auth.userId,result.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result.rows[0])
   ]);
-  return reply.code(201).send(result.rows[0]);
+  return reply.code(201).send({...result.rows[0],webhookSecret});
  });
+ app.post("/api/v1/admin/integrations/:id/rotate-secret",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const secret=newWebhookSecret();
+  const result=await db.query(`UPDATE integration_endpoints SET webhook_secret_ciphertext=$1,webhook_active_from=now()
+   WHERE id=$2 AND organization_id=$3 AND integration_type='WEBHOOK'
+   RETURNING id,name`,[encryptWebhookSecret(secret),id,org]);
+  if(!result.rows[0])return reply.code(404).send({error:"WEBHOOK_NOT_FOUND"});
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata)
+   VALUES($1,'WEBHOOK_SECRET_ROTATED','integration_endpoint',$2,$3,$4,$5::jsonb)`,[
+   auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify({name:result.rows[0].name})
+  ]);
+  return {ok:true,webhookSecret:secret};
+ });
+
+ app.post("/api/v1/admin/integrations/:id/test",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const exists=await db.query("SELECT 1 FROM integration_endpoints WHERE id=$1 AND organization_id=$2 AND integration_type='WEBHOOK'",[id,org]);
+  if(!exists.rows[0])return reply.code(404).send({error:"WEBHOOK_NOT_FOUND"});
+  try{
+   const result=await queueWebhookTest(id,auth.userId);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata)
+    VALUES($1,'WEBHOOK_TESTED','integration_endpoint',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   return result;
+  }catch(error:any){
+   return reply.code(error?.statusCode??502).send({error:"WEBHOOK_TEST_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.get("/api/v1/admin/integrations/:id/deliveries",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId),{id}=request.params as {id:string};
+  const endpoint=await db.query("SELECT 1 FROM integration_endpoints WHERE id=$1 AND organization_id=$2",[id,org]);
+  if(!endpoint.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const result=await db.query(`SELECT id,event_action AS "eventAction",status,attempts,next_attempt_at AS "nextAttemptAt",
+   last_attempt_at AS "lastAttemptAt",delivered_at AS "deliveredAt",response_status AS "responseStatus",
+   response_excerpt AS "responseExcerpt",last_error AS "lastError",created_at AS "createdAt"
+   FROM webhook_deliveries WHERE endpoint_id=$1 ORDER BY created_at DESC LIMIT 100`,[id]);
+  return {items:result.rows};
+ });
+
  app.patch("/api/v1/admin/integrations/:id/status",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string},parsed=activeSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});

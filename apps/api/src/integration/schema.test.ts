@@ -688,6 +688,34 @@ test("SIGDEC v1.39 fecha voluntariado e assistencia humanitaria",async()=>{
  assert.deepEqual(features.rows.map(x=>x.table_name),["feature_flags","integration_endpoints"]);
 });
 
+test("SIGDEC v1.41 possui MFA efetivo e fila persistente de webhooks",async()=>{
+ const sessionCol=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='auth_sessions' AND column_name='mfa_verified_at'`);
+ assert.equal(sessionCol.rowCount,1);
+
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN ('mfa_login_challenges','webhook_deliveries')
+  ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),["mfa_login_challenges","webhook_deliveries"]);
+
+ const challengeDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='mfa_login_challenges'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(challengeDefs,/SETUP/);
+ assert.match(challengeDefs,/LOGIN/);
+
+ const webhookDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='webhook_deliveries'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(webhookDefs,/PENDING/);
+ assert.match(webhookDefs,/SUCCEEDED/);
+ assert.match(webhookDefs,/FAILED/);
+
+ const integrationCols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='integration_endpoints'
+   AND column_name IN ('webhook_secret_ciphertext','webhook_active_from','last_delivery_at','delivery_failure_count')
+  ORDER BY column_name`);
+ assert.deepEqual(integrationCols.rows.map(x=>x.column_name),["delivery_failure_count","last_delivery_at","webhook_active_from","webhook_secret_ciphertext"]);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
