@@ -73,6 +73,7 @@ try {
               job_title = COALESCE(NULLIF($5, ''), job_title),
               department = COALESCE(NULLIF($6, ''), department),
               active = true,
+              mfa_required = true,
               updated_at = now()
         WHERE id = $1`,
       [
