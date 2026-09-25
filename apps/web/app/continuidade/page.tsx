@@ -12,7 +12,7 @@ type Evidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:stri
 type ExerciseStep={stepId:string;phase:string;title:string;instructions:string;expectedMinutes:number;required:boolean;ownerName?:string|null;status:"PENDING"|"COMPLETED"|"SKIPPED"|"FAILED";notes?:string|null;evidence:Evidence[]};
 type AarAction={id:string;title:string;description?:string|null;priority:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";ownerUserId?:string|null;ownerName?:string|null;dueAt?:string|null;status:"OPEN"|"IN_PROGRESS"|"DONE"|"CANCELLED";completedAt?:string|null;riskId?:string|null;riskCode?:string|null;riskTitle?:string|null;recoveryActionId?:string|null;recoveryActionTitle?:string|null;recoveryActionStatus?:string|null;recurrenceKey?:string|null;effectiveness:"NOT_EVALUATED"|"EFFECTIVE"|"PARTIAL"|"INEFFECTIVE";effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null;effectivenessEvaluatedByName?:string|null};
 type Aar={id:string;status:"DRAFT"|"FINAL";executiveSummary:string;strengths:string;gaps:string;recommendations:string;finalizedAt?:string|null;finalizedByName?:string|null;actions:AarAction[];lessons?:Array<{id:string;category:string;recurrenceKey:string;title:string;observation:string;severity:string;createdAt:string}>};
-type Exercise={id:string;planVersion:number;planTitle:string;scenario:string;status:"IN_PROGRESS"|"COMPLETED"|"CANCELLED";result?:"PASS"|"PARTIAL"|"FAIL"|null;notes?:string|null;startedAt:string;completedAt?:string|null;summary:{total:number;completed:number;skipped:number;failed:number;pending:number;requiredPending:number;progressPct:number};steps:ExerciseStep[];aar?:Aar|null};
+type Exercise={id:string;planId:string;planVersion:number;planTitle:string;scenario:string;status:"IN_PROGRESS"|"COMPLETED"|"CANCELLED";result?:"PASS"|"PARTIAL"|"FAIL"|null;notes?:string|null;startedAt:string;completedAt?:string|null;summary:{total:number;completed:number;skipped:number;failed:number;pending:number;requiredPending:number;progressPct:number};steps:ExerciseStep[];aar?:Aar|null};
 type ContinuitySchedule={id:string;name:string;intervalDays:number;nextDueAt:string;defaultScenario:string;ownerUserId?:string|null;ownerName?:string|null;enabled:boolean;lastExerciseId?:string|null;dueState:"SCHEDULED"|"DUE_SOON"|"OVERDUE"|"DISABLED"};
 type ContinuityContact={id:string;contactScope:"INTERNAL"|"EXTERNAL";escalationLevel:number;name:string;roleTitle?:string|null;organizationName?:string|null;channelType:"PHONE"|"EMAIL"|"RADIO"|"OTHER";channelValue:string;notes?:string|null;active:boolean};
 type ActionAlert={id:string;actionId:string;alertType:"DUE_SOON"|"OVERDUE";dueAt:string;detectedAt:string;title:string;priority:string;status:string;ownerName?:string|null;exerciseId:string;scenario:string;planVersion:number};
@@ -23,6 +23,8 @@ type RecoveryReference={id:string;title:string;category:string;status:string;res
 type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks:number;linkedRecoveryActions:number;avgCompletionHours?:number|null;onTimePct?:number|null;effective:number;partial:number;ineffective:number;awaitingEffectiveness:number};byPriority:Array<{priority:string;total:number;done:number;avgCompletionHours?:number|null}>;byRecurrenceKey:Array<{recurrenceKey:string;actions:number;exercises:number;effective:number;partial:number;ineffective:number;awaitingEffectiveness:number;firstExerciseAt:string;lastExerciseAt:string}>};
 type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
 type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
+type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;createdAt:string;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;evidence:ChangeEvidence[]};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -40,6 +42,7 @@ export default function ContinuidadePage(){
  const [actionMetrics,setActionMetrics]=useState<ActionMetrics|null>(null);
  const [runbookRecommendations,setRunbookRecommendations]=useState<RunbookRecommendation[]>([]);
  const [effectivenessHistory,setEffectivenessHistory]=useState<EffectivenessHistory[]>([]);
+ const [changeProposals,setChangeProposals]=useState<ChangeProposal[]>([]);
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
  const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
@@ -68,7 +71,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -78,7 +81,8 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/action-references"),
     request("/api/v1/sidec/continuity/actions/metrics"),
     request("/api/v1/sidec/continuity/runbook/recommendations"),
-    request("/api/v1/sidec/continuity/actions/effectiveness-history")
+    request("/api/v1/sidec/continuity/actions/effectiveness-history"),
+    request("/api/v1/sidec/continuity/runbook/change-proposals")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -90,6 +94,7 @@ export default function ContinuidadePage(){
    if(metrics)setActionMetrics(metrics);
    if(recommendations)setRunbookRecommendations(recommendations.items??[]);
    if(history)setEffectivenessHistory(history.items??[]);
+   if(proposals)setChangeProposals(proposals.items??[]);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -243,12 +248,66 @@ export default function ContinuidadePage(){
   setMessage("Ação de recuperação criada e vinculada à ação corretiva.");
  });
 
- const updateRecommendation=(item:RunbookRecommendation,status:"ACCEPTED"|"IMPLEMENTED"|"DISMISSED")=>act(async()=>{
-  const defaultNote=status==="ACCEPTED"?"Recomendação aceita para análise na próxima revisão do runbook.":status==="IMPLEMENTED"?"Recomendação implementada em revisão controlada do runbook.":"Recomendação descartada após análise humana.";
+ const updateRecommendation=(item:RunbookRecommendation,status:"ACCEPTED"|"DISMISSED")=>act(async()=>{
+  const defaultNote=status==="ACCEPTED"?"Recomendação aceita para análise na próxima revisão do runbook.":"Recomendação descartada após análise humana.";
   const notes=window.prompt("Fundamentação da decisão:",defaultNote);
   if(notes===null||notes.trim().length<5)throw new Error("Informe uma fundamentação com pelo menos 5 caracteres.");
   await request(`/api/v1/sidec/continuity/runbook/recommendations/${item.id}`,{method:"PATCH",body:JSON.stringify({status,notes})});
   setMessage("Recomendação de runbook atualizada.");
+ });
+
+ const createChangeProposal=(item:RunbookRecommendation)=>act(async()=>{
+  const draft=runbook?.draft;
+  if(!draft)throw new Error("Crie uma revisão em rascunho antes de vincular a recomendação.");
+  const proposalText=window.prompt("Descreva objetivamente a mudança proposta para o runbook:",item.rationale);
+  if(proposalText===null||proposalText.trim().length<10)throw new Error("Descreva a proposta com pelo menos 10 caracteres.");
+  await request(`/api/v1/sidec/continuity/runbook/recommendations/${item.id}/change-proposal`,{
+   method:"POST",body:JSON.stringify({targetPlanId:draft.id,proposalText})
+  });
+  setMessage(`Proposta vinculada ao rascunho v${draft.version}.`);
+ });
+
+ const addChangeEvidence=(proposal:ChangeProposal)=>act(async()=>{
+  const title=window.prompt("Título da evidência:","Alteração aplicada na revisão do runbook");
+  if(title===null||title.trim().length<3)throw new Error("Informe um título válido.");
+  const reference=window.prompt("Descreva a evidência ou referência:","Revisão do conteúdo e das etapas conforme proposta aprovada.");
+  if(reference===null||reference.trim().length<1)throw new Error("Informe a referência da evidência.");
+  await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/evidence`,{
+   method:"POST",body:JSON.stringify({evidenceType:"NOTE",title,reference,contentHash:null})
+  });
+  setMessage("Evidência de implementação registrada.");
+ });
+
+ const applyChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
+  const notes=window.prompt("Fundamentação para marcar a mudança como aplicada:","Revisão ativada e evidências conferidas pelo operador.");
+  if(notes===null||notes.trim().length<5)throw new Error("Informe a fundamentação.");
+  await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}`,{
+   method:"PATCH",body:JSON.stringify({status:"APPLIED",notes})
+  });
+  setMessage("Mudança aplicada; recomendação marcada como implementada.");
+ });
+
+ const verifyChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
+  const candidates=exercises.filter(ex=>ex.planId===proposal.targetPlanId&&ex.status==="COMPLETED"&&ex.aar?.status==="FINAL")
+   .sort((a,b)=>new Date(b.completedAt??b.startedAt).getTime()-new Date(a.completedAt??a.startedAt).getTime());
+  const exercise=candidates[0];
+  if(!exercise)throw new Error("Conclua um exercício da revisão-alvo e finalize seu AAR antes da verificação.");
+  if(!window.confirm(`Usar o exercício de ${new Date(exercise.startedAt).toLocaleString("pt-BR")} para verificar a mudança da revisão v${proposal.targetPlanVersion}?`))return;
+  const notes=window.prompt("Conclusão da verificação:","Mudança exercitada na revisão-alvo e AAR finalizado.");
+  if(notes===null||notes.trim().length<5)throw new Error("Informe a conclusão da verificação.");
+  await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}`,{
+   method:"PATCH",body:JSON.stringify({status:"VERIFIED",verificationExerciseId:exercise.id,notes})
+  });
+  setMessage("Mudança verificada por exercício e AAR da revisão-alvo.");
+ });
+
+ const cancelChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
+  const notes=window.prompt("Motivo do cancelamento da proposta:","Proposta substituída após reavaliação humana.");
+  if(notes===null||notes.trim().length<5)throw new Error("Informe o motivo do cancelamento.");
+  await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}`,{
+   method:"PATCH",body:JSON.stringify({status:"CANCELLED",notes})
+  });
+  setMessage("Proposta cancelada; a recomendação permanece aceita.");
  });
  const finishExercise=(id:string)=>act(async()=>{
   await request("/api/v1/sidec/continuity/exercises/"+id+"/finish",{method:"POST",body:JSON.stringify({notes:finishNotes||null})});
@@ -340,7 +399,29 @@ export default function ContinuidadePage(){
     {item.resolutionNotes&&<p><strong>Fundamentação:</strong> {item.resolutionNotes}{item.resolvedByName?" · "+item.resolvedByName:""}</p>}
     <div className="headerActions">
      {item.status==="OPEN"&&<><button type="button" className="primaryButton" disabled={busy} onClick={()=>void updateRecommendation(item,"ACCEPTED")}>Aceitar para revisão</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void updateRecommendation(item,"DISMISSED")}>Descartar</button></>}
-     {item.status==="ACCEPTED"&&<><button type="button" className="primaryButton" disabled={busy} onClick={()=>void updateRecommendation(item,"IMPLEMENTED")}>Marcar implementada</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void updateRecommendation(item,"DISMISSED")}>Descartar</button></>}
+     {item.status==="ACCEPTED"&&(()=>{const activeProposal=changeProposals.find(p=>p.recommendationId===item.id&&p.status!=="CANCELLED");return activeProposal?<span><strong>Proposta:</strong> {activeProposal.status} · runbook v{activeProposal.targetPlanVersion}</span>:<>{runbook?.draft?<button type="button" className="primaryButton" disabled={busy} onClick={()=>void createChangeProposal(item)}>Criar proposta na revisão v{runbook.draft.version}</button>:<button type="button" className="primaryButton" disabled={busy} onClick={()=>void createRevision()}>Criar revisão para tratar</button>}<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void updateRecommendation(item,"DISMISSED")}>Descartar</button></>})()}
+    </div>
+   </article>)}</div>
+  </section>
+
+  <section style={{marginTop:18}}>
+   <h2>Propostas de mudança controlada</h2>
+   <p>A proposta liga uma recomendação aceita a uma revisão específica. O SIGDEC não altera o runbook automaticamente.</p>
+   <div className="dataGrid">{changeProposals.length===0?<div className="infoCard">Nenhuma proposta de mudança registrada.</div>:changeProposals.map(proposal=><article className={proposal.status==="PROPOSED"?"warningCard":"card"} key={proposal.id}>
+    <h2>{proposal.recommendationTitle}</h2>
+    <p><strong>{proposal.status}</strong> · revisão v{proposal.targetPlanVersion} · {proposal.targetPlanStatus}</p>
+    <p><strong>Recorrência:</strong> {proposal.recurrenceKey}</p>
+    <p>{proposal.proposalText}</p>
+    <p><strong>Evidências:</strong> {proposal.evidence.length}</p>
+    {proposal.evidence.slice(-5).map(ev=><p key={ev.id}><small>{ev.evidenceType} · {ev.title} · {ev.reference}</small></p>)}
+    {proposal.statusNotes&&<p><strong>Fundamentação:</strong> {proposal.statusNotes}</p>}
+    {proposal.appliedAt&&<p>Aplicada em {new Date(proposal.appliedAt).toLocaleString("pt-BR")}{proposal.appliedByName?" · "+proposal.appliedByName:""}</p>}
+    {proposal.verifiedAt&&<p>Verificada em {new Date(proposal.verifiedAt).toLocaleString("pt-BR")}{proposal.verifiedByName?" · "+proposal.verifiedByName:""}{proposal.verificationExerciseResult?" · exercício "+proposal.verificationExerciseResult:""}</p>}
+    <div className="headerActions">
+     {(proposal.status==="PROPOSED"||proposal.status==="APPLIED")&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void addChangeEvidence(proposal)}>Adicionar evidência</button>}
+     {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
+     {proposal.status==="PROPOSED"&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void cancelChangeProposal(proposal)}>Cancelar proposta</button>}
+     {proposal.status==="APPLIED"&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void verifyChangeProposal(proposal)}>Verificar por exercício/AAR</button>}
     </div>
    </article>)}</div>
   </section>
