@@ -165,9 +165,11 @@ export async function incidentRoutes(app: FastifyInstance) {
               i.neighborhood, i.latitude, i.longitude,
               i.created_at AS "createdAt", i.updated_at AS "updatedAt",
               t.name AS "typeName", t.group_name AS "typeGroup",
-              tm.code AS "teamCode", v.code AS "vehicleCode"
+              tm.code AS "teamCode", v.code AS "vehicleCode",
+              creator.matricula AS "createdByMatricula", creator.display_name AS "createdByName"
          FROM incidents i
          JOIN incident_types t ON t.id = i.incident_type_id
+         JOIN users creator ON creator.id = i.created_by
          LEFT JOIN teams tm ON tm.id = i.current_team_id
          LEFT JOIN vehicles v ON v.id = i.current_vehicle_id
         WHERE ${where.join(" AND ")}
@@ -303,9 +305,11 @@ export async function incidentRoutes(app: FastifyInstance) {
 
     const incident = await db.query(
       `SELECT i.*, t.name AS type_name, t.group_name AS type_group,
-              tm.code AS team_code, v.code AS vehicle_code
+              tm.code AS team_code, v.code AS vehicle_code,
+              creator.matricula AS created_by_matricula, creator.display_name AS created_by_name
          FROM incidents i
          JOIN incident_types t ON t.id = i.incident_type_id
+         JOIN users creator ON creator.id = i.created_by
          LEFT JOIN teams tm ON tm.id = i.current_team_id
          LEFT JOIN vehicles v ON v.id = i.current_vehicle_id
         WHERE i.id = $1 AND i.organization_id = $2`,
@@ -390,7 +394,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     const organizationId=requireOrganization(authFrom(request).organizationId);
     const result=await db.query(`SELECT a.id,a.incident_id AS "incidentId",i.protocol,a.action_type AS "actionType",a.title,a.description,
       a.started_at AS "startedAt",a.ended_at AS "endedAt",a.address_line AS "addressLine",a.neighborhood,a.latitude,a.longitude,
-      a.participants_count AS "participantsCount",u.display_name AS "createdByName"
+      a.participants_count AS "participantsCount",u.display_name AS "createdByName",u.matricula AS "createdByMatricula"
       FROM civil_defense_actions a
       LEFT JOIN incidents i ON i.id=a.incident_id
       JOIN users u ON u.id=a.created_by
@@ -421,7 +425,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     const organizationId=requireOrganization(authFrom(request).organizationId);
     const r=await db.query(`SELECT s.id,s.incident_id AS "incidentId",i.protocol,s.request_type AS "requestType",s.status,s.destination,s.justification,
       s.requested_items AS "requestedItems",s.external_protocol AS "externalProtocol",s.submitted_at AS "submittedAt",s.resolved_at AS "resolvedAt",
-      s.resolution_notes AS "resolutionNotes",s.created_at AS "createdAt",u.display_name AS "createdByName"
+      s.resolution_notes AS "resolutionNotes",s.created_at AS "createdAt",u.display_name AS "createdByName",u.matricula AS "createdByMatricula"
       FROM operational_support_requests s
       LEFT JOIN incidents i ON i.id=s.incident_id JOIN users u ON u.id=s.created_by
       WHERE s.organization_id=$1 ORDER BY CASE s.status WHEN 'SUBMITTED' THEN 1 WHEN 'IN_ANALYSIS' THEN 2 WHEN 'DRAFT' THEN 3 ELSE 4 END,s.created_at DESC LIMIT 300`,[organizationId]);
