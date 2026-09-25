@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import argon2 from "argon2";
+import QRCode from "qrcode";
 import { z } from "zod";
 import {
   authFrom,
@@ -13,6 +14,7 @@ import {
 } from "../auth.js";
 import { db } from "../db.js";
 import { isMailConfigured, sendPasswordResetEmail } from "../mail.js";
+import { challengeHash, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, newChallengeToken, recoveryCode, recoveryCodeHash, verifyTotp } from "../lib/mfa.js";
 
 const loginSchema = z.object({
   matricula: z.string().min(1).max(32),
@@ -44,6 +46,12 @@ const resetPasswordSchema = z.object({
   newPassword: strongPasswordSchema
 });
 
+const mfaChallengeSchema=z.object({challengeToken:z.string().min(40).max(256)});
+const mfaCodeSchema=z.object({
+ challengeToken:z.string().min(40).max(256),
+ code:z.string().trim().min(6).max(40)
+});
+
 async function audit(params: {
   userId?: string | null;
   action: string;
@@ -65,6 +73,62 @@ async function audit(params: {
       JSON.stringify(params.metadata ?? {})
     ]
   );
+}
+
+async function issueMfaChallenge(input:{userId:string;purpose:"SETUP"|"LOGIN";ip?:string;userAgent?:string}){
+ const token=newChallengeToken();
+ const expiresAt=new Date(Date.now()+10*60*1000);
+ await db.query(`UPDATE mfa_login_challenges SET used_at=now()
+  WHERE user_id=$1 AND used_at IS NULL`,[input.userId]);
+ await db.query(`INSERT INTO mfa_login_challenges(user_id,token_hash,purpose,expires_at,requested_ip,user_agent)
+  VALUES($1,$2,$3,$4,$5,$6)`,[
+  input.userId,challengeHash(token),input.purpose,expiresAt,input.ip??null,input.userAgent??null
+ ]);
+ return {token,expiresAt};
+}
+
+async function loadMfaChallenge(token:string,purpose:"SETUP"|"LOGIN"){
+ const result=await db.query(`SELECT c.id,c.user_id AS "userId",c.purpose,c.attempts,c.expires_at AS "expiresAt",
+   u.organization_id AS "organizationId",u.matricula,u.display_name AS "displayName",u.email,
+   u.job_title AS "jobTitle",u.department,u.must_change_password AS "mustChangePassword",
+   u.mfa_required AS "mfaRequired",u.mfa_enabled AS "mfaEnabled",
+   m.secret_ciphertext AS "secretCiphertext",m.verified_at AS "mfaVerifiedAt"
+  FROM mfa_login_challenges c
+  JOIN users u ON u.id=c.user_id AND u.active=true
+  LEFT JOIN mfa_totp_credentials m ON m.user_id=u.id
+  WHERE c.token_hash=$1 AND c.purpose=$2 AND c.used_at IS NULL AND c.expires_at>now()
+  LIMIT 1`,[challengeHash(token),purpose]);
+ return result.rows[0] as any??null;
+}
+
+async function failMfaChallenge(id:string){
+ await db.query(`UPDATE mfa_login_challenges
+  SET attempts=attempts+1,used_at=CASE WHEN attempts+1>=5 THEN now() ELSE used_at END
+  WHERE id=$1`,[id]);
+}
+
+async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recoveryCodes?:string[]}){
+ const access=await loadAccess(String(input.challenge.userId));
+ const session=await createSession({
+  userId:String(input.challenge.userId),organizationId:input.challenge.organizationId??null,
+  roles:access.roles,permissions:access.permissions,ip:input.request.ip,
+  userAgent:input.request.headers["user-agent"],mfaVerified:true
+ });
+ setSessionCookie(input.reply,session.token,session.expiresAt);
+ await audit({
+  userId:String(input.challenge.userId),action:"auth.login_success",entityId:String(input.challenge.userId),
+  ip:input.request.ip,userAgent:input.request.headers["user-agent"],
+  metadata:{sessionId:session.sessionId,mfa:true}
+ });
+ return {
+  user:{
+   id:input.challenge.userId,matricula:input.challenge.matricula,displayName:input.challenge.displayName,
+   email:input.challenge.email,jobTitle:input.challenge.jobTitle,department:input.challenge.department,
+   roles:access.roles,permissions:access.permissions,mustChangePassword:Boolean(input.challenge.mustChangePassword),
+   mfaRequired:true,mfaEnabled:true
+  },
+  recoveryCodes:input.recoveryCodes
+ };
 }
 
 export async function authRoutes(app: FastifyInstance) {
