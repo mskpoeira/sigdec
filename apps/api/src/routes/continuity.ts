@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { authFrom, requirePermission } from "../auth.js";
+import { authFrom, hasLivePermission, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSidecRunbookActivation } from "../lib/sidec-runbook.js";
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
@@ -370,7 +370,7 @@ async function activeApprovalDelegation(org:string,delegateUserId:string){
    d.valid_from AS "validFrom",d.valid_until AS "validUntil",d.reason,
    u.display_name AS "delegatorName",u.matricula AS "delegatorMatricula"
   FROM sidec_continuity_approval_delegations d
-  JOIN users u ON u.id=d.delegator_user_id
+  JOIN users u ON u.id=d.delegator_user_id AND u.active=true AND u.organization_id=d.organization_id
   JOIN user_roles ur ON ur.user_id=d.delegator_user_id
   JOIN role_permissions rp ON rp.role_id=ur.role_id
   JOIN permissions p ON p.id=rp.permission_id AND p.code='sidec_continuity_change.approve'
@@ -1443,13 +1443,19 @@ export async function continuityRoutes(app:FastifyInstance){
   const delegate=await db.query(`SELECT id,display_name AS "displayName",matricula FROM users
     WHERE id=$1 AND organization_id=$2 AND active=true`,[parsed.data.delegateUserId,org]);
   if(!delegate.rows[0])return reply.code(404).send({error:"DELEGATE_NOT_FOUND"});
+  if(!(await hasLivePermission(parsed.data.delegateUserId,"sidec_continuity.read"))){
+   return reply.code(409).send({error:"DELEGATE_CONTINUITY_READ_REQUIRED"});
+  }
   const validFrom=parsed.data.validFrom??new Date(),validUntil=parsed.data.validUntil;
+  if(validUntil.getTime()<=Date.now())return reply.code(400).send({error:"DELEGATION_MUST_END_IN_FUTURE"});
   if(validUntil.getTime()<=validFrom.getTime())return reply.code(400).send({error:"INVALID_DELEGATION_WINDOW"});
   if(validUntil.getTime()-validFrom.getTime()>90*24*60*60*1000)return reply.code(400).send({error:"DELEGATION_MAX_90_DAYS"});
-  const overlap=await db.query(`SELECT id FROM sidec_continuity_approval_delegations
-    WHERE organization_id=$1 AND delegator_user_id=$2 AND delegate_user_id=$3 AND revoked_at IS NULL
-      AND valid_from<$5 AND valid_until>$4 LIMIT 1`,[org,auth.userId,parsed.data.delegateUserId,validFrom,validUntil]);
-  if(overlap.rows[0])return reply.code(409).send({error:"OVERLAPPING_DELEGATION",delegationId:overlap.rows[0].id});
+  const overlap=await db.query(`SELECT id,delegator_user_id AS "delegatorUserId" FROM sidec_continuity_approval_delegations
+    WHERE organization_id=$1 AND delegate_user_id=$2 AND revoked_at IS NULL
+      AND valid_from<$4 AND valid_until>$3 LIMIT 1`,[org,parsed.data.delegateUserId,validFrom,validUntil]);
+  if(overlap.rows[0])return reply.code(409).send({
+   error:"DELEGATE_AUTHORITY_OVERLAP",delegationId:overlap.rows[0].id,delegatorUserId:overlap.rows[0].delegatorUserId
+  });
   const created=await db.query(`INSERT INTO sidec_continuity_approval_delegations(
      organization_id,delegator_user_id,delegate_user_id,valid_from,valid_until,reason,created_by
     ) VALUES($1,$2,$3,$4,$5,$6,$2)
@@ -1471,7 +1477,7 @@ export async function continuityRoutes(app:FastifyInstance){
   const item=current.rows[0] as any;
   if(!item)return reply.code(404).send({error:"DELEGATION_NOT_FOUND"});
   if(item.revokedAt)return reply.code(409).send({error:"DELEGATION_ALREADY_REVOKED"});
-  const master=auth.permissions.includes("system.master");
+  const master=await hasLivePermission(auth.userId,"system.master");
   if(String(item.delegatorUserId)!==String(auth.userId)&&!master)return reply.code(403).send({error:"FORBIDDEN"});
   const updated=await db.query(`UPDATE sidec_continuity_approval_delegations
     SET revoked_at=now(),revoked_by=$1 WHERE id=$2 AND organization_id=$3
@@ -1744,7 +1750,7 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!proposal)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
   if(proposal.severity!=="CRITICAL")return reply.code(409).send({error:"CRITICAL_PROPOSAL_REQUIRED"});
   if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
-  const directAuthority=auth.permissions.includes("sidec_continuity_change.approve")||auth.permissions.includes("system.master");
+  const directAuthority=await hasLivePermission(auth.userId,"sidec_continuity_change.approve");
   const delegation=directAuthority?null:await activeApprovalDelegation(org,auth.userId);
   if(!directAuthority&&!delegation)return reply.code(403).send({error:"APPROVAL_AUTHORITY_REQUIRED"});
   const authorityUserId=String(delegation?.delegatorUserId??auth.userId);
@@ -2108,6 +2114,7 @@ export async function continuityRoutes(app:FastifyInstance){
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=reportRetentionExtensionSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.retainUntil.getTime()<=Date.now())return reply.code(400).send({error:"RETENTION_MUST_BE_FUTURE"});
   const result=await db.query(`SELECT a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",
     a.object_lock_mode AS "objectLockMode",a.retain_until AS "receiptRetainUntil",a.legal_hold AS "receiptLegalHold",
     a.content_hash AS "contentHash",v.retain_until AS "verifiedRetainUntil",v.legal_hold AS "verifiedLegalHold"
