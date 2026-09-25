@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -306,8 +307,8 @@ export default function VistoriasPage() {
               </p>
               <p>
                 {item.scheduledAt
-                  ? `Agendada para ${new Date(item.scheduledAt).toLocaleString("pt-BR")}`
-                  : `Criada em ${new Date(item.createdAt).toLocaleString("pt-BR")}`}
+                  ? `Agendada para ${formatDateTimeBR(item.scheduledAt)}`
+                  : `Criada em ${formatDateTimeBR(item.createdAt)}`}
               </p>
               {item.findings && <p><strong>Conclusão:</strong> {item.findings}</p>}
               {item.recommendations && <p><strong>Providências:</strong> {item.recommendations}</p>}
