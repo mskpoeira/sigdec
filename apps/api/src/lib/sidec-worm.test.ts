@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { wormMode,wormObjectKey,wormReplicaBucket,wormReplicaEnabled,wormReplicaMode } from "./sidec-worm.js";
+import { wormContinuityChangeReportKey,wormMode,wormObjectKey,wormReplicaBucket,wormReplicaEnabled,wormReplicaMode } from "./sidec-worm.js";
 
 test("chave WORM deriva somente do SHA-256",()=>{
  const hash="a".repeat(64);
  assert.equal(wormObjectKey(hash),`sidec/aa/${hash}.zip`);
  assert.throws(()=>wormObjectKey("abc"));
+});
+
+test("relatorio de mudanca usa namespace WORM proprio",()=>{
+ const hash="b".repeat(64);
+ assert.equal(wormContinuityChangeReportKey(hash),`sidec/continuity-change-reports/bb/${hash}.pdf`);
+ assert.throws(()=>wormContinuityChangeReportKey("abc"));
 });
 
 test("modo WORM aceita apenas governance ou compliance",()=>{

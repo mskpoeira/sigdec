@@ -46,6 +46,11 @@ export function wormObjectKey(artifactHash:string){
  return `sidec/${artifactHash.slice(0,2)}/${artifactHash}.zip`;
 }
 
+export function wormContinuityChangeReportKey(reportHash:string){
+ if(!/^[a-f0-9]{64}$/.test(reportHash))throw new Error("Hash de relatório inválido para chave WORM.");
+ return `sidec/continuity-change-reports/${reportHash.slice(0,2)}/${reportHash}.pdf`;
+}
+
 function destinationConfig(destination:WormDestination){
  if(destination==="PRIMARY"){
   return {
@@ -76,32 +81,42 @@ function client(destination:WormDestination){
  });
 }
 
-async function archiveAt(destination:WormDestination,input:{
- content:Buffer;artifactHash:string;manifestHash:string;fileName:string;retention:WormRetention;
+async function archiveObjectAt(destination:WormDestination,input:{
+ content:Buffer;contentHash:string;key:string;contentType:string;metadata:Record<string,string>;retention:WormRetention;
 }){
  const observed=createHash("sha256").update(input.content).digest("hex");
- if(observed!==input.artifactHash)throw Object.assign(new Error("Hash do artefato local divergente antes do arquivo WORM."),{code:"WORM_LOCAL_HASH_MISMATCH"});
+ if(observed!==input.contentHash)throw Object.assign(new Error("Hash do artefato local divergente antes do arquivo WORM."),{code:"WORM_LOCAL_HASH_MISMATCH"});
  if(!input.retention.retainUntil&&!input.retention.legalHold){
   throw Object.assign(new Error("Defina retainUntil ou legal hold antes do arquivamento WORM."),{code:"WORM_RETENTION_REQUIRED"});
  }
- const config=destinationConfig(destination),key=wormObjectKey(input.artifactHash);
+ const config=destinationConfig(destination);
  const retainUntil=input.retention.retainUntil??undefined;
  const mode=retainUntil?config.mode:undefined;
  const result=await client(destination).send(new PutObjectCommand({
-  Bucket:config.bucket,Key:key,Body:input.content,ContentType:"application/zip",ContentLength:input.content.length,
-  Metadata:{
-   "sigdec-sha256":input.artifactHash,
-   "sigdec-manifest-sha256":input.manifestHash,
-   "sigdec-file-name":Buffer.from(input.fileName,"utf8").toString("base64url"),
-   "sigdec-destination":destination.toLowerCase()
-  },
+  Bucket:config.bucket,Key:input.key,Body:input.content,ContentType:input.contentType,ContentLength:input.content.length,
+  Metadata:{...input.metadata,"sigdec-destination":destination.toLowerCase()},
   ObjectLockMode:mode,ObjectLockRetainUntilDate:retainUntil,
   ObjectLockLegalHoldStatus:input.retention.legalHold?"ON":undefined
  }));
  return {
-  destination,bucket:config.bucket,key,versionId:result.VersionId??null,etag:result.ETag??null,
+  destination,bucket:config.bucket,key:input.key,versionId:result.VersionId??null,etag:result.ETag??null,
   storageClass:"STANDARD",objectLockMode:mode??null,retainUntil:retainUntil??null,legalHold:input.retention.legalHold
  };
+}
+
+async function archiveAt(destination:WormDestination,input:{
+ content:Buffer;artifactHash:string;manifestHash:string;fileName:string;retention:WormRetention;
+}){
+ return archiveObjectAt(destination,{
+  content:input.content,contentHash:input.artifactHash,key:wormObjectKey(input.artifactHash),contentType:"application/zip",
+  metadata:{
+   "sigdec-sha256":input.artifactHash,
+   "sigdec-manifest-sha256":input.manifestHash,
+   "sigdec-file-name":Buffer.from(input.fileName,"utf8").toString("base64url"),
+   "sigdec-artifact-kind":"sidec-package"
+  },
+  retention:input.retention
+ });
 }
 
 export function archiveSidecArtifact(input:{content:Buffer;artifactHash:string;manifestHash:string;fileName:string;retention:WormRetention}){
@@ -109,6 +124,21 @@ export function archiveSidecArtifact(input:{content:Buffer;artifactHash:string;m
 }
 export function archiveSidecReplica(input:{content:Buffer;artifactHash:string;manifestHash:string;fileName:string;retention:WormRetention}){
  return archiveAt("REPLICA",input);
+}
+
+export function archiveSidecContinuityChangeReport(input:{
+ content:Buffer;reportHash:string;proposalId:string;fileName:string;retention:WormRetention;
+}){
+ return archiveObjectAt("PRIMARY",{
+  content:input.content,contentHash:input.reportHash,key:wormContinuityChangeReportKey(input.reportHash),contentType:"application/pdf",
+  metadata:{
+   "sigdec-sha256":input.reportHash,
+   "sigdec-proposal-id":input.proposalId,
+   "sigdec-file-name":Buffer.from(input.fileName,"utf8").toString("base64url"),
+   "sigdec-artifact-kind":"continuity-change-report"
+  },
+  retention:input.retention
+ });
 }
 
 async function extendRetentionAt(destination:WormDestination,input:{

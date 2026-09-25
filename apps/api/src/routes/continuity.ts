@@ -7,6 +7,7 @@ import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSid
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
 import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
+import { archiveSidecContinuityChangeReport,verifySidecArchive } from "../lib/sidec-worm.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
@@ -123,6 +124,12 @@ const changeEvidenceSchema=z.object({
 const changeApprovalSchema=z.object({
  decision:z.enum(["APPROVED","REJECTED"]),
  notes:z.string().trim().min(5).max(8000)
+});
+
+const changePolicySchema=z.object({
+ approvalValidHours:z.number().int().min(1).max(2160),
+ reportWormRetentionDays:z.number().int().min(1).max(36500).nullable(),
+ reportWormLegalHold:z.boolean()
 });
 
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
@@ -293,6 +300,37 @@ async function buildChangeEffectivenessSnapshot(org:string,basePlanId:string|nul
  return {outcome,baseline:exerciseEffectivenessView(baseline),verification:exerciseEffectivenessView(verification),evaluatedAt:new Date().toISOString()};
 }
 
+async function loadChangePolicy(org:string){
+ const result=await db.query(`SELECT approval_valid_hours AS "approvalValidHours",
+   report_worm_retention_days AS "reportWormRetentionDays",report_worm_legal_hold AS "reportWormLegalHold",
+   updated_at AS "updatedAt"
+  FROM sidec_continuity_change_policies WHERE organization_id=$1`,[org]);
+ return result.rows[0]??{
+  approvalValidHours:168,
+  reportWormRetentionDays:null,
+  reportWormLegalHold:false,
+  updatedAt:null
+ };
+}
+
+async function recordChangeReportArchiveVerification(input:{
+ org:string;proposalId:string;source:"ARCHIVE"|"MANUAL"|"SCHEDULED";
+ bucket:string;key:string;versionId?:string|null;expectedHash:string;
+}){
+ const verification=await verifySidecArchive({
+  bucket:input.bucket,key:input.key,versionId:input.versionId,expectedHash:input.expectedHash
+ });
+ await db.query(`INSERT INTO sidec_continuity_change_report_archive_verifications(
+   proposal_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,
+   retain_until,legal_hold,verification_source,error_message
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[
+   input.proposalId,input.org,input.expectedHash,verification.observedHash,verification.existsRemote,
+   verification.hashValid,verification.objectLockMode,verification.retainUntil,verification.legalHold,
+   input.source,verification.errorMessage
+  ]);
+ return verification;
+}
+
 async function loadChangeReportPayload(org:string,id:string){
  const result=await db.query(`SELECT cp.id,cp.status,cp.proposal_text AS "proposalText",cp.status_notes AS "statusNotes",
    cp.created_at AS "createdAt",cp.applied_at AS "appliedAt",cp.verified_at AS "verifiedAt",
@@ -311,6 +349,7 @@ async function loadChangeReportPayload(org:string,id:string){
     WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence,
    COALESCE((SELECT json_agg(json_build_object(
      'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
+     'validUntil',ca.valid_until,'revalidatedAt',ca.revalidated_at,
      'decidedById',ca.decided_by,'decidedByName',cu.display_name
    ) ORDER BY ca.decided_at)
     FROM sidec_continuity_change_approvals ca
@@ -485,6 +524,27 @@ export async function evaluateContinuityActionAlerts(organizationId?:string){
   if(inserted.rows[0])created++;
  }
  return {created,dueSoonHours};
+}
+
+export async function evaluateContinuityChangeReportArchives(organizationId?:string){
+ const params:unknown[]=[];
+ let where="";
+ if(organizationId){params.push(organizationId);where="WHERE a.organization_id=$1";}
+ const rows=await db.query(`SELECT a.proposal_id AS "proposalId",a.organization_id AS "organizationId",
+   a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",a.content_hash AS "contentHash"
+  FROM sidec_continuity_change_report_archives a ${where}
+  ORDER BY a.archived_at ASC LIMIT 500`,params);
+ let checked=0,failed=0;
+ for(const row of rows.rows as Array<any>){
+  const result=await recordChangeReportArchiveVerification({
+   org:String(row.organizationId),proposalId:String(row.proposalId),source:"SCHEDULED",
+   bucket:String(row.bucket),key:String(row.objectKey),
+   versionId:row.versionId?String(row.versionId):null,expectedHash:String(row.contentHash)
+  });
+  checked++;
+  if(!result.existsRemote||result.hashValid!==true)failed++;
+ }
+ return {checked,failed};
 }
 
 export async function continuityRoutes(app:FastifyInstance){
@@ -1136,6 +1196,36 @@ export async function continuityRoutes(app:FastifyInstance){
   return {items:[...groups.entries()].map(([recurrenceKey,history])=>({recurrenceKey,history}))};
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/change-policy",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  return loadChangePolicy(org);
+ });
+
+ app.patch("/api/v1/sidec/continuity/runbook/change-policy",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=changePolicySchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const before=await loadChangePolicy(org);
+  const updated=await db.query(`INSERT INTO sidec_continuity_change_policies(
+     organization_id,approval_valid_hours,report_worm_retention_days,report_worm_legal_hold,updated_by
+    ) VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(organization_id) DO UPDATE SET
+      approval_valid_hours=EXCLUDED.approval_valid_hours,
+      report_worm_retention_days=EXCLUDED.report_worm_retention_days,
+      report_worm_legal_hold=EXCLUDED.report_worm_legal_hold,
+      updated_by=EXCLUDED.updated_by,updated_at=now()
+    RETURNING approval_valid_hours AS "approvalValidHours",
+      report_worm_retention_days AS "reportWormRetentionDays",
+      report_worm_legal_hold AS "reportWormLegalHold",updated_at AS "updatedAt"`,[
+     org,parsed.data.approvalValidHours,parsed.data.reportWormRetentionDays,parsed.data.reportWormLegalHold,auth.userId
+    ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.change_policy_update','sidec_continuity_change_policy',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,org,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(updated.rows[0])
+    ]);
+  return updated.rows[0];
+ });
+
  app.get("/api/v1/sidec/continuity/runbook/change-metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const summary=await db.query(`SELECT
@@ -1146,6 +1236,8 @@ export async function continuityRoutes(app:FastifyInstance){
     count(*) FILTER(WHERE cp.status='CANCELLED')::int AS cancelled,
     count(*) FILTER(WHERE rr.severity='CRITICAL')::int AS critical,
     count(*) FILTER(WHERE seal.proposal_id IS NOT NULL)::int AS sealed,
+    count(*) FILTER(WHERE archive.proposal_id IS NOT NULL)::int AS archived,
+    count(*) FILTER(WHERE archive.proposal_id IS NOT NULL AND av.exists_remote=true AND av.hash_valid=true)::int AS "archiveHealthy",
     count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
     count(*) FILTER(WHERE cp.effectiveness_outcome='STABLE')::int AS stable,
     count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed,
@@ -1154,12 +1246,25 @@ export async function continuityRoutes(app:FastifyInstance){
     round((100.0*count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')/
       NULLIF(count(*) FILTER(WHERE cp.effectiveness_outcome IN ('IMPROVED','STABLE','REGRESSED')),0))::numeric,1) AS "improvedRate",
     round(avg(EXTRACT(EPOCH FROM (cp.applied_at-cp.created_at))/3600.0) FILTER(WHERE cp.applied_at IS NOT NULL)::numeric,1) AS "avgApplyHours",
-    round(avg(EXTRACT(EPOCH FROM (cp.verified_at-cp.applied_at))/3600.0) FILTER(WHERE cp.verified_at IS NOT NULL AND cp.applied_at IS NOT NULL)::numeric,1) AS "avgVerificationHours"
+    round(avg(EXTRACT(EPOCH FROM (cp.verified_at-cp.applied_at))/3600.0) FILTER(WHERE cp.verified_at IS NOT NULL AND cp.applied_at IS NOT NULL)::numeric,1) AS "avgVerificationHours",
+    (SELECT count(*)::int FROM sidec_continuity_change_approvals ca
+      JOIN sidec_continuity_change_proposals x ON x.id=ca.proposal_id
+      WHERE x.organization_id=$1 AND x.status='PROPOSED' AND ca.decision='APPROVED'
+       AND ca.valid_until>now() AND ca.valid_until<=now()+interval '24 hours') AS "approvalsExpiring24h",
+    (SELECT count(*)::int FROM sidec_continuity_change_approvals ca
+      JOIN sidec_continuity_change_proposals x ON x.id=ca.proposal_id
+      WHERE x.organization_id=$1 AND x.status='PROPOSED' AND ca.decision='APPROVED'
+       AND (ca.valid_until IS NULL OR ca.valid_until<=now())) AS "approvalsExpired"
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
    LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
+   LEFT JOIN sidec_continuity_change_report_archives archive ON archive.proposal_id=cp.id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid FROM sidec_continuity_change_report_archive_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
+   ) av ON true
    WHERE cp.organization_id=$1`,[org]);
-  const [bySeverity,byMonth]=await Promise.all([
+  const [bySeverity,byMonth,byRecurrence]=await Promise.all([
    db.query(`SELECT rr.severity,count(*)::int AS total,
       count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
       count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
@@ -1176,9 +1281,19 @@ export async function continuityRoutes(app:FastifyInstance){
      FROM sidec_continuity_change_proposals cp
      WHERE cp.organization_id=$1 AND cp.created_at>=date_trunc('month',now())-interval '11 months'
      GROUP BY date_trunc('month',cp.created_at)
-     ORDER BY date_trunc('month',cp.created_at)`,[org])
+     ORDER BY date_trunc('month',cp.created_at)`,[org]),
+   db.query(`SELECT rr.recurrence_key AS "recurrenceKey",count(*)::int AS proposals,
+      count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+      count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed,
+      max(cp.created_at) AS "lastProposalAt"
+     FROM sidec_continuity_change_proposals cp
+     JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+     WHERE cp.organization_id=$1
+     GROUP BY rr.recurrence_key
+     ORDER BY count(*) DESC,max(cp.created_at) DESC LIMIT 20`,[org])
   ]);
-  return {summary:summary.rows[0],bySeverity:bySeverity.rows,byMonth:byMonth.rows};
+  return {summary:summary.rows[0],bySeverity:bySeverity.rows,byMonth:byMonth.rows,byRecurrence:byRecurrence.rows};
  });
 
  app.get("/api/v1/sidec/continuity/runbook/recommendations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
@@ -1213,6 +1328,11 @@ export async function continuityRoutes(app:FastifyInstance){
     creator.display_name AS "createdByName",applier.display_name AS "appliedByName",verifier.display_name AS "verifiedByName",
     seal.report_hash AS "reportHash",seal.key_id AS "reportSealKeyId",seal.public_key_fingerprint AS "reportSealFingerprint",
     seal.sealed_at AS "reportSealedAt",sealer.display_name AS "reportSealedByName",
+    archive.bucket AS "reportArchiveBucket",archive.object_key AS "reportArchiveObjectKey",
+    archive.retain_until AS "reportArchiveRetainUntil",archive.legal_hold AS "reportArchiveLegalHold",
+    archive.archived_at AS "reportArchivedAt",
+    av.exists_remote AS "reportArchiveExistsRemote",av.hash_valid AS "reportArchiveHashValid",
+    av.verified_at AS "reportArchiveVerifiedAt",av.error_message AS "reportArchiveErrorMessage",
     COALESCE((SELECT json_agg(json_build_object(
       'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
       'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
@@ -1227,6 +1347,7 @@ export async function continuityRoutes(app:FastifyInstance){
      FROM sidec_continuity_change_impacts ci WHERE ci.proposal_id=cp.id),'[]'::json) AS impacts,
     COALESCE((SELECT json_agg(json_build_object(
       'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
+      'validUntil',ca.valid_until,'revalidatedAt',ca.revalidated_at,
       'decidedById',ca.decided_by,'decidedByName',au.display_name
     ) ORDER BY ca.decided_at)
      FROM sidec_continuity_change_approvals ca
@@ -1243,16 +1364,27 @@ export async function continuityRoutes(app:FastifyInstance){
    LEFT JOIN users verifier ON verifier.id=cp.verified_by
    LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
    LEFT JOIN users sealer ON sealer.id=seal.sealed_by
+   LEFT JOIN sidec_continuity_change_report_archives archive ON archive.proposal_id=cp.id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid,verified_at,error_message
+    FROM sidec_continuity_change_report_archive_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
+   ) av ON true
    WHERE cp.organization_id=$1
    ORDER BY CASE cp.status WHEN 'PROPOSED' THEN 1 WHEN 'APPLIED' THEN 2 WHEN 'VERIFIED' THEN 3 ELSE 4 END,cp.created_at DESC`,[org]);
   const items=[];
   for(const row of r.rows as Array<any>){
    const diff=row.diffSnapshot??await buildRunbookDiff(org,String(row.targetPlanId),row.basePlanId?String(row.basePlanId):null);
    const approvals=Array.isArray(row.approvals)?row.approvals:[];
-   const approvedCount=approvals.filter((item:any)=>item.decision==="APPROVED").length;
+   const now=Date.now();
+   const approvedCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&item.validUntil&&new Date(item.validUntil).getTime()>now).length;
+   const expiredApprovalCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=now)).length;
    const rejectedCount=approvals.filter((item:any)=>item.decision==="REJECTED").length;
-   items.push({...row,approvedCount,rejectedCount,criticalApprovalSatisfied:row.recommendationSeverity!=="CRITICAL"||(approvedCount>=2&&rejectedCount===0),
-    reportSealed:Boolean(row.reportHash),diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
+   items.push({...row,approvedCount,expiredApprovalCount,rejectedCount,
+    criticalApprovalSatisfied:row.recommendationSeverity!=="CRITICAL"||(approvedCount>=2&&rejectedCount===0),
+    reportSealed:Boolean(row.reportHash),reportArchived:Boolean(row.reportArchiveObjectKey),
+    reportArchiveHealthy:Boolean(row.reportArchiveExistsRemote&&row.reportArchiveHashValid),
+    diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
 
   }
   return {items};
@@ -1322,16 +1454,28 @@ export async function continuityRoutes(app:FastifyInstance){
   if(proposal.severity!=="CRITICAL")return reply.code(409).send({error:"CRITICAL_PROPOSAL_REQUIRED"});
   if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
   if(String(proposal.createdById)===String(auth.userId))return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
-  const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(proposal_id,decision,notes,decided_by)
-    VALUES($1,$2,$3,$4)
+  const policy=await loadChangePolicy(org);
+  const existingDecision=await db.query(`SELECT decision FROM sidec_continuity_change_approvals
+    WHERE proposal_id=$1 AND decided_by=$2`,[id,auth.userId]);
+  const revalidating=existingDecision.rows[0]?.decision==="APPROVED"&&parsed.data.decision==="APPROVED";
+  const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(
+     proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by
+    ) VALUES(
+     $1,$2,$3,$4,
+     CASE WHEN $2='APPROVED' THEN now()+($5::text||' hours')::interval ELSE NULL END,
+     CASE WHEN $6 THEN now() ELSE NULL END,
+     CASE WHEN $6 THEN $4 ELSE NULL END
+    )
     ON CONFLICT(proposal_id,decided_by) DO UPDATE
-      SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),updated_at=now()
-    RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt"`,[
-     id,parsed.data.decision,parsed.data.notes,auth.userId
+      SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),valid_until=EXCLUDED.valid_until,
+        revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,updated_at=now()
+    RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt",
+      valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
+     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating
     ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
     VALUES($1,'sidec_continuity.change_approval','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
-     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),JSON.stringify({decision:parsed.data.decision})
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),JSON.stringify({decision:parsed.data.decision,approvalValidHours:policy.approvalValidHours,revalidating})
     ]);
   return decision.rows[0];
  });
@@ -1372,12 +1516,13 @@ export async function continuityRoutes(app:FastifyInstance){
    if(Number(evidence.rows[0]?.count??0)<1)return reply.code(409).send({error:"CHANGE_EVIDENCE_REQUIRED"});
    if(current.recommendation_severity==="CRITICAL"){
     const approvalState=await db.query(`SELECT
-      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2)::int AS approved,
+      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND valid_until>now())::int AS approved,
+      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND (valid_until IS NULL OR valid_until<=now()))::int AS expired,
       count(*) FILTER(WHERE decision='REJECTED')::int AS rejected
      FROM sidec_continuity_change_approvals WHERE proposal_id=$1`,[id,current.created_by]);
-    const approved=Number(approvalState.rows[0]?.approved??0),rejected=Number(approvalState.rows[0]?.rejected??0);
+    const approved=Number(approvalState.rows[0]?.approved??0),expired=Number(approvalState.rows[0]?.expired??0),rejected=Number(approvalState.rows[0]?.rejected??0);
     if(rejected>0)return reply.code(409).send({error:"CRITICAL_CHANGE_REJECTED",rejected});
-    if(approved<2)return reply.code(409).send({error:"CRITICAL_CHANGE_DUAL_APPROVAL_REQUIRED",approved,required:2});
+    if(approved<2)return reply.code(409).send({error:"CRITICAL_CHANGE_DUAL_APPROVAL_REQUIRED",approved,expired,required:2});
    }
    const diff=await buildRunbookDiff(org,String(current.target_plan_id),current.base_plan_id?String(current.base_plan_id):null);
    if(!diff)return reply.code(409).send({error:"RUNBOOK_DIFF_UNAVAILABLE"});
@@ -1525,6 +1670,80 @@ export async function continuityRoutes(app:FastifyInstance){
    publicKeyFingerprint:row.publicKeyFingerprint,sealedAt:row.sealedAt,sealedByName:row.sealedByName,
    hashValid,signatureValid,valid:hashValid&&signatureValid
   };
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const existing=await db.query(`SELECT proposal_id AS "proposalId",bucket,object_key AS "objectKey",version_id AS "versionId",
+    object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",legal_hold AS "legalHold",
+    content_hash AS "contentHash",archived_at AS "archivedAt"
+   FROM sidec_continuity_change_report_archives WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  if(existing.rows[0])return existing.rows[0];
+
+  const seal=await db.query(`SELECT report_hash AS "reportHash",report_bytes AS "reportBytes"
+    FROM sidec_continuity_change_report_seals WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  const item=seal.rows[0] as any;
+  if(!item)return reply.code(409).send({error:"SEALED_REPORT_REQUIRED"});
+  const observedHash=createHash("sha256").update(item.reportBytes as Buffer).digest("hex");
+  if(observedHash!==item.reportHash)return reply.code(409).send({error:"SEALED_REPORT_HASH_MISMATCH",expected:item.reportHash,observed:observedHash});
+
+  const policy=await loadChangePolicy(org);
+  if(!policy.reportWormRetentionDays&&!policy.reportWormLegalHold){
+   return reply.code(409).send({error:"WORM_REPORT_RETENTION_POLICY_REQUIRED"});
+  }
+  const retainUntil=policy.reportWormRetentionDays
+   ?new Date(Date.now()+Number(policy.reportWormRetentionDays)*24*60*60*1000):null;
+  const archived=await archiveSidecContinuityChangeReport({
+   content:item.reportBytes as Buffer,reportHash:String(item.reportHash),proposalId:id,
+   fileName:`SIGDEC-continuity-change-${id}-sealed.pdf`,
+   retention:{retainUntil,legalHold:Boolean(policy.reportWormLegalHold)}
+  });
+  const inserted=await db.query(`INSERT INTO sidec_continuity_change_report_archives(
+     proposal_id,organization_id,bucket,object_key,version_id,etag,storage_class,object_lock_mode,
+     retain_until,legal_hold,content_hash,archived_by
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    ON CONFLICT(proposal_id) DO NOTHING
+    RETURNING proposal_id AS "proposalId",bucket,object_key AS "objectKey",version_id AS "versionId",
+      etag,storage_class AS "storageClass",object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",
+      legal_hold AS "legalHold",content_hash AS "contentHash",archived_at AS "archivedAt"`,[
+     id,org,archived.bucket,archived.key,archived.versionId,archived.etag,archived.storageClass,
+     archived.objectLockMode,archived.retainUntil,archived.legalHold,item.reportHash,auth.userId
+    ]);
+  const receipt=inserted.rows[0]??(await db.query(`SELECT proposal_id AS "proposalId",bucket,object_key AS "objectKey",
+    version_id AS "versionId",etag,storage_class AS "storageClass",object_lock_mode AS "objectLockMode",
+    retain_until AS "retainUntil",legal_hold AS "legalHold",content_hash AS "contentHash",archived_at AS "archivedAt"
+   FROM sidec_continuity_change_report_archives WHERE proposal_id=$1 AND organization_id=$2`,[id,org])).rows[0];
+  const verification=await recordChangeReportArchiveVerification({
+   org,proposalId:id,source:"ARCHIVE",bucket:receipt.bucket,key:receipt.objectKey,
+   versionId:receipt.versionId??null,expectedHash:String(item.reportHash)
+  });
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_report_archive','sidec_continuity_change_report_archive',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(receipt),
+     JSON.stringify({verification,retentionDays:policy.reportWormRetentionDays,legalHold:policy.reportWormLegalHold})
+    ]);
+  if(!verification.existsRemote||verification.hashValid!==true){
+   return reply.code(502).send({error:"WORM_REPORT_ARCHIVE_VERIFICATION_FAILED",receipt,verification});
+  }
+  return reply.code(201).send({receipt,verification});
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/verify",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const archive=await db.query(`SELECT proposal_id AS "proposalId",bucket,object_key AS "objectKey",
+    version_id AS "versionId",content_hash AS "contentHash"
+   FROM sidec_continuity_change_report_archives WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  const item=archive.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"REPORT_ARCHIVE_NOT_FOUND"});
+  const verification=await recordChangeReportArchiveVerification({
+   org,proposalId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,
+   versionId:item.versionId??null,expectedHash:item.contentHash
+  });
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.change_report_archive_verify','sidec_continuity_change_report_archive',$2,$3,$4,$5::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification)
+    ]);
+  return verification;
  });
 
  app.patch("/api/v1/sidec/continuity/runbook/recommendations/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
