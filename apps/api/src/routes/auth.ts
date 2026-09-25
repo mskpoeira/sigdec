@@ -499,7 +499,8 @@ export async function authRoutes(app: FastifyInstance) {
         permissions: access.permissions,
         mustChangePassword: user.must_change_password,
         mfaRequired: user.mfa_required,
-        mfaEnabled: user.mfa_enabled
+        mfaEnabled: user.mfa_enabled,
+        mfaVerified: Boolean(user.mfa_verified_at)
       }
     };
   });
@@ -682,12 +683,14 @@ export async function authRoutes(app: FastifyInstance) {
       must_change_password: boolean;
       mfa_required: boolean;
       mfa_enabled: boolean;
+      mfa_verified_at: Date | null;
     }>(
-      `SELECT id, matricula, display_name, email, job_title, department,
-              must_change_password, mfa_required, mfa_enabled
-         FROM users
-        WHERE id = $1 AND active = true`,
-      [auth.userId]
+      `SELECT u.id,u.matricula,u.display_name,u.email,u.job_title,u.department,
+              u.must_change_password,u.mfa_required,u.mfa_enabled,s.mfa_verified_at
+         FROM users u
+         JOIN auth_sessions s ON s.id=$2 AND s.user_id=u.id AND s.revoked_at IS NULL
+        WHERE u.id=$1 AND u.active=true`,
+      [auth.userId,auth.sessionId]
     );
 
     const user = result.rows[0];
