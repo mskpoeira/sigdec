@@ -23,6 +23,22 @@ const app=Fastify({logger:true,trustProxy:true});
 const release=apiPackage.version;
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
+app.addHook("onResponse",async(request,reply)=>{
+ const method=request.method.toUpperCase();
+ if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return;
+ const auth=(request as typeof request & {auth?:{userId:string}}).auth;
+ if(!auth?.userId)return;
+ const routePath=request.routeOptions?.url??request.url.split("?")[0]??request.url;
+ try{
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata)
+   VALUES($1,$2,'request_mutation',$3,$4,$5,$6::jsonb)`,[
+    auth.userId,`REQUEST_${method}`,routePath,request.ip,request.headers["user-agent"]??null,
+    JSON.stringify({method,path:routePath,statusCode:reply.statusCode})
+  ]);
+ }catch(error){
+  request.log.error({err:error,method,path:routePath},"Falha ao registrar auditoria universal da atividade.");
+ }
+});
 app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:release,timestamp:new Date().toISOString()}));
 app.get("/api/v1/ready",async(_request,reply)=>{
  try{
