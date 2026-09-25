@@ -27,6 +27,7 @@ WHERE ur.user_id=u.id
 
 ALTER TABLE integration_endpoints
   ADD COLUMN IF NOT EXISTS webhook_secret_ciphertext text,
+  ADD COLUMN IF NOT EXISTS webhook_active_from timestamptz,
   ADD COLUMN IF NOT EXISTS last_delivery_at timestamptz,
   ADD COLUMN IF NOT EXISTS delivery_failure_count integer NOT NULL DEFAULT 0 CHECK(delivery_failure_count>=0);
 
