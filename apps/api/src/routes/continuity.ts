@@ -7,6 +7,7 @@ import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSid
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
 import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
+import { archiveSidecContinuityChangeReport,verifySidecArchive } from "../lib/sidec-worm.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
@@ -123,6 +124,12 @@ const changeEvidenceSchema=z.object({
 const changeApprovalSchema=z.object({
  decision:z.enum(["APPROVED","REJECTED"]),
  notes:z.string().trim().min(5).max(8000)
+});
+
+const changePolicySchema=z.object({
+ approvalValidHours:z.number().int().min(1).max(2160),
+ reportWormRetentionDays:z.number().int().min(1).max(36500).nullable(),
+ reportWormLegalHold:z.boolean()
 });
 
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
@@ -291,6 +298,37 @@ async function buildChangeEffectivenessSnapshot(org:string,basePlanId:string|nul
   }
  }
  return {outcome,baseline:exerciseEffectivenessView(baseline),verification:exerciseEffectivenessView(verification),evaluatedAt:new Date().toISOString()};
+}
+
+async function loadChangePolicy(org:string){
+ const result=await db.query(`SELECT approval_valid_hours AS "approvalValidHours",
+   report_worm_retention_days AS "reportWormRetentionDays",report_worm_legal_hold AS "reportWormLegalHold",
+   updated_at AS "updatedAt"
+  FROM sidec_continuity_change_policies WHERE organization_id=$1`,[org]);
+ return result.rows[0]??{
+  approvalValidHours:168,
+  reportWormRetentionDays:null,
+  reportWormLegalHold:false,
+  updatedAt:null
+ };
+}
+
+async function recordChangeReportArchiveVerification(input:{
+ org:string;proposalId:string;source:"ARCHIVE"|"MANUAL"|"SCHEDULED";
+ bucket:string;key:string;versionId?:string|null;expectedHash:string;
+}){
+ const verification=await verifySidecArchive({
+  bucket:input.bucket,key:input.key,versionId:input.versionId,expectedHash:input.expectedHash
+ });
+ await db.query(`INSERT INTO sidec_continuity_change_report_archive_verifications(
+   proposal_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,
+   retain_until,legal_hold,verification_source,error_message
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[
+   input.proposalId,input.org,input.expectedHash,verification.observedHash,verification.existsRemote,
+   verification.hashValid,verification.objectLockMode,verification.retainUntil,verification.legalHold,
+   input.source,verification.errorMessage
+  ]);
+ return verification;
 }
 
 async function loadChangeReportPayload(org:string,id:string){
