@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
+import { incidentProtocolParts } from "../lib/incident-protocol.js";
 
 const prioritySchema = z.enum(["P1","P2","P3","P4","P5"]);
 const sourceSchema = z.enum([
@@ -211,7 +212,8 @@ export async function incidentRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "INVALID_TYPE", message: "Tipo de ocorrência inválido." });
       }
 
-      const year = new Date().getFullYear();
+      const protocolDate = incidentProtocolParts(new Date());
+      const year = protocolDate.year;
       const counter = await client.query<{ last_number: number }>(
         `INSERT INTO incident_counters (organization_id, year, last_number)
          VALUES ($1, $2, 1)
@@ -224,7 +226,7 @@ export async function incidentRoutes(app: FastifyInstance) {
       const sequenceNo = counter.rows[0]?.last_number;
       if (!sequenceNo) throw new Error("Falha ao gerar sequência da ocorrência.");
 
-      const protocol = `DC-${year}-${String(sequenceNo).padStart(6, "0")}`;
+      const protocol = protocolDate.format(sequenceNo);
       const priority = input.priority ?? type.default_priority;
 
       const created = await client.query<{ id: string }>(
