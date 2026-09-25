@@ -1987,6 +1987,82 @@ export async function continuityRoutes(app:FastifyInstance){
   return updated.rows[0];
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/effectiveness-targets",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const parsed=governancePeriodSchema.safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_PERIOD",details:parsed.error.flatten()});
+  try{
+   const period=resolvedGovernancePeriod(parsed.data);
+   return {period,items:await evaluateEffectivenessTargets(org,period.from,period.to)};
+  }catch(error){
+   return reply.code((error as any)?.statusCode??400).send({error:(error as any)?.code??"INVALID_PERIOD",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.put("/api/v1/sidec/continuity/runbook/effectiveness-targets",{preHandler:requirePermission("sidec_continuity.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=effectivenessTargetsReplaceSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const normalized=parsed.data.items.map(item=>({...item,scopeValue:item.scopeType==="DEFAULT"?"*":item.scopeValue.trim()}));
+  if(normalized.some(item=>item.scopeType!=="DEFAULT"&&item.scopeValue.length<2))return reply.code(400).send({error:"INVALID_SCOPE_VALUE"});
+  const keys=normalized.map(item=>item.scopeType+":"+item.scopeValue.toLowerCase());
+  if(new Set(keys).size!==keys.length)return reply.code(400).send({error:"DUPLICATE_TARGET_SCOPE"});
+  const before=(await db.query(`SELECT * FROM sidec_continuity_effectiveness_targets WHERE organization_id=$1 ORDER BY scope_type,scope_value`,[org])).rows;
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   await client.query("DELETE FROM sidec_continuity_effectiveness_targets WHERE organization_id=$1",[org]);
+   for(const item of normalized){
+    await client.query(`INSERT INTO sidec_continuity_effectiveness_targets(
+      organization_id,scope_type,scope_value,min_verified_rate,min_improved_rate,
+      max_avg_apply_hours,max_avg_verification_hours,enabled,updated_by
+     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[
+     org,item.scopeType,item.scopeValue,item.minVerifiedRate??null,item.minImprovedRate??null,
+     item.maxAvgApplyHours??null,item.maxAvgVerificationHours??null,item.enabled,auth.userId
+    ]);
+   }
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.effectiveness_targets_replace','sidec_continuity_effectiveness_targets',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,org,request.ip,request.headers["user-agent"]??null,JSON.stringify(before),JSON.stringify(normalized)
+   ]);
+   await client.query("COMMIT");
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+  const period=resolvedGovernancePeriod({});
+  return {period,items:await evaluateEffectivenessTargets(org,period.from,period.to)};
+ });
+
+ app.get("/api/v1/sidec/continuity/runbook/governance-report.pdf",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const parsed=governancePeriodSchema.safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_PERIOD",details:parsed.error.flatten()});
+  try{
+   const period=resolvedGovernancePeriod(parsed.data);
+   const report=await buildContinuityGovernanceExecutiveReport(org,period.from,period.to);
+   const pdf=await buildContinuityGovernancePdf({organizationName:report.organizationName,report});
+   return reply.type("application/pdf")
+    .header("Content-Disposition",`attachment; filename="SIGDEC-governanca-continuidade-${period.from.toISOString().slice(0,10)}-${period.to.toISOString().slice(0,10)}.pdf"`)
+    .header("Content-Length",String(pdf.length)).send(pdf);
+  }catch(error){
+   return reply.code((error as any)?.statusCode??500).send({error:(error as any)?.code??"GOVERNANCE_REPORT_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.get("/api/v1/sidec/continuity/runbook/governance-export.csv",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const parsed=governancePeriodSchema.safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_PERIOD",details:parsed.error.flatten()});
+  try{
+   const period=resolvedGovernancePeriod(parsed.data);
+   const report=await buildContinuityGovernanceExecutiveReport(org,period.from,period.to);
+   const csv=governanceCsv(report);
+   return reply.type("text/csv; charset=utf-8")
+    .header("Content-Disposition",`attachment; filename="SIGDEC-governanca-continuidade-${period.from.toISOString().slice(0,10)}-${period.to.toISOString().slice(0,10)}.csv"`)
+    .send("\uFEFF"+csv);
+  }catch(error){
+   return reply.code((error as any)?.statusCode??500).send({error:(error as any)?.code??"GOVERNANCE_EXPORT_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
  app.get("/api/v1/sidec/continuity/runbook/change-metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const summary=await db.query(`SELECT
