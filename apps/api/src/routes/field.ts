@@ -25,6 +25,7 @@ const positionSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   accuracyMeters: z.number().nonnegative().max(10000).optional(),
+  capturedAt: z.coerce.date().optional(),
   recordedAt: z.coerce.date().optional()
 });
 
@@ -144,10 +145,10 @@ export async function fieldRoutes(app: FastifyInstance) {
 
     const positions = await db.query(
       `SELECT DISTINCT ON (p.user_id)
-              p.user_id AS "userId", u.display_name AS "displayName",
+              p.user_id AS "userId", u.display_name AS "displayName", u.matricula,
               p.team_id AS "teamId", tm.code AS "teamCode",
               p.latitude, p.longitude, p.accuracy_meters AS "accuracyMeters",
-              p.recorded_at AS "recordedAt"
+              p.recorded_at AS "recordedAt", p.captured_at AS "capturedAt"
          FROM field_positions p
          JOIN users u ON u.id = p.user_id
          LEFT JOIN teams tm ON tm.id = p.team_id
@@ -189,8 +190,8 @@ export async function fieldRoutes(app: FastifyInstance) {
 
     const [positions, monitoring] = await Promise.all([
       db.query(
-        `SELECT p.user_id AS "userId",u.display_name AS "displayName",tm.code AS "teamCode",
-                p.latitude,p.longitude,p.accuracy_meters AS "accuracyMeters",p.recorded_at AS "recordedAt"
+        `SELECT p.user_id AS "userId",u.display_name AS "displayName",u.matricula,tm.code AS "teamCode",
+                p.latitude,p.longitude,p.accuracy_meters AS "accuracyMeters",p.recorded_at AS "recordedAt",p.captured_at AS "capturedAt"
            FROM field_positions p
            JOIN users u ON u.id=p.user_id
            LEFT JOIN teams tm ON tm.id=p.team_id
@@ -243,21 +244,22 @@ export async function fieldRoutes(app: FastifyInstance) {
       }
     }
 
-    await db.query(
+    const result = await db.query(
       `INSERT INTO field_positions (
          organization_id, user_id, team_id, latitude, longitude,
-         accuracy_meters, recorded_at, location
+         accuracy_meters, captured_at, location
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,
          ST_SetSRID(ST_MakePoint($5::double precision,$4::double precision),4326)::geography
-       )`,
+       )
+       RETURNING recorded_at AS "recordedAt", captured_at AS "capturedAt"`,
       [
         orgId, auth.userId, value.teamId ?? null, value.latitude, value.longitude,
-        value.accuracyMeters ?? null, value.recordedAt ?? new Date()
+        value.accuracyMeters ?? null, value.capturedAt ?? value.recordedAt ?? new Date()
       ]
     );
 
-    return reply.code(201).send({ ok: true });
+    return reply.code(201).send({ ok: true, ...result.rows[0] });
   });
 
   app.get("/api/v1/inspections", {

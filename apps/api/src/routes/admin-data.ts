@@ -95,7 +95,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   inventory:`SELECT id,code,name,unit,category,active,created_at FROM humanitarian_items WHERE organization_id=$1 ORDER BY created_at DESC LIMIT $2`,
   incidents:`SELECT id,protocol,status,priority,created_at FROM incidents WHERE organization_id=$1 ORDER BY created_at DESC LIMIT $2`,
   navigation:`SELECT id,label,path,active,sort_order FROM navigation_items WHERE organization_id=$1 ORDER BY sort_order LIMIT $2`,
-  audit:`SELECT a.id,a.occurred_at,a.action,a.entity_type,a.entity_id FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1 ORDER BY a.id DESC LIMIT $2`
+  audit:`SELECT a.id,a.occurred_at,a.actor_matricula,a.action,a.entity_type,a.entity_id,a.metadata FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id WHERE COALESCE(u.organization_id,(SELECT organization_id FROM users WHERE id=a.actor_user_id))=$1 ORDER BY a.id DESC LIMIT $2`
  } as const;
  app.get("/api/v1/admin/database",{preHandler:requirePermission("system.master")},async request=>{
   const query=z.object({view:z.enum(["users","inventory","incidents","navigation","audit"]),limit:z.coerce.number().int().min(1).max(100).default(50)}).safeParse(request.query);

@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -28,11 +29,13 @@ type Sitrep = { generatedAt:string; activeIncidents:number; p1Incidents:number; 
 type FieldPosition = {
   userId: string;
   displayName: string;
+  matricula: string;
   teamCode: string | null;
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
   recordedAt: string;
+  capturedAt?: string | null;
 };
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 
@@ -180,7 +183,7 @@ export default function CampoPage() {
         latitude:position.coords.latitude,
         longitude:position.coords.longitude,
         accuracyMeters:position.coords.accuracy,
-        recordedAt:new Date(position.timestamp).toISOString()
+        capturedAt:new Date(position.timestamp).toISOString()
       };
       if(!navigator.onLine){
         sessionStorage.setItem(PENDING_LOCATION_KEY,JSON.stringify(payload));
@@ -218,7 +221,7 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.47</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.48</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
         </div>
@@ -271,7 +274,7 @@ export default function CampoPage() {
             <p>Para visualizar no Google My Maps, importe o arquivo KML ou CSV em um mapa seu. Inclui pontos e ocorrências ativas com coordenadas.</p>
             <a href="https://www.google.com/maps/d/" target="_blank" rel="noreferrer">Abrir Google My Maps ↗</a>
             <h3>{points.length} ponto(s) registrado(s)</h3>
-            <div className="fieldIncidentList">{points.map(point=><button type="button" className={`fieldIncident ${selectedId===`point:${point.id}`?"fieldIncidentSelected":""}`} key={point.id} onClick={()=>setSelectedId(`point:${point.id}`)}><span className="priorityBadge">●</span><span><strong>{point.title}</strong><small>{point.description||`${point.latitude}, ${point.longitude}`}</small><small>{new Date(point.createdAt).toLocaleString("pt-BR")}</small></span></button>)}</div>
+            <div className="fieldIncidentList">{points.map(point=><button type="button" className={`fieldIncident ${selectedId===`point:${point.id}`?"fieldIncidentSelected":""}`} key={point.id} onClick={()=>setSelectedId(`point:${point.id}`)}><span className="priorityBadge">●</span><span><strong>{point.title}</strong><small>{point.description||`${point.latitude}, ${point.longitude}`}</small><small>{formatDateTimeBR(point.createdAt)}</small></span></button>)}</div>
           </div>
           <div>
             <span className="eyebrow">OCORRÊNCIAS ATIVAS</span>
@@ -325,7 +328,7 @@ export default function CampoPage() {
       <section className="detailSection">
         <div><span className="eyebrow">HISTÓRICO GEOESPACIAL</span><h2>Janela de {historyHours} hora(s)</h2></div>
         <div className="dataGrid"><article className="card"><h2>{historyPositions.length}</h2><p>registros de posição de equipes</p></article><article className="card"><h2>{historySignals.length}</h2><p>eventos ambientais georreferenciados</p></article></div>
-        <div className="grid">{historySignals.slice(0,12).map((signal)=><article className="card" key={`hist-${signal.id}`}><h2>{signal.stationCode} · {signal.stationName}</h2><p><strong>{signal.severity}</strong> · {signal.title}</p><p>{signal.metric}: {signal.observedValue} {signal.unit}</p><p>{new Date(signal.createdAt).toLocaleString("pt-BR")}</p><a className="secondaryLink" href={`https://www.openstreetmap.org/?mlat=${signal.latitude}&mlon=${signal.longitude}#map=17/${signal.latitude}/${signal.longitude}`} target="_blank" rel="noreferrer">Abrir ponto histórico</a></article>)}</div>
+        <div className="grid">{historySignals.slice(0,12).map((signal)=><article className="card" key={`hist-${signal.id}`}><h2>{signal.stationCode} · {signal.stationName}</h2><p><strong>{signal.severity}</strong> · {signal.title}</p><p>{signal.metric}: {signal.observedValue} {signal.unit}</p><p>{formatDateTimeBR(signal.createdAt)}</p><a className="secondaryLink" href={`https://www.openstreetmap.org/?mlat=${signal.latitude}&mlon=${signal.longitude}#map=17/${signal.latitude}/${signal.longitude}`} target="_blank" rel="noreferrer">Abrir ponto histórico</a></article>)}</div>
       </section>
 
       <section className="detailSection">
@@ -335,8 +338,9 @@ export default function CampoPage() {
           {positions.map((position) => (
             <article className="card" key={position.userId}>
               <h2>{position.teamCode ? `Equipe ${position.teamCode}` : position.displayName}</h2>
-              <p>{position.teamCode ? position.displayName : "Agente em campo"}</p>
-              <p>Atualizada em {new Date(position.recordedAt).toLocaleString("pt-BR")}</p>
+              <p>{position.teamCode ? position.displayName : "Agente em campo"} · matrícula {position.matricula}</p>
+              <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)}</p>
+              {position.capturedAt&&<p><small>Coletada pelo dispositivo em {formatDateTimeBR(position.capturedAt)}</small></p>}
               <a
                 className="secondaryLink"
                 href={`https://www.openstreetmap.org/?mlat=${position.latitude}&mlon=${position.longitude}#map=17/${position.latitude}/${position.longitude}`}

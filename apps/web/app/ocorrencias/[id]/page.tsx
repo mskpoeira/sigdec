@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../../lib/datetime";
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -28,6 +29,8 @@ type Incident = {
   vehicle_code: string | null;
   created_at: string;
   updated_at: string;
+  created_by_matricula: string | null;
+  created_by_name: string | null;
 };
 
 type TimelineItem = {
@@ -341,7 +344,7 @@ export default function OcorrenciaDetalhePage() {
             <div><dt>Situação</dt><dd>{statusLabels[incident.status] ?? incident.status}</dd></div>
             <div><dt>Risco à vida</dt><dd>{incident.risk_to_life ? "Sim" : "Não"}</dd></div>
             <div><dt>Origem</dt><dd>{incident.source}</dd></div>
-            <div><dt>Aberta em</dt><dd>{new Date(incident.created_at).toLocaleString("pt-BR")}</dd></div>
+            <div><dt>Aberta em</dt><dd>{formatDateTimeBR(incident.created_at)}</dd></div><div><dt>Registrada por</dt><dd>Matrícula {incident.created_by_matricula??"—"}{incident.created_by_name?` · ${incident.created_by_name}`:""}</dd></div>
             <div><dt>Solicitante</dt><dd>{incident.caller_name || "Não informado"}</dd></div>
             <div><dt>Telefone</dt><dd>{incident.caller_phone || "Não informado"}</dd></div>
             <div className="detailWide"><dt>Descrição</dt><dd>{incident.description || "Sem descrição complementar."}</dd></div>
@@ -467,7 +470,7 @@ export default function OcorrenciaDetalhePage() {
               </div>
               <div>
                 <span className="statusTag">{statusLabels[dispatch.status] ?? dispatch.status}</span>
-                <time>{new Date(dispatch.dispatchedAt).toLocaleString("pt-BR")}</time>
+                <time>{formatDateTimeBR(dispatch.dispatchedAt)}</time>
               </div>
               <div className="dispatchActions">
                 {(dispatchNext[dispatch.status] ?? []).map((status) => (
@@ -497,8 +500,8 @@ export default function OcorrenciaDetalhePage() {
                 <strong>{eventLabels[item.eventType] ?? item.eventType}</strong>
                 <p>{item.note || "Registro automático do sistema."}</p>
                 <small>
-                  {new Date(item.occurredAt).toLocaleString("pt-BR")}
-                  {item.actorName ? ` · ${item.actorName}` : ""}
+                  {formatDateTimeBR(item.occurredAt)}
+                  {item.actorMatricula ? ` · matrícula ${item.actorMatricula}` : ""}{item.actorName ? ` · ${item.actorName}` : ""}
                 </small>
               </div>
             </article>

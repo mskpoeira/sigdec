@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -34,7 +35,9 @@ type TechnicalDocument = {
   cancelledAt: string | null;
   protocol: string | null;
   createdByName: string;
+  createdByMatricula: string | null;
   approvedByName: string | null;
+  approvedByMatricula: string | null;
   sourceType: string | null;
 };
 
@@ -389,8 +392,9 @@ export default function DocumentosPage() {
                 {typeLabels[item.documentType] ?? item.documentType}
                 {item.protocol ? ` · ${item.protocol}` : ""}
               </p>
-              <p>Revisão {item.revision} · elaborado por {item.createdByName}</p>
-              {item.approvedByName && <p>Aprovado por {item.approvedByName}</p>}
+              <p>Revisão {item.revision} · elaborado por {item.createdByName} · matrícula {item.createdByMatricula??"—"}</p>
+              <p><small>Registrado em {formatDateTimeBR(item.createdAt)}</small></p>
+              {item.approvedByName && <p>Aprovado por {item.approvedByName}{item.approvedByMatricula?` · matrícula ${item.approvedByMatricula}`:""}{item.approvedAt?` · ${formatDateTimeBR(item.approvedAt)}`:""}</p>}
               {item.contentHash && (
                 <code className="documentHash">SHA-256 {item.contentHash}</code>
               )}

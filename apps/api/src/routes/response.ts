@@ -359,10 +359,11 @@ export async function responseRoutes(app:FastifyInstance){
  app.get("/api/v1/humanitarian/deliveries",{preHandler:requirePermission("humanitarian.read")},async req=>{
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT d.id,d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",
    d.household_id AS "householdId",d.notes,d.duplicate_acknowledged AS "duplicateAcknowledged",d.duplicate_reason AS "duplicateReason",
-   i.protocol,COALESCE(jsonb_agg(jsonb_build_object('itemId',di.item_id,'name',hi.name,'unit',hi.unit,'quantity',di.quantity)
+   i.protocol,du.matricula AS "deliveredByMatricula",du.display_name AS "deliveredByName",COALESCE(jsonb_agg(jsonb_build_object('itemId',di.item_id,'name',hi.name,'unit',hi.unit,'quantity',di.quantity)
     ORDER BY hi.name) FILTER(WHERE di.item_id IS NOT NULL),'[]'::jsonb) AS items
    FROM humanitarian_deliveries d
    LEFT JOIN incidents i ON i.id=d.incident_id
+   JOIN users du ON du.id=d.delivered_by
    LEFT JOIN humanitarian_delivery_items di ON di.delivery_id=d.id
    LEFT JOIN humanitarian_items hi ON hi.id=di.item_id
    WHERE d.organization_id=$1 GROUP BY d.id,i.protocol ORDER BY d.delivered_at DESC LIMIT 200`,[o]); return {items:r.rows};

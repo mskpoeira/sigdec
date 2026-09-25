@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../../lib/datetime";
 import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
@@ -14,7 +15,13 @@ const paths=["/painel","/ocorrencias","/ocorrencias/nova","/campo","/monitoramen
 const blankUser={matricula:"",displayName:"",email:"",phone:"",jobTitle:"",department:"",roleIds:[] as string[],active:true};
 const blankItem={code:"",name:"",unit:"un",category:"Geral",active:true};
 const blankMenu={label:"",path:"/painel",permissionCode:"",sortOrder:100,active:true};
-const fmt=(value:string|null)=>value?new Date(value).toLocaleString("pt-BR"):"Nunca";
+const fmt=(value:string|null)=>value?formatDateTimeBR(value):"Nunca";
+const dbCell=(key:string,value:unknown)=>{
+ if(value===null||value===undefined)return "—";
+ if(typeof value==="object")return JSON.stringify(value);
+ if(typeof value==="string"&&/(?:_at|At|timestamp)$/i.test(key))return formatDateTimeBR(value);
+ return String(value);
+};
 
 export default function UsersAdministrationPage(){
  const[tab,setTab]=useState<Tab>("users"),[users,setUsers]=useState<User[]>([]),[roles,setRoles]=useState<Role[]>([]),[permissions,setPermissions]=useState<Permission[]>([]),
@@ -23,7 +30,7 @@ export default function UsersAdministrationPage(){
   [roleId,setRoleId]=useState<string|null>(null),[roleDraft,setRoleDraft]=useState({code:"",name:"",permissionCodes:[] as string[]}),
   [itemId,setItemId]=useState<string|null>(null),[itemDraft,setItemDraft]=useState(blankItem),
   [menuId,setMenuId]=useState<string|null>(null),[menuDraft,setMenuDraft]=useState(blankMenu),
-  [dbView,setDbView]=useState("users"),[dbRows,setDbRows]=useState<Record<string,unknown>[]>([]),
+  [dbView,setDbView]=useState("audit"),[dbRows,setDbRows]=useState<Record<string,unknown>[]>([]),
   [message,setMessage]=useState(""),[temporary,setTemporary]=useState(""),[busy,setBusy]=useState(false);
  const request=useCallback(async(path:string,init?:RequestInit)=>{
   const r=await fetch(`${API}${path}`,{credentials:"include",cache:"no-store",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});
@@ -62,9 +69,9 @@ export default function UsersAdministrationPage(){
  async function removeMenu(item:MenuItem){if(!window.confirm(`Excluir o atalho ${item.label}?`))return;
   await perform(async()=>{await request(`/api/v1/admin/navigation/${item.id}`,{method:"DELETE"});setMessage("Atalho excluído.")})}
  async function openDatabase(view=dbView){setDbView(view);try{const r=await request(`/api/v1/admin/database?view=${encodeURIComponent(view)}&limit=50`);setDbRows(r.items??[])}catch(error){setMessage(error instanceof Error?error.message:"Falha na consulta.")}}
- const tabs:[Tab,string][]=[["users","Usuários"],["roles","Perfis e permissões"],["items","Itens de estoque"],["menus","Itens do menu"],["reports","Relatórios"],["database","Banco de dados"]];
+ const tabs:[Tab,string][]=[["users","Usuários"],["roles","Perfis e permissões"],["items","Itens de estoque"],["menus","Itens do menu"],["reports","Relatórios"],["database","Banco e auditoria"]];
  return <main className="shell moduleShell adminWorkspace">
-  <header className="listHeader"><div><span className="eyebrow">SIGDEC · ADMINISTRAÇÃO · v1.45</span><h1>Usuários e dados do sistema</h1><p>Cadastros, acessos, itens, relatórios e consulta protegida.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao">Administração</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
+  <header className="listHeader"><div><span className="eyebrow">SIGDEC · ADMINISTRAÇÃO · v1.48</span><h1>Usuários e dados do sistema</h1><p>Cadastros, acessos, itens, relatórios e consulta protegida.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao">Administração</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   <nav className="adminTabs" aria-label="Áreas de administração">{tabs.map(([id,label])=><button type="button" key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setMessage("");if(id==="database")void openDatabase()}}>{label}</button>)}</nav>
   {message&&<p className="infoCard" role="status">{message}</p>}
   {temporary&&<section className="warningCard" role="status"><strong>Senha temporária: copie agora</strong><p className="temporarySecret">{temporary}</p><p>Ela não será exibida novamente. Entregue ao usuário por canal seguro; a troca será exigida no primeiro acesso.</p><button type="button" onClick={()=>setTemporary("")}>Já copiei</button></section>}
@@ -86,6 +93,6 @@ export default function UsersAdministrationPage(){
 
   {tab==="reports"&&<section><h2>Relatórios de usuários</h2><p>Indicadores atuais e exportação para conferência. O relatório contém dados funcionais; compartilhe apenas com pessoas autorizadas.</p><div className="dataGrid">{report&&Object.entries(report.overview).map(([key,value])=><article className="card" key={key}><h3>{({total:"Total",active:"Ativos",inactive:"Desativados",pendingPasswordChange:"Troca de senha pendente",mfaEnabled:"MFA ativo"} as Record<string,string>)[key]??key}</h3><p className="adminNumber">{value}</p></article>)}</div><a className="primaryButton" href={`${API}/api/v1/admin/reports/users.csv`}>Baixar relatório CSV</a><h3>Por perfil</h3><div className="dataGrid">{report?.roles.map(r=><article className="card" key={r.code}><h3>{r.name}</h3><p>{r.active} ativo(s) de {r.total} usuário(s)</p></article>)}</div></section>}
 
-  {tab==="database"&&<section><h2>Consulta ao banco de dados</h2><p>Visões de leitura com campos selecionados. Dados de autenticação, segredos e informações pessoais de assistência não são expostos nesta consulta.</p><div className="headerActions"><select aria-label="Visão do banco" value={dbView} onChange={e=>void openDatabase(e.target.value)}>{["users","inventory","incidents","navigation","audit"].map(v=><option key={v} value={v}>{({users:"Usuários",inventory:"Estoque",incidents:"Ocorrências",navigation:"Menu",audit:"Auditoria"} as Record<string,string>)[v]}</option>)}</select><button className="secondaryLink" type="button" onClick={()=>void openDatabase()}>Atualizar</button></div><div className="adminTableWrap"><table><thead><tr>{Object.keys(dbRows[0]??{}).map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{dbRows.map((r,index)=><tr key={index}>{Object.values(r).map((v,j)=><td key={j}>{v===null?"—":String(v)}</td>)}</tr>)}</tbody></table>{dbRows.length===0&&<p>Nenhum registro nesta visão.</p>}</div></section>}
+  {tab==="database"&&<section><h2>{dbView==="audit"?"Auditoria de atividades":"Consulta ao banco de dados"}</h2><p>{dbView==="audit"?"Toda inclusão, alteração e exclusão autenticada registra horário oficial do servidor e matrícula funcional do responsável.":"Visões de leitura com campos selecionados. Dados de autenticação, segredos e informações pessoais de assistência não são expostos nesta consulta."}</p><div className="headerActions"><select aria-label="Visão do banco" value={dbView} onChange={e=>void openDatabase(e.target.value)}>{["users","inventory","incidents","navigation","audit"].map(v=><option key={v} value={v}>{({users:"Usuários",inventory:"Estoque",incidents:"Ocorrências",navigation:"Menu",audit:"Auditoria"} as Record<string,string>)[v]}</option>)}</select><button className="secondaryLink" type="button" onClick={()=>void openDatabase()}>Atualizar</button></div><div className="adminTableWrap"><table><thead><tr>{Object.keys(dbRows[0]??{}).map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{dbRows.map((r,index)=><tr key={index}>{Object.entries(r).map(([k,v],j)=><td key={j}>{dbCell(k,v)}</td>)}</tr>)}</tbody></table>{dbRows.length===0&&<p>Nenhum registro nesta visão.</p>}</div></section>}
  </main>;
 }
