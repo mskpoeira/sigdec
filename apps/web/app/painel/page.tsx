@@ -5,7 +5,7 @@ import type { Route } from "next";
 import { useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
-type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
+type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean;mfaVerified?:boolean};
 
 const nav: Array<[string,string,Route,string?]> =[
 ["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias","incidents"],["◉","Riscos e Mapas","/campo","field"],["▲","Alertas","/monitoramento","monitoring"],
@@ -22,7 +22,7 @@ export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
  useEffect(()=>{
-  fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>{if(b.user?.mustChangePassword){location.href="/alterar-senha";return}if(b.user?.mfaRequired&&!b.user?.mfaEnabled){location.href="/configurar-mfa";return}setUser(b.user)}).catch(()=>location.href="/login");
+  fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>{if(b.user?.mustChangePassword){location.href="/alterar-senha";return}if(b.user?.mfaRequired&&!b.user?.mfaEnabled){location.href="/configurar-mfa";return}if(b.user?.mfaEnabled&&!b.user?.mfaVerified){location.href="/login";return}setUser(b.user)}).catch(()=>location.href="/login");
   fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
   fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
   fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
