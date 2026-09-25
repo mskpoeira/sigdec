@@ -76,9 +76,20 @@ INSERT INTO permissions(code,description) VALUES
 ('sidec_continuity_change.seal','Selar e verificar o relatório final de mudança do runbook SIDEC')
 ON CONFLICT(code) DO NOTHING;
 
+INSERT INTO roles(code,name,level,system_role)
+VALUES('SIDEC_CONTINUITY_APPROVER','Aprovador de Mudança SIDEC',70,true)
+ON CONFLICT(code) DO NOTHING;
+
 INSERT INTO role_permissions(role_id,permission_id)
 SELECT r.id,p.id
 FROM roles r
 JOIN permissions p ON p.code IN ('sidec_continuity_change.approve','sidec_continuity_change.seal')
 WHERE r.code='MASTER'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions(role_id,permission_id)
+SELECT r.id,p.id
+FROM roles r
+JOIN permissions p ON p.code IN ('sidec_continuity.read','sidec_continuity_change.approve')
+WHERE r.code='SIDEC_CONTINUITY_APPROVER'
 ON CONFLICT DO NOTHING;
