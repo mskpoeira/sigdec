@@ -218,7 +218,7 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.45</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.46</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
         </div>
