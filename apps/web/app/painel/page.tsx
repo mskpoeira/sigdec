@@ -14,6 +14,7 @@ const nav: Array<[string,string,Route,string?]> =[
 ];
 const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▥","Centro de Gestão","/gestao","gray"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
+type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;neighborhood:string|null;latitude:number|null;longitude:number|null};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
 type Feature={code:string;enabled:boolean};
 type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
@@ -21,13 +22,14 @@ type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
 export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
- const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);
+ const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);
  useEffect(()=>{
   fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
   fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
   fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
   fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
   fetch(`${API_URL}/api/v1/navigation`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setCustomNavigation(b.items??[])).catch(()=>{});
+  fetch(`${API_URL}/api/v1/field/map`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setMapIncidents((b.incidents??[]).filter((x:MapIncident)=>x.latitude!==null&&x.longitude!==null&&Number.isFinite(Number(x.latitude))&&Number.isFinite(Number(x.longitude))))}).catch(()=>{});
  },[]);
  async function logout(){await fetch(`${API_URL}/auth/logout`,{method:"POST",credentials:"include"});location.href="/login"}
  if(!user)return <main className="shell"><p>Carregando sessão...</p></main>;
@@ -39,6 +41,10 @@ export default function PainelPage(){
   [String(summary?.upcomingTrainings??"—"),"Treinamentos Futuros","Programações ainda não iniciadas","purple"]
  ];
  const featureOn=(code?:string)=>!code||features[code]!==false;
+ const locatedMapIncidents=mapIncidents.filter(x=>x.latitude!==null&&x.longitude!==null);
+ const googleSatelliteUrl="https://maps.google.com/maps?ll=-23.4332,-45.0834&z=10&t=k&output=embed";
+ const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
+ const pinPosition=(x:MapIncident)=>{const lat=Number(x.latitude),lon=Number(x.longitude);const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));return {left:`${left}%`,top:`${top}%`}};
  return <main className="opsDashboard">
   <aside className="opsSide">
    <div className="opsSideBrand"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div>
@@ -49,7 +55,7 @@ export default function PainelPage(){
   <section className="opsMain">
    <header className="opsHero">
     <div className="opsMunicipal"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
-    <div className="opsTitle"><b>SIGDEC</b><strong>Sistema Integrado de Gestão<br/>de Desastres e Emergências</strong><span>UBATUBA - SP</span></div>
+    <div className="opsTitle"><b>SIGDEC</b><strong>Sistema Integrado de Gestão<br/>de Defesa Civil</strong><span>UBATUBA - SP</span></div>
     <div className="opsScenery"><span>Ubatuba</span><small>Nossa gente. Nossa natureza.<br/>Mais segura sempre.</small></div>
     <div className="dcBadge"><b>COORDENAÇÃO MUNICIPAL - SP</b><span>▲</span><strong>DEFESA CIVIL</strong></div>
    </header>
@@ -59,7 +65,7 @@ export default function PainelPage(){
     <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
      <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {x.priority}</small></div><span>{x.status}</span></Link>)}</section>
-     <section className="opsCard"><header><h2>Resumo Territorial</h2><Link href="/campo">Abrir operação de campo</Link></header><div className="situationMap"><div className="coast">UBATUBA · DADOS ATUAIS</div>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map(x=><div className="incidentMini" key={"territorial-"+x.id}><div><b>{x.neighborhood??"Local não informado"}</b><small>{x.priority} · {x.status}</small></div></div>)}<div className="legend">Resumo derivado das ocorrências reais carregadas pelo SIGDEC.</div></div></section>
+     <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap googleSituationMap"><iframe src={googleSatelliteUrl} title="Mapa de Situação — imagem de satélite do Google Maps" loading="lazy" referrerPolicy="no-referrer-when-downgrade"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">Google Maps · Satélite</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
    <footer className="opsFooter"><span>SIGDEC v1.45.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
