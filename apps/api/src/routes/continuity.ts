@@ -820,9 +820,10 @@ async function currentContinuityChangeReportResilienceHealth(organizationId?:str
    pv.verified_at AS "primaryVerifiedAt",
    rv.exists_remote AS "replicaExistsRemote",rv.hash_valid AS "replicaHashValid",rv.observed_hash AS "replicaObservedHash",
    rv.verified_at AS "replicaVerifiedAt",
-   d.success AS "latestDrillSuccess",d.destination AS "latestDrillDestination",d.performed_at AS "latestDrillAt",
+   pd.success AS "primaryLatestDrillSuccess",pd.performed_at AS "primaryLatestDrillAt",
+   rd.success AS "replicaLatestDrillSuccess",rd.performed_at AS "replicaLatestDrillAt",
    CASE
-    WHEN d.success=false THEN 'RESTORE_FAILURE'
+    WHEN pd.success=false OR (r.proposal_id IS NOT NULL AND rd.success=false) THEN 'RESTORE_FAILURE'
     WHEN pv.exists_remote=false OR pv.hash_valid=false OR rv.exists_remote=false OR rv.hash_valid=false
       OR (pv.observed_hash IS NOT NULL AND rv.observed_hash IS NOT NULL AND pv.observed_hash<>rv.observed_hash) THEN 'CRITICAL'
     WHEN r.proposal_id IS NULL THEN 'MISSING_REPLICA'
@@ -847,9 +848,13 @@ async function currentContinuityChangeReportResilienceHealth(organizationId?:str
    WHERE x.proposal_id=p.proposal_id ORDER BY verified_at DESC LIMIT 1
   ) rv ON true
   LEFT JOIN LATERAL (
-   SELECT success,destination,performed_at FROM sidec_continuity_change_report_restore_drills x
-   WHERE x.proposal_id=p.proposal_id ORDER BY performed_at DESC LIMIT 1
-  ) d ON true
+   SELECT success,performed_at FROM sidec_continuity_change_report_restore_drills x
+   WHERE x.proposal_id=p.proposal_id AND x.destination='PRIMARY' ORDER BY performed_at DESC LIMIT 1
+  ) pd ON true
+  LEFT JOIN LATERAL (
+   SELECT success,performed_at FROM sidec_continuity_change_report_restore_drills x
+   WHERE x.proposal_id=p.proposal_id AND x.destination='REPLICA' ORDER BY performed_at DESC LIMIT 1
+  ) rd ON true
   WHERE true${orgFilter}
   ORDER BY p.archived_at`,params);
  return result.rows as Array<any>;
