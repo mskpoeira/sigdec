@@ -5,7 +5,7 @@ import { useCallback,useEffect,useState } from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
 type Operator={id:string;matricula:string;displayName:string;jobTitle?:string|null};
-type RunbookStep={id?:string;lineageKey?:string;phase:"DECLARATION"|"COMMUNICATION"|"PRESERVATION"|"RECOVERY"|"VALIDATION"|"RETURN";sortOrder:number;title:string;instructions:string;expectedMinutes:number;ownerUserId?:string|null;ownerName?:string|null;ownerMatricula?:string|null;required:boolean};
+type RunbookStep={id?:string;lineageKey?:string;sourceLineageKeys?:string[];phase:"DECLARATION"|"COMMUNICATION"|"PRESERVATION"|"RECOVERY"|"VALIDATION"|"RETURN";sortOrder:number;title:string;instructions:string;expectedMinutes:number;ownerUserId?:string|null;ownerName?:string|null;ownerMatricula?:string|null;required:boolean};
 type RunbookPlan={id:string;version:number;title:string;status:"DRAFT"|"ACTIVE"|"RETIRED";activationCriteria:string;recoveryStrategy:string;communicationPlan:string;returnToNormal:string;updatedAt:string;activatedAt?:string|null;activatedByName?:string|null;steps:RunbookStep[]};
 type RunbookData={active:RunbookPlan|null;draft:RunbookPlan|null;revisions:Array<{id:string;version:number;title:string;status:string;updatedAt:string}>;operators:Operator[]};
 type Evidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
@@ -28,7 +28,7 @@ type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decid
 type ApprovalDelegation={id:string;delegatorUserId:string;delegatorName?:string|null;delegatorMatricula?:string|null;delegateUserId:string;delegateName?:string|null;delegateMatricula?:string|null;validFrom:string;validUntil:string;reason:string;revokedAt?:string|null;createdAt:string;status:"ACTIVE"|"SCHEDULED"|"EXPIRED"|"REVOKED"};
 type ChangePolicy={approvalValidHours:number;reportWormRetentionDays?:number|null;reportWormLegalHold:boolean;updatedAt?:string|null};
 type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;archived:number;archiveHealthy:number;replicated:number;replicaHealthy:number;activeDelegations:number;reportResilienceOpen:number;reportRetryPending:number;reportRestoreFailures30d:number;approvalsExpiring24h:number;approvalsExpired:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>;byRecurrence:Array<{recurrenceKey:string;proposals:number;verified:number;improved:number;regressed:number;lastProposalAt:string}>};
-type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;reportReplicaCreated:boolean;reportReplicaHealthy:boolean;reportReplicationHealthy:boolean;reportReplicaBucket?:string|null;reportReplicaObjectKey?:string|null;reportReplicaRetainUntil?:string|null;reportReplicaLegalHold?:boolean|null;reportReplicatedAt?:string|null;reportReplicaVerifiedAt?:string|null;reportReplicaErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;stepsSplit?:number;stepsMerged?:number;stepsDerived?:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;reportReplicaCreated:boolean;reportReplicaHealthy:boolean;reportReplicationHealthy:boolean;reportReplicaBucket?:string|null;reportReplicaObjectKey?:string|null;reportReplicaRetainUntil?:string|null;reportReplicaLegalHold?:boolean|null;reportReplicatedAt?:string|null;reportReplicaVerifiedAt?:string|null;reportReplicaErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED"|"SPLIT"|"MERGED"|"DERIVED";phase:string;sortOrder:number;title:string;changedFields:string[];lineageDetails?:Record<string,unknown>}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -131,6 +131,41 @@ export default function ContinuidadePage(){
   patchDraft({steps:runbook.draft.steps.map((step,i)=>i===index?{...step,...patch}:step)});
  }
 
+ function stepOrigins(step:RunbookStep){
+  if(step.sourceLineageKeys?.length)return [...step.sourceLineageKeys];
+  return step.lineageKey?[step.lineageKey]:[];
+ }
+
+ function resequenceSteps(steps:RunbookStep[]){
+  return steps.map((step,index)=>({...step,sortOrder:index+1}));
+ }
+
+ function splitDraftStep(index:number){
+  const draft=runbook?.draft;if(!draft)return;
+  const step=draft.steps[index];if(!step)return;
+  const origins=stepOrigins(step);
+  const base={...step,id:undefined,lineageKey:undefined,sourceLineageKeys:origins.length?origins:undefined};
+  const first:{[K in keyof RunbookStep]?:RunbookStep[K]}={...base,title:(step.title+" · parte 1").slice(0,240)};
+  const second:{[K in keyof RunbookStep]?:RunbookStep[K]}={...base,title:(step.title+" · parte 2").slice(0,240)};
+  const next=[...draft.steps.slice(0,index),first as RunbookStep,second as RunbookStep,...draft.steps.slice(index+1)];
+  patchDraft({steps:resequenceSteps(next)});
+ }
+
+ function mergeDraftStepWithNext(index:number){
+  const draft=runbook?.draft;if(!draft||draft.steps.length<=6)return;
+  const left=draft.steps[index],right=draft.steps[index+1];if(!left||!right)return;
+  const origins=[...new Set([...stepOrigins(left),...stepOrigins(right)])];
+  const merged:RunbookStep={
+   phase:left.phase,sortOrder:left.sortOrder,title:(left.title+" + "+right.title).slice(0,240),
+   instructions:(left.instructions+"\n\n"+right.instructions).slice(0,12000),
+   expectedMinutes:Math.min(10080,left.expectedMinutes+right.expectedMinutes),
+   ownerUserId:left.ownerUserId??right.ownerUserId??null,required:left.required||right.required,
+   sourceLineageKeys:origins.length?origins:undefined
+  };
+  const next=[...draft.steps.slice(0,index),merged,...draft.steps.slice(index+2)];
+  patchDraft({steps:resequenceSteps(next)});
+ }
+
  const createSchedule=()=>act(async()=>{
   await request("/api/v1/sidec/continuity/schedules",{method:"POST",body:JSON.stringify({
    name:scheduleDraft.name,intervalDays:scheduleDraft.intervalDays,nextDueAt:scheduleDraft.nextDueAt,
@@ -182,7 +217,7 @@ export default function ContinuidadePage(){
    body:JSON.stringify({
     title:draft.title,activationCriteria:draft.activationCriteria,recoveryStrategy:draft.recoveryStrategy,
     communicationPlan:draft.communicationPlan,returnToNormal:draft.returnToNormal,
-    steps:draft.steps.map(step=>({lineageKey:step.lineageKey,phase:step.phase,sortOrder:step.sortOrder,title:step.title,instructions:step.instructions,expectedMinutes:step.expectedMinutes,ownerUserId:step.ownerUserId||null,required:step.required}))
+    steps:draft.steps.map(step=>({lineageKey:step.lineageKey,sourceLineageKeys:step.sourceLineageKeys,phase:step.phase,sortOrder:step.sortOrder,title:step.title,instructions:step.instructions,expectedMinutes:step.expectedMinutes,ownerUserId:step.ownerUserId||null,required:step.required}))
    })
   });
   setMessage("Rascunho salvo.");
@@ -578,7 +613,7 @@ export default function ContinuidadePage(){
     <p><strong>Linhagem:</strong> {proposal.basePlanVersion?"v"+proposal.basePlanVersion:"sem baseline"} → v{proposal.targetPlanVersion}</p>
     <p><strong>Recorrência:</strong> {proposal.recurrenceKey}</p>
     <p>{proposal.proposalText}</p>
-    <p><strong>Diff:</strong> {proposal.diffSummary.totalChanges} alteração(ões) · {proposal.diffSummary.fieldsChanged} campo(s) gerais · {proposal.diffSummary.stepsAdded} etapa(s) adicionada(s) · {proposal.diffSummary.stepsModified} modificada(s) · {proposal.diffSummary.stepsRemoved} removida(s)</p>
+    <p><strong>Diff:</strong> {proposal.diffSummary.totalChanges} alteração(ões) · {proposal.diffSummary.fieldsChanged} campo(s) gerais · {proposal.diffSummary.stepsAdded} adicionada(s) · {proposal.diffSummary.stepsModified} modificada(s) · {proposal.diffSummary.stepsRemoved} removida(s) · {proposal.diffSummary.stepsSplit??0} divisão(ões) · {proposal.diffSummary.stepsMerged??0} fusão(ões) · {proposal.diffSummary.stepsDerived??0} derivada(s)</p>
     {proposal.status==="PROPOSED"&&proposal.diffSummary.totalChanges===0&&<p><strong>Atenção:</strong> nenhuma alteração estrutural foi detectada entre a revisão-base e o rascunho-alvo.</p>}
     {proposal.effectivenessOutcome&&<p><strong>Eficácia:</strong> {proposal.effectivenessOutcome==="IMPROVED"?"Melhorou":proposal.effectivenessOutcome==="REGRESSED"?"Regrediu":proposal.effectivenessOutcome==="STABLE"?"Estável":"Sem baseline"}{proposal.baselineExerciseResult?" · antes "+proposal.baselineExerciseResult:""}{proposal.verificationExerciseResult?" · depois "+proposal.verificationExerciseResult:""}</p>}
     {proposal.recommendationSeverity==="CRITICAL"&&<p><strong>Dupla aprovação:</strong> {proposal.approvedCount}/2 válidas · {proposal.expiredApprovalCount} vencida(s) · {proposal.rejectedCount} rejeição(ões) · {proposal.criticalApprovalSatisfied?"liberada":"pendente"}</p>}
@@ -643,6 +678,8 @@ export default function ContinuidadePage(){
       <label>Responsável<select value={step.ownerUserId??""} onChange={e=>patchStep(index,{ownerUserId:e.target.value||null})}><option value="">Selecionar responsável</option>{(runbook?.operators??[]).map(person=><option key={person.id} value={person.id}>{person.displayName+" · "+person.matricula+(person.jobTitle?" · "+person.jobTitle:"")}</option>)}</select></label>
       <label>Tempo esperado (min)<input type="number" min="1" max="10080" value={step.expectedMinutes} onChange={e=>patchStep(index,{expectedMinutes:Number(e.target.value)})}/></label>
       <label>Obrigatoriedade<select value={step.required?"required":"optional"} onChange={e=>patchStep(index,{required:e.target.value==="required"})}><option value="required">Obrigatória</option><option value="optional">Opcional</option></select></label>
+      {step.sourceLineageKeys?.length?<p><small><strong>Linhagem múltipla:</strong> derivada de {step.sourceLineageKeys.length} etapa(s) da revisão-base.</small></p>:step.lineageKey?<p><small>Identidade preservada entre revisões.</small></p>:null}
+      <div className="headerActions"><button type="button" className="secondaryLink" disabled={busy||draft.steps.length>=80} onClick={()=>splitDraftStep(index)}>Dividir etapa</button>{index<draft.steps.length-1&&<button type="button" className="secondaryLink" disabled={busy||draft.steps.length<=6} onClick={()=>mergeDraftStepWithNext(index)}>Fundir com próxima</button>}</div>
      </article>)}
     </div>
     <div className="headerActions"><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void saveDraft()}>Salvar rascunho</button><button type="button" className="primaryButton" disabled={busy} onClick={()=>void activateDraft()}>Validar e ativar</button></div>
