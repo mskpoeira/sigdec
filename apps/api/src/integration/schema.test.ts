@@ -646,6 +646,25 @@ test("SIGDEC v1.37 possui linhagem multipla e impactos estruturais explicitos",a
  assert.match(impactDefs,/DERIVED/);
 });
 
+test("SIGDEC v1.38 possui metas quantitativas de eficacia",async()=>{
+ const table=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name='sidec_continuity_effectiveness_targets'`);
+ assert.equal(table.rowCount,1);
+
+ const defs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_effectiveness_targets'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(defs,/DEFAULT/);
+ assert.match(defs,/CATEGORY/);
+ assert.match(defs,/RECURRENCE/);
+ assert.match(defs,/min_verified_rate/);
+ assert.match(defs,/max_avg_verification_hours/);
+
+ const unique=await db.query(`SELECT 1 FROM pg_indexes
+  WHERE tablename='sidec_continuity_effectiveness_targets'
+    AND indexdef LIKE '%organization_id%scope_type%scope_value%'`);
+ assert.ok((unique.rowCount??0)>=1);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
