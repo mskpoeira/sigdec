@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
@@ -5,10 +6,12 @@ import { db } from "../db.js";
 import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSidecRunbookActivation } from "../lib/sidec-runbook.js";
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
+import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
 const runbookStepSchema=z.object({
+ lineageKey:z.string().uuid().optional(),
  phase:phaseSchema,
  sortOrder:z.number().int().min(1).max(10000),
  title:z.string().trim().min(3).max(240),
@@ -117,6 +120,11 @@ const changeEvidenceSchema=z.object({
  contentHash:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional()
 });
 
+const changeApprovalSchema=z.object({
+ decision:z.enum(["APPROVED","REJECTED"]),
+ notes:z.string().trim().min(5).max(8000)
+});
+
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
  z.object({status:z.literal("APPLIED"),notes:z.string().trim().min(5).max(8000)}),
  z.object({status:z.literal("VERIFIED"),verificationExerciseId:z.string().uuid(),notes:z.string().trim().min(5).max(8000)}),
@@ -178,7 +186,7 @@ async function loadRunbookPlan(org:string,id:string){
   WHERE p.organization_id=$1 AND p.id=$2`,[org,id]);
  const plan=planResult.rows[0];
  if(!plan)return null;
- const steps=await db.query(`SELECT s.id,s.phase,s.sort_order AS "sortOrder",s.title,s.instructions,
+ const steps=await db.query(`SELECT s.id,s.lineage_key AS "lineageKey",s.phase,s.sort_order AS "sortOrder",s.title,s.instructions,
    s.expected_minutes AS "expectedMinutes",s.owner_user_id AS "ownerUserId",s.required,
    u.display_name AS "ownerName",u.matricula AS "ownerMatricula",u.job_title AS "ownerJobTitle"
   FROM sidec_continuity_steps s
@@ -206,15 +214,12 @@ async function buildRunbookDiff(org:string,targetPlanId:string,basePlanId?:strin
   const after=(target as any)[field]??null;
   return before===after?[]:[{field,label,before,after}];
  });
- const key=(step:any)=>`${String(step.phase)}:${Number(step.sortOrder)}`;
+ const key=(step:any)=>String(step.lineageKey??`${String(step.phase)}:${Number(step.sortOrder)}`);
  const baseMap=new Map<string,any>();
  for(const step of base?.steps??[])baseMap.set(key(step),step);
  const targetMap=new Map<string,any>();
  for(const step of target.steps??[])targetMap.set(key(step),step);
- const keys=[...new Set([...baseMap.keys(),...targetMap.keys()])].sort((a,b)=>{
-  const ao=Number(a.split(":").at(-1)??0),bo=Number(b.split(":").at(-1)??0);
-  return ao-bo||a.localeCompare(b);
- });
+ const keys=[...new Set([...baseMap.keys(),...targetMap.keys()])];
  const steps:any[]=[];
  for(const stepKey of keys){
   const before=baseMap.get(stepKey),after=targetMap.get(stepKey);
@@ -227,12 +232,13 @@ async function buildRunbookDiff(org:string,targetPlanId:string,basePlanId?:strin
    continue;
   }
   if(!before||!after)continue;
-  const changedFields=["title","instructions","expectedMinutes","ownerUserId","required"].filter(field=>{
+  const changedFields=["phase","sortOrder","title","instructions","expectedMinutes","ownerUserId","required"].filter(field=>{
    const left=(before as any)[field]??null,right=(after as any)[field]??null;
    return left!==right;
   });
   if(changedFields.length)steps.push({stepKey,changeType:"MODIFIED",baseStepId:before.id,targetStepId:after.id,phase:after.phase,sortOrder:after.sortOrder,title:after.title,changedFields});
  }
+ steps.sort((a,b)=>Number(a.sortOrder)-Number(b.sortOrder)||String(a.stepKey).localeCompare(String(b.stepKey)));
  const summary={
   fieldsChanged:fields.length,
   stepsAdded:steps.filter(x=>x.changeType==="ADDED").length,
@@ -472,7 +478,7 @@ export async function continuityRoutes(app:FastifyInstance){
    ?(await db.query(`SELECT * FROM sidec_continuity_plans WHERE organization_id=$1 AND status='ACTIVE'`,[org])).rows[0]
    :null;
   const activeSteps=active
-   ?(await db.query(`SELECT phase,sort_order AS "sortOrder",title,instructions,expected_minutes AS "expectedMinutes",
+   ?(await db.query(`SELECT lineage_key AS "lineageKey",phase,sort_order AS "sortOrder",title,instructions,expected_minutes AS "expectedMinutes",
       owner_user_id AS "ownerUserId",required FROM sidec_continuity_steps WHERE plan_id=$1 ORDER BY sort_order`,[active.id])).rows
    :null;
   const defaults=defaultSidecRunbookSteps(auth.userId);
@@ -501,9 +507,9 @@ export async function continuityRoutes(app:FastifyInstance){
    const id=String(created.rows[0].id);
    for(const step of sourceSteps){
     await client.query(`INSERT INTO sidec_continuity_steps(
-      plan_id,phase,sort_order,title,instructions,expected_minutes,owner_user_id,required
-     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[
-      id,step.phase,Number(step.sortOrder),step.title,step.instructions,Number(step.expectedMinutes),
+      plan_id,lineage_key,phase,sort_order,title,instructions,expected_minutes,owner_user_id,required
+     ) VALUES($1,COALESCE($2::uuid,gen_random_uuid()),$3,$4,$5,$6,$7,$8,$9)`,[
+      id,step.lineageKey??null,step.phase,Number(step.sortOrder),step.title,step.instructions,Number(step.expectedMinutes),
       step.ownerUserId??auth.userId,Boolean(step.required)
     ]);
    }
@@ -545,12 +551,21 @@ export async function continuityRoutes(app:FastifyInstance){
     parsed.data.title,parsed.data.activationCriteria,parsed.data.recoveryStrategy,
     parsed.data.communicationPlan,parsed.data.returnToNormal,id,org
    ]);
+   const lineageKeys=parsed.data.steps.map(step=>step.lineageKey).filter((value):value is string=>Boolean(value));
+   if(new Set(lineageKeys).size!==lineageKeys.length)throw Object.assign(new Error("Identidade de etapa duplicada no rascunho."),{statusCode:400,code:"DUPLICATE_STEP_LINEAGE"});
+   if(lineageKeys.length){
+    const allowed=await client.query(`SELECT DISTINCT lineage_key::text AS key FROM sidec_continuity_steps
+      WHERE plan_id=$1 OR plan_id=$2`,[id,before.parentPlanId??id]);
+    const allowedSet=new Set(allowed.rows.map((row:any)=>String(row.key)));
+    const invalid=lineageKeys.filter(value=>!allowedSet.has(value));
+    if(invalid.length)throw Object.assign(new Error("Identidade de etapa não pertence à linhagem deste runbook."),{statusCode:400,code:"INVALID_STEP_LINEAGE"});
+   }
    await client.query("DELETE FROM sidec_continuity_steps WHERE plan_id=$1",[id]);
    for(const step of parsed.data.steps){
     await client.query(`INSERT INTO sidec_continuity_steps(
-      plan_id,phase,sort_order,title,instructions,expected_minutes,owner_user_id,required
-     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[
-      id,step.phase,step.sortOrder,step.title,step.instructions,step.expectedMinutes,step.ownerUserId??null,step.required
+      plan_id,lineage_key,phase,sort_order,title,instructions,expected_minutes,owner_user_id,required
+     ) VALUES($1,COALESCE($2::uuid,gen_random_uuid()),$3,$4,$5,$6,$7,$8,$9)`,[
+      id,step.lineageKey??null,step.phase,step.sortOrder,step.title,step.instructions,step.expectedMinutes,step.ownerUserId??null,step.required
     ]);
    }
    const afterSnapshot={...parsed.data,id,version:before.version,status:"DRAFT"};
