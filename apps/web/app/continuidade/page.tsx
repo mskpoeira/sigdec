@@ -24,10 +24,11 @@ type ActionMetrics={summary:{total:number;done:number;overdue:number;linkedRisks
 type RunbookRecommendation={id:string;recurrenceKey:string;category:string;severity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";title:string;rationale:string;occurrences:number;firstSeenAt:string;lastSeenAt:string;status:"OPEN"|"ACCEPTED"|"IMPLEMENTED"|"DISMISSED";resolutionNotes?:string|null;resolvedByName?:string|null};
 type EffectivenessHistory={recurrenceKey:string;history:Array<{exerciseId:string;planVersion:number;startedAt:string;completedAt?:string|null;actionId:string;title:string;status:string;effectiveness:string;effectivenessNotes?:string|null;effectivenessEvaluatedAt?:string|null}>};
 type ChangeEvidence={id:string;evidenceType:"NOTE"|"LINK"|"DOCUMENT"|"HASH";title:string;reference:string;contentHash?:string|null;createdAt:string;createdByName?:string|null};
-type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;validUntil?:string|null;revalidatedAt?:string|null;decidedById:string;decidedByName?:string|null};
+type ChangeApproval={id:string;decision:"APPROVED"|"REJECTED";notes:string;decidedAt:string;validUntil?:string|null;revalidatedAt?:string|null;decidedById:string;decidedByName?:string|null;authorityUserId?:string|null;authorityUserName?:string|null;delegationId?:string|null;delegated?:boolean};
+type ApprovalDelegation={id:string;delegatorUserId:string;delegatorName?:string|null;delegatorMatricula?:string|null;delegateUserId:string;delegateName?:string|null;delegateMatricula?:string|null;validFrom:string;validUntil:string;reason:string;revokedAt?:string|null;createdAt:string;status:"ACTIVE"|"SCHEDULED"|"EXPIRED"|"REVOKED"};
 type ChangePolicy={approvalValidHours:number;reportWormRetentionDays?:number|null;reportWormLegalHold:boolean;updatedAt?:string|null};
-type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;archived:number;archiveHealthy:number;approvalsExpiring24h:number;approvalsExpired:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>;byRecurrence:Array<{recurrenceKey:string;proposals:number;verified:number;improved:number;regressed:number;lastProposalAt:string}>};
-type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
+type ChangeMetrics={summary:{total:number;proposed:number;applied:number;verified:number;cancelled:number;critical:number;sealed:number;archived:number;archiveHealthy:number;replicated:number;replicaHealthy:number;activeDelegations:number;approvalsExpiring24h:number;approvalsExpired:number;improved:number;stable:number;regressed:number;noBaseline:number;verifiedRate?:number|null;improvedRate?:number|null;avgApplyHours?:number|null;avgVerificationHours?:number|null};bySeverity:Array<{severity:string;total:number;verified:number;improved:number;regressed:number}>;byMonth:Array<{month:string;total:number;verified:number;improved:number;regressed:number}>;byRecurrence:Array<{recurrenceKey:string;proposals:number;verified:number;improved:number;regressed:number;lastProposalAt:string}>};
+type ChangeProposal={id:string;recommendationId:string;recurrenceKey:string;recommendationTitle:string;recommendationStatus:string;recommendationSeverity:"LOW"|"MEDIUM"|"HIGH"|"CRITICAL";targetPlanId:string;targetPlanVersion:number;targetPlanTitle:string;targetPlanStatus:"DRAFT"|"ACTIVE"|"RETIRED";basePlanId?:string|null;basePlanVersion?:number|null;basePlanTitle?:string|null;proposalText:string;status:"PROPOSED"|"APPLIED"|"VERIFIED"|"CANCELLED";statusNotes?:string|null;appliedAt?:string|null;verifiedAt?:string|null;verificationExerciseId?:string|null;verificationExerciseResult?:string|null;verificationExerciseStartedAt?:string|null;baselineExerciseId?:string|null;baselineExerciseResult?:string|null;effectivenessOutcome?:"NO_BASELINE"|"IMPROVED"|"STABLE"|"REGRESSED"|null;diffSummary:{fieldsChanged:number;stepsAdded:number;stepsModified:number;stepsRemoved:number;totalChanges:number};createdAt:string;createdById?:string|null;createdByName?:string|null;appliedByName?:string|null;verifiedByName?:string|null;approvedCount:number;expiredApprovalCount:number;rejectedCount:number;criticalApprovalSatisfied:boolean;reportSealed:boolean;reportArchived:boolean;reportArchiveHealthy:boolean;reportHash?:string|null;reportSealKeyId?:string|null;reportSealFingerprint?:string|null;reportSealedAt?:string|null;reportSealedByName?:string|null;reportArchiveBucket?:string|null;reportArchiveObjectKey?:string|null;reportArchiveRetainUntil?:string|null;reportArchiveLegalHold?:boolean|null;reportArchivedAt?:string|null;reportArchiveVerifiedAt?:string|null;reportArchiveErrorMessage?:string|null;reportReplicaCreated:boolean;reportReplicaHealthy:boolean;reportReplicationHealthy:boolean;reportReplicaBucket?:string|null;reportReplicaObjectKey?:string|null;reportReplicaRetainUntil?:string|null;reportReplicaLegalHold?:boolean|null;reportReplicatedAt?:string|null;reportReplicaVerifiedAt?:string|null;reportReplicaErrorMessage?:string|null;approvals:ChangeApproval[];evidence:ChangeEvidence[];impacts?:Array<{id:string;stepKey:string;changeType:"ADDED"|"MODIFIED"|"REMOVED";phase:string;sortOrder:number;title:string;changedFields:string[]}>};
 
 const phaseLabels:Record<string,string>={DECLARATION:"Declaração",COMMUNICATION:"Comunicação",PRESERVATION:"Preservação",RECOVERY:"Recuperação",VALIDATION:"Validação",RETURN:"Retorno à normalidade"};
 const resultLabels:Record<string,string>={PASS:"Aprovado",PARTIAL:"Parcial",FAIL:"Falhou"};
@@ -48,6 +49,8 @@ export default function ContinuidadePage(){
  const [changeProposals,setChangeProposals]=useState<ChangeProposal[]>([]);
  const [changeMetrics,setChangeMetrics]=useState<ChangeMetrics|null>(null);
  const [changePolicy,setChangePolicy]=useState<ChangePolicy|null>(null);
+ const [approvalDelegations,setApprovalDelegations]=useState<ApprovalDelegation[]>([]);
+ const [delegationDraft,setDelegationDraft]=useState({delegateUserId:"",validUntil:"",reason:"Substituição temporária formal para decisões críticas do runbook SIDEC."});
  const [scheduleDraft,setScheduleDraft]=useState({name:"Exercício periódico SIDEC",intervalDays:90,nextDueAt:"",defaultScenario:"Exercício periódico de mesa para validar o Plano de Continuidade SIDEC e as evidências operacionais.",ownerUserId:""});
  const [contactDraft,setContactDraft]=useState({contactScope:"EXTERNAL",escalationLevel:1,name:"",roleTitle:"",organizationName:"",channelType:"PHONE",channelValue:"",notes:""});
  const [lessonDraft,setLessonDraft]=useState({category:"PROCESS",recurrenceKey:"",title:"",observation:"",severity:"MEDIUM"});
@@ -76,7 +79,7 @@ export default function ContinuidadePage(){
 
  const load=useCallback(async()=>{
   try{
-   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats,policy]=await Promise.all([
+   const [r,e,s,cnt,aa,ls,refs,metrics,recommendations,history,proposals,changeStats,policy,delegations]=await Promise.all([
     request("/api/v1/sidec/continuity/runbook"),
     request("/api/v1/sidec/continuity/exercises"),
     request("/api/v1/sidec/continuity/schedules"),
@@ -89,7 +92,8 @@ export default function ContinuidadePage(){
     request("/api/v1/sidec/continuity/actions/effectiveness-history"),
     request("/api/v1/sidec/continuity/runbook/change-proposals"),
     request("/api/v1/sidec/continuity/runbook/change-metrics"),
-    request("/api/v1/sidec/continuity/runbook/change-policy")
+    request("/api/v1/sidec/continuity/runbook/change-policy"),
+    request("/api/v1/sidec/continuity/runbook/approval-delegations")
    ]);
    if(r)setRunbook(r);
    if(e)setExercises(e.items??[]);
@@ -104,6 +108,7 @@ export default function ContinuidadePage(){
    if(proposals)setChangeProposals(proposals.items??[]);
    if(changeStats)setChangeMetrics(changeStats);
    if(policy)setChangePolicy(policy);
+   if(delegations)setApprovalDelegations(delegations.items??[]);
    setError("");
   }catch(err){setError(err instanceof Error?err.message:"Serviço indisponível.")}
  },[request]);
@@ -304,6 +309,23 @@ export default function ContinuidadePage(){
   setMessage("Política de governança das mudanças atualizada.");
  });
 
+ const createApprovalDelegation=()=>act(async()=>{
+  if(!delegationDraft.delegateUserId)throw new Error("Selecione o usuário que receberá a delegação.");
+  if(!delegationDraft.validUntil)throw new Error("Informe a validade da delegação.");
+  if(delegationDraft.reason.trim().length<5)throw new Error("Informe a fundamentação da delegação.");
+  await request("/api/v1/sidec/continuity/runbook/approval-delegations",{
+   method:"POST",body:JSON.stringify({delegateUserId:delegationDraft.delegateUserId,validUntil:delegationDraft.validUntil,reason:delegationDraft.reason})
+  });
+  setDelegationDraft({delegateUserId:"",validUntil:"",reason:"Substituição temporária formal para decisões críticas do runbook SIDEC."});
+  setMessage("Delegação temporária registrada com trilha de auditoria.");
+ });
+
+ const revokeApprovalDelegation=(item:ApprovalDelegation)=>act(async()=>{
+  if(!window.confirm(`Revogar a delegação de ${item.delegateName??item.delegateMatricula??"usuário"}?`))return;
+  await request(`/api/v1/sidec/continuity/runbook/approval-delegations/${item.id}/revoke`,{method:"POST",body:"{}"});
+  setMessage("Delegação revogada. O histórico foi preservado.");
+ });
+
  const decideCriticalProposal=(proposal:ChangeProposal,decision:"APPROVED"|"REJECTED")=>act(async()=>{
   const defaultNote=decision==="APPROVED"?"Mudança crítica analisada e aprovada para aplicação controlada.":"Mudança crítica rejeitada após análise.";
   const notes=window.prompt("Fundamentação da decisão:",defaultNote);
@@ -334,6 +356,44 @@ export default function ContinuidadePage(){
  const verifyArchivedChangeReport=(proposal:ChangeProposal)=>act(async()=>{
   const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/verify`,{method:"POST",body:"{}"});
   setMessage(result?.existsRemote&&result?.hashValid?"Arquivo WORM íntegro e disponível.":"A verificação do arquivo WORM indicou problema.");
+ });
+
+ const replicateChangeReport=(proposal:ChangeProposal)=>act(async()=>{
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/replicate`,{method:"POST",body:"{}"});
+  setMessage(result?.verification?.hashValid?"Réplica WORM secundária criada e validada.":"Operação de réplica concluída.");
+ });
+
+ const verifyChangeReportReplica=(proposal:ChangeProposal)=>act(async()=>{
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/replica/verify`,{method:"POST",body:"{}"});
+  setMessage(result?.existsRemote&&result?.hashValid?"Réplica WORM íntegra.":"A verificação da réplica indicou problema.");
+ });
+
+ const syncChangeReportReplica=(proposal:ChangeProposal)=>act(async()=>{
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/replica/sync-policy`,{method:"POST",body:"{}"});
+  setMessage(result?.synced?"Política da réplica sincronizada com o WORM principal.":"Sincronização concluída.");
+ });
+
+ const extendChangeReportRetention=(proposal:ChangeProposal)=>act(async()=>{
+  const current=proposal.reportArchiveRetainUntil?new Date(proposal.reportArchiveRetainUntil):new Date();
+  current.setDate(current.getDate()+30);
+  const retainUntil=window.prompt("Nova retenção até (ISO 8601 ou data reconhecida pelo navegador):",current.toISOString());
+  if(retainUntil===null)return;
+  if(Number.isNaN(new Date(retainUntil).getTime()))throw new Error("Data de retenção inválida.");
+  const reason=window.prompt("Fundamentação para ampliar a retenção:","Ampliação administrativa da preservação do relatório selado.");
+  if(reason===null||reason.trim().length<5)throw new Error("Informe a fundamentação.");
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/retention/extend`,{
+   method:"POST",body:JSON.stringify({retainUntil,reason})
+  });
+  setMessage(result?.verification?.hashValid?"Retenção ampliada e integridade revalidada.":"Retenção ampliada.");
+ });
+
+ const enableChangeReportLegalHold=(proposal:ChangeProposal)=>act(async()=>{
+  const reason=window.prompt("Fundamentação para ativar legal hold:","Preservação administrativa sem liberação automática.");
+  if(reason===null||reason.trim().length<5)throw new Error("Informe a fundamentação.");
+  const result=await request(`/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report/archive/legal-hold`,{
+   method:"POST",body:JSON.stringify({reason})
+  });
+  setMessage(result?.verification?.hashValid?"Legal hold ativado e integridade revalidada.":"Legal hold ativado.");
  });
 
  const applyChangeProposal=(proposal:ChangeProposal)=>act(async()=>{
@@ -382,7 +442,7 @@ export default function ContinuidadePage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.34</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
+   <div><span className="eyebrow">SIGDEC · CONTINUIDADE SIDEC · v1.35</span><h1>Plano de Continuidade e Runbook</h1><p>Versões controladas, responsáveis nominais e exercícios de mesa auditáveis. Esta tela não executa failover real automaticamente.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>
   {error&&<p className="errorMessage">{error}</p>}{message&&<p className="formMessage">{message}</p>}
@@ -471,11 +531,22 @@ export default function ContinuidadePage(){
     <p><small>A política é operacional e não substitui eventual temporalidade legal ou arquivística aplicável.</small></p>
     <button type="button" className="secondaryLink" disabled={busy} onClick={()=>void configureChangePolicy()}>Configurar política</button>
    </div>
+   <div className="card" style={{marginBottom:12}}>
+    <h2>Delegação temporária de aprovação</h2>
+    <p>O substituto decide em nome da autoridade delegante por prazo determinado. O quórum continua exigindo duas autoridades originárias independentes.</p>
+    <div className="incidentForm">
+     <label>Delegado<select value={delegationDraft.delegateUserId} onChange={e=>setDelegationDraft(v=>({...v,delegateUserId:e.target.value}))}><option value="">Selecionar usuário</option>{(runbook?.operators??[]).map(person=><option key={person.id} value={person.id}>{person.displayName+" · "+person.matricula}</option>)}</select></label>
+     <label>Válida até<input type="datetime-local" value={delegationDraft.validUntil} onChange={e=>setDelegationDraft(v=>({...v,validUntil:e.target.value}))}/></label>
+     <label>Fundamentação<input value={delegationDraft.reason} onChange={e=>setDelegationDraft(v=>({...v,reason:e.target.value}))}/></label>
+     <button type="button" className="secondaryLink" disabled={busy||!delegationDraft.delegateUserId||!delegationDraft.validUntil} onClick={()=>void createApprovalDelegation()}>Criar delegação</button>
+    </div>
+    {approvalDelegations.filter(item=>item.status==="ACTIVE"||item.status==="SCHEDULED").length===0?<p><small>Nenhuma delegação vigente ou programada.</small></p>:approvalDelegations.filter(item=>item.status==="ACTIVE"||item.status==="SCHEDULED").map(item=><p key={item.id}><small><strong>{item.status}</strong> · {item.delegatorName??item.delegatorMatricula} → {item.delegateName??item.delegateMatricula} · {new Date(item.validFrom).toLocaleString("pt-BR")} até {new Date(item.validUntil).toLocaleString("pt-BR")} · {item.reason} <button type="button" className="secondaryLink" disabled={busy} onClick={()=>void revokeApprovalDelegation(item)}>Revogar</button></small></p>)}
+   </div>
    {changeMetrics&&<div className="dataGrid">
     <article className="card"><h2>Total de propostas</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.total}</p><p>{changeMetrics.summary.proposed} proposta(s) · {changeMetrics.summary.applied} aplicada(s) · {changeMetrics.summary.verified} verificada(s)</p></article>
-    <article className="card"><h2>Verificação</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.verifiedRate==null?"—":Number(changeMetrics.summary.verifiedRate).toFixed(1)+"%"}</p><p>{changeMetrics.summary.sealed} selado(s) · {changeMetrics.summary.archived} em WORM · {changeMetrics.summary.archiveHealthy} íntegro(s)</p></article>
+    <article className="card"><h2>Verificação</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.verifiedRate==null?"—":Number(changeMetrics.summary.verifiedRate).toFixed(1)+"%"}</p><p>{changeMetrics.summary.sealed} selado(s) · {changeMetrics.summary.archived} em WORM · {changeMetrics.summary.archiveHealthy} íntegro(s) · {changeMetrics.summary.replicated} réplica(s) · {changeMetrics.summary.replicaHealthy} réplica(s) íntegra(s)</p></article>
     <article className={changeMetrics.summary.regressed>0?"warningCard":"card"}><h2>Eficácia</h2><p>{changeMetrics.summary.improved} melhorou · {changeMetrics.summary.stable} estável · {changeMetrics.summary.regressed} regrediu</p><p>{changeMetrics.summary.noBaseline} sem baseline · taxa de melhora {changeMetrics.summary.improvedRate==null?"—":Number(changeMetrics.summary.improvedRate).toFixed(1)+"%"}</p></article>
-    <article className={changeMetrics.summary.approvalsExpired>0?"warningCard":"card"}><h2>Governança crítica</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.critical}</p><p>{changeMetrics.summary.approvalsExpired} aprovação(ões) vencida(s) · {changeMetrics.summary.approvalsExpiring24h} vence(m) em até 24 h.</p></article>
+    <article className={changeMetrics.summary.approvalsExpired>0?"warningCard":"card"}><h2>Governança crítica</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.critical}</p><p>{changeMetrics.summary.approvalsExpired} aprovação(ões) vencida(s) · {changeMetrics.summary.approvalsExpiring24h} vence(m) em até 24 h · {changeMetrics.summary.activeDelegations} delegação(ões) ativa(s).</p></article>
     <article className="card"><h2>Tempo médio</h2><p>Aplicação: {changeMetrics.summary.avgApplyHours==null?"—":Number(changeMetrics.summary.avgApplyHours).toFixed(1)+" h"}</p><p>Aplicação → verificação: {changeMetrics.summary.avgVerificationHours==null?"—":Number(changeMetrics.summary.avgVerificationHours).toFixed(1)+" h"}</p></article>
    </div>}
    {changeMetrics&&changeMetrics.byRecurrence.length>0&&<div style={{marginTop:12}}>
@@ -502,7 +573,7 @@ export default function ContinuidadePage(){
     {proposal.status==="PROPOSED"&&proposal.diffSummary.totalChanges===0&&<p><strong>Atenção:</strong> nenhuma alteração estrutural foi detectada entre a revisão-base e o rascunho-alvo.</p>}
     {proposal.effectivenessOutcome&&<p><strong>Eficácia:</strong> {proposal.effectivenessOutcome==="IMPROVED"?"Melhorou":proposal.effectivenessOutcome==="REGRESSED"?"Regrediu":proposal.effectivenessOutcome==="STABLE"?"Estável":"Sem baseline"}{proposal.baselineExerciseResult?" · antes "+proposal.baselineExerciseResult:""}{proposal.verificationExerciseResult?" · depois "+proposal.verificationExerciseResult:""}</p>}
     {proposal.recommendationSeverity==="CRITICAL"&&<p><strong>Dupla aprovação:</strong> {proposal.approvedCount}/2 válidas · {proposal.expiredApprovalCount} vencida(s) · {proposal.rejectedCount} rejeição(ões) · {proposal.criticalApprovalSatisfied?"liberada":"pendente"}</p>}
-    {proposal.approvals?.map(item=>{const expired=item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=Date.now());return <p key={item.id}><small>{item.decision}{expired?" · VENCIDA":""} · {item.decidedByName??"Usuário"} · decisão {new Date(item.decidedAt).toLocaleString("pt-BR")}{item.validUntil?" · válida até "+new Date(item.validUntil).toLocaleString("pt-BR"):""}{item.revalidatedAt?" · revalidada "+new Date(item.revalidatedAt).toLocaleString("pt-BR"):""} · {item.notes}</small></p>})}
+    {proposal.approvals?.map(item=>{const expired=item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=Date.now());return <p key={item.id}><small>{item.decision}{expired?" · VENCIDA":""} · {item.decidedByName??"Usuário"}{item.delegated?" · delegado por "+(item.authorityUserName??"autoridade"):""} · decisão {new Date(item.decidedAt).toLocaleString("pt-BR")}{item.validUntil?" · válida até "+new Date(item.validUntil).toLocaleString("pt-BR"):""}{item.revalidatedAt?" · revalidada "+new Date(item.revalidatedAt).toLocaleString("pt-BR"):""} · {item.notes}</small></p>})}
     <p><strong>Evidências:</strong> {proposal.evidence.length}</p>
     {proposal.evidence.slice(-5).map(ev=><p key={ev.id}><small>{ev.evidenceType} · {ev.title} · {ev.reference}</small></p>)}
     {proposal.statusNotes&&<p><strong>Fundamentação:</strong> {proposal.statusNotes}</p>}
@@ -511,6 +582,8 @@ export default function ContinuidadePage(){
     {proposal.reportSealed&&<p><strong>Relatório selado:</strong> {proposal.reportSealedAt?new Date(proposal.reportSealedAt).toLocaleString("pt-BR"):"sim"}{proposal.reportSealedByName?" · "+proposal.reportSealedByName:""} · SHA-256 {proposal.reportHash?.slice(0,16)}… · chave {proposal.reportSealKeyId}</p>}
     {proposal.reportArchived&&<p><strong>WORM:</strong> arquivado em {proposal.reportArchivedAt?new Date(proposal.reportArchivedAt).toLocaleString("pt-BR"):"—"} · {proposal.reportArchiveHealthy?"íntegro":"aguardando/verificação com problema"}{proposal.reportArchiveRetainUntil?" · retenção até "+new Date(proposal.reportArchiveRetainUntil).toLocaleString("pt-BR"):""}{proposal.reportArchiveLegalHold?" · legal hold ativo":""}{proposal.reportArchiveVerifiedAt?" · verificado "+new Date(proposal.reportArchiveVerifiedAt).toLocaleString("pt-BR"):""}</p>}
     {proposal.reportArchiveErrorMessage&&<p><strong>Arquivo WORM:</strong> {proposal.reportArchiveErrorMessage}</p>}
+    {proposal.reportReplicaCreated&&<p><strong>Réplica WORM:</strong> {proposal.reportReplicaHealthy?"íntegra":"aguardando/verificação com problema"}{proposal.reportReplicatedAt?" · criada "+new Date(proposal.reportReplicatedAt).toLocaleString("pt-BR"):""}{proposal.reportReplicaRetainUntil?" · retenção até "+new Date(proposal.reportReplicaRetainUntil).toLocaleString("pt-BR"):""}{proposal.reportReplicaLegalHold?" · legal hold ativo":""}{proposal.reportReplicaVerifiedAt?" · verificada "+new Date(proposal.reportReplicaVerifiedAt).toLocaleString("pt-BR"):""}</p>}
+    {proposal.reportReplicaErrorMessage&&<p><strong>Réplica WORM:</strong> {proposal.reportReplicaErrorMessage}</p>}
     <div className="headerActions">
      {(proposal.status==="PROPOSED"||proposal.status==="APPLIED")&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void addChangeEvidence(proposal)}>Adicionar evidência</button>}
      {proposal.status==="PROPOSED"&&proposal.recommendationSeverity==="CRITICAL"&&<><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"APPROVED")}>{proposal.expiredApprovalCount>0?"Aprovar / revalidar":"Aprovar mudança crítica"}</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"REJECTED")}>Rejeitar mudança crítica</button></>}
@@ -521,6 +594,11 @@ export default function ContinuidadePage(){
      {proposal.reportSealed&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyChangeReportSeal(proposal)}>Verificar selo</button>}
      {proposal.reportSealed&&!proposal.reportArchived&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void archiveChangeReport(proposal)}>Arquivar no WORM</button>}
      {proposal.reportArchived&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyArchivedChangeReport(proposal)}>Verificar WORM</button>}
+     {proposal.reportArchived&&!proposal.reportReplicaCreated&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void replicateChangeReport(proposal)}>Criar réplica WORM</button>}
+     {proposal.reportReplicaCreated&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyChangeReportReplica(proposal)}>Verificar réplica</button>}
+     {proposal.reportReplicaCreated&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void syncChangeReportReplica(proposal)}>Sincronizar réplica</button>}
+     {proposal.reportArchived&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void extendChangeReportRetention(proposal)}>Ampliar retenção</button>}
+     {proposal.reportArchived&&!proposal.reportArchiveLegalHold&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void enableChangeReportLegalHold(proposal)}>Ativar legal hold</button>}
      <a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report.pdf`}>{proposal.reportSealed?"Relatório selado PDF":"Relatório da mudança PDF"}</a>
     </div>
    </article>)}</div>

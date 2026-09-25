@@ -7,7 +7,7 @@ import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSid
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
 import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
-import { archiveSidecContinuityChangeReport,verifySidecArchive } from "../lib/sidec-worm.js";
+import { archiveSidecContinuityChangeReport,archiveSidecContinuityChangeReportReplica,enableSidecArchiveLegalHold,enableSidecReplicaLegalHold,extendSidecArchiveRetention,extendSidecReplicaRetention,verifySidecArchive,verifySidecReplica,wormMode,wormReplicaEnabled,wormReplicaMode } from "../lib/sidec-worm.js";
 
 const phaseSchema=z.enum(["DECLARATION","COMMUNICATION","PRESERVATION","RECOVERY","VALIDATION","RETURN"]);
 
@@ -130,6 +130,22 @@ const changePolicySchema=z.object({
  approvalValidHours:z.number().int().min(1).max(2160),
  reportWormRetentionDays:z.number().int().min(1).max(36500).nullable(),
  reportWormLegalHold:z.boolean()
+});
+
+const approvalDelegationSchema=z.object({
+ delegateUserId:z.string().uuid(),
+ validFrom:z.coerce.date().optional(),
+ validUntil:z.coerce.date(),
+ reason:z.string().trim().min(5).max(4000)
+});
+
+const reportRetentionExtensionSchema=z.object({
+ retainUntil:z.coerce.date(),
+ reason:z.string().trim().min(5).max(4000)
+});
+
+const reportLegalHoldSchema=z.object({
+ reason:z.string().trim().min(5).max(4000)
 });
 
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
@@ -329,6 +345,169 @@ async function recordChangeReportArchiveVerification(input:{
    input.source,verification.errorMessage
   ]);
  return verification;
+}
+
+async function recordChangeReportReplicaVerification(input:{
+ org:string;proposalId:string;source:"REPLICATION"|"MANUAL"|"SCHEDULED"|"POLICY";
+ bucket:string;key:string;versionId?:string|null;expectedHash:string;
+}){
+ const verification=await verifySidecReplica({
+  bucket:input.bucket,key:input.key,versionId:input.versionId,expectedHash:input.expectedHash
+ });
+ await db.query(`INSERT INTO sidec_continuity_change_report_replica_verifications(
+   proposal_id,organization_id,expected_hash,observed_hash,exists_remote,hash_valid,object_lock_mode,
+   retain_until,legal_hold,verification_source,error_message
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[
+   input.proposalId,input.org,input.expectedHash,verification.observedHash,verification.existsRemote,
+   verification.hashValid,verification.objectLockMode,verification.retainUntil,verification.legalHold,
+   input.source,verification.errorMessage
+  ]);
+ return verification;
+}
+
+async function activeApprovalDelegation(org:string,delegateUserId:string){
+ const result=await db.query(`SELECT d.id,d.delegator_user_id AS "delegatorUserId",d.delegate_user_id AS "delegateUserId",
+   d.valid_from AS "validFrom",d.valid_until AS "validUntil",d.reason,
+   u.display_name AS "delegatorName",u.matricula AS "delegatorMatricula"
+  FROM sidec_continuity_approval_delegations d
+  JOIN users u ON u.id=d.delegator_user_id
+  JOIN user_roles ur ON ur.user_id=d.delegator_user_id
+  JOIN role_permissions rp ON rp.role_id=ur.role_id
+  JOIN permissions p ON p.id=rp.permission_id AND p.code='sidec_continuity_change.approve'
+  WHERE d.organization_id=$1 AND d.delegate_user_id=$2 AND d.revoked_at IS NULL
+    AND d.valid_from<=now() AND d.valid_until>now()
+  ORDER BY d.valid_until DESC LIMIT 1`,[org,delegateUserId]);
+ return result.rows[0]??null;
+}
+
+async function recordChangeReportPolicyEvent(input:{
+ org:string;proposalId:string;destination:"PRIMARY"|"REPLICA";
+ eventType:"RETENTION_EXTENDED"|"LEGAL_HOLD_ENABLED"|"REPLICA_CREATED";
+ previousRetainUntil?:Date|string|null;newRetainUntil?:Date|string|null;
+ previousLegalHold?:boolean|null;newLegalHold?:boolean|null;reason:string;actorUserId?:string|null;
+}){
+ await db.query(`INSERT INTO sidec_continuity_change_report_policy_events(
+   proposal_id,organization_id,destination,event_type,previous_retain_until,new_retain_until,
+   previous_legal_hold,new_legal_hold,reason,actor_user_id
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[
+   input.proposalId,input.org,input.destination,input.eventType,input.previousRetainUntil??null,input.newRetainUntil??null,
+   input.previousLegalHold??null,input.newLegalHold??null,input.reason,input.actorUserId??null
+  ]);
+}
+
+async function createChangeReportReplica(org:string,id:string,userId:string|null){
+ if(!wormReplicaEnabled())return {enabled:false,created:false,error:"WORM_REPLICA_DISABLED"};
+ const existing=await db.query(`SELECT proposal_id AS "proposalId",bucket,object_key AS "objectKey",version_id AS "versionId",
+   object_lock_mode AS "objectLockMode",retain_until AS "retainUntil",legal_hold AS "legalHold",
+   content_hash AS "contentHash",replicated_at AS "replicatedAt"
+  FROM sidec_continuity_change_report_replicas WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+ if(existing.rows[0]){
+  const row=existing.rows[0] as any;
+  const verification=await recordChangeReportReplicaVerification({
+   org,proposalId:id,source:"MANUAL",bucket:row.bucket,key:row.objectKey,
+   versionId:row.versionId??null,expectedHash:String(row.contentHash)
+  });
+  return {enabled:true,created:false,receipt:row,verification};
+ }
+ const source=await db.query(`SELECT s.report_hash AS "reportHash",s.report_bytes AS "reportBytes",
+   p.retain_until AS "receiptRetainUntil",p.legal_hold AS "receiptLegalHold",
+   pv.retain_until AS "verifiedRetainUntil",pv.legal_hold AS "verifiedLegalHold"
+  FROM sidec_continuity_change_report_seals s
+  JOIN sidec_continuity_change_report_archives p ON p.proposal_id=s.proposal_id
+  LEFT JOIN LATERAL (
+   SELECT retain_until,legal_hold FROM sidec_continuity_change_report_archive_verifications x
+   WHERE x.proposal_id=s.proposal_id AND x.exists_remote=true AND x.hash_valid=true
+   ORDER BY verified_at DESC LIMIT 1
+  ) pv ON true
+  WHERE s.proposal_id=$1 AND s.organization_id=$2`,[id,org]);
+ const item=source.rows[0] as any;
+ if(!item)throw Object.assign(new Error("Arquivo WORM principal do relatório não encontrado."),{statusCode:409,code:"PRIMARY_REPORT_ARCHIVE_REQUIRED"});
+ const retainUntil=item.verifiedRetainUntil??item.receiptRetainUntil??null;
+ const legalHold=Boolean(item.verifiedLegalHold??item.receiptLegalHold);
+ const archived=await archiveSidecContinuityChangeReportReplica({
+  content:item.reportBytes as Buffer,reportHash:String(item.reportHash),proposalId:id,
+  fileName:`SIGDEC-continuity-change-${id}-sealed.pdf`,
+  retention:{retainUntil:retainUntil?new Date(retainUntil):null,legalHold}
+ });
+ const inserted=await db.query(`INSERT INTO sidec_continuity_change_report_replicas(
+   proposal_id,organization_id,destination_code,bucket,object_key,version_id,etag,storage_class,object_lock_mode,
+   retain_until,legal_hold,content_hash,replicated_by
+  ) VALUES($1,$2,'SECONDARY',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  ON CONFLICT(proposal_id) DO NOTHING
+  RETURNING proposal_id AS "proposalId",destination_code AS "destinationCode",bucket,object_key AS "objectKey",
+   version_id AS "versionId",etag,storage_class AS "storageClass",object_lock_mode AS "objectLockMode",
+   retain_until AS "retainUntil",legal_hold AS "legalHold",content_hash AS "contentHash",replicated_at AS "replicatedAt"`,[
+   id,org,archived.bucket,archived.key,archived.versionId,archived.etag,archived.storageClass,
+   archived.objectLockMode,archived.retainUntil,archived.legalHold,item.reportHash,userId
+  ]);
+ const receipt=inserted.rows[0] as any;
+ const verification=await recordChangeReportReplicaVerification({
+  org,proposalId:id,source:"REPLICATION",bucket:receipt.bucket,key:receipt.objectKey,
+  versionId:receipt.versionId??null,expectedHash:String(item.reportHash)
+ });
+ await recordChangeReportPolicyEvent({
+  org,proposalId:id,destination:"REPLICA",eventType:"REPLICA_CREATED",
+  newRetainUntil:verification.retainUntil??receipt.retainUntil,newLegalHold:Boolean(verification.legalHold),
+  reason:"Réplica WORM secundária criada para o relatório selado.",actorUserId:userId
+ });
+ return {enabled:true,created:true,receipt,verification};
+}
+
+async function syncChangeReportReplicaPolicy(org:string,id:string,userId:string|null,reason:string){
+ if(!wormReplicaEnabled())return {enabled:false,synced:false,error:"WORM_REPLICA_DISABLED"};
+ const result=await db.query(`SELECT p.retain_until AS "primaryReceiptRetainUntil",p.legal_hold AS "primaryReceiptLegalHold",
+   pv.retain_until AS "primaryVerifiedRetainUntil",pv.legal_hold AS "primaryVerifiedLegalHold",
+   r.bucket,r.object_key AS "objectKey",r.version_id AS "versionId",r.object_lock_mode AS "objectLockMode",
+   r.retain_until AS "replicaReceiptRetainUntil",r.legal_hold AS "replicaReceiptLegalHold",r.content_hash AS "contentHash",
+   rv.retain_until AS "replicaVerifiedRetainUntil",rv.legal_hold AS "replicaVerifiedLegalHold"
+  FROM sidec_continuity_change_report_archives p
+  JOIN sidec_continuity_change_report_replicas r ON r.proposal_id=p.proposal_id
+  LEFT JOIN LATERAL (
+   SELECT retain_until,legal_hold FROM sidec_continuity_change_report_archive_verifications x
+   WHERE x.proposal_id=p.proposal_id AND x.exists_remote=true AND x.hash_valid=true
+   ORDER BY verified_at DESC LIMIT 1
+  ) pv ON true
+  LEFT JOIN LATERAL (
+   SELECT retain_until,legal_hold FROM sidec_continuity_change_report_replica_verifications x
+   WHERE x.proposal_id=p.proposal_id AND x.exists_remote=true AND x.hash_valid=true
+   ORDER BY verified_at DESC LIMIT 1
+  ) rv ON true
+  WHERE p.proposal_id=$1 AND p.organization_id=$2`,[id,org]);
+ const row=result.rows[0] as any;
+ if(!row)return {enabled:true,synced:false,error:"REPORT_REPLICA_NOT_FOUND"};
+ const desiredUntil=row.primaryVerifiedRetainUntil??row.primaryReceiptRetainUntil??null;
+ const desiredHold=Boolean(row.primaryVerifiedLegalHold??row.primaryReceiptLegalHold);
+ const currentUntil=row.replicaVerifiedRetainUntil??row.replicaReceiptRetainUntil??null;
+ const currentHold=Boolean(row.replicaVerifiedLegalHold??row.replicaReceiptLegalHold);
+ if(desiredUntil&&(!currentUntil||new Date(desiredUntil).getTime()>new Date(currentUntil).getTime())){
+  await extendSidecReplicaRetention({
+   bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null,
+   mode:(row.objectLockMode??wormReplicaMode()) as "GOVERNANCE"|"COMPLIANCE",retainUntil:new Date(desiredUntil)
+  });
+  await recordChangeReportPolicyEvent({
+   org,proposalId:id,destination:"REPLICA",eventType:"RETENTION_EXTENDED",
+   previousRetainUntil:currentUntil,newRetainUntil:desiredUntil,
+   previousLegalHold:currentHold,newLegalHold:currentHold,reason,actorUserId:userId
+  });
+ }
+ if(desiredHold&&!currentHold){
+  await enableSidecReplicaLegalHold({bucket:row.bucket,key:row.objectKey,versionId:row.versionId??null});
+  await recordChangeReportPolicyEvent({
+   org,proposalId:id,destination:"REPLICA",eventType:"LEGAL_HOLD_ENABLED",
+   previousRetainUntil:desiredUntil??currentUntil,newRetainUntil:desiredUntil??currentUntil,
+   previousLegalHold:false,newLegalHold:true,reason,actorUserId:userId
+  });
+ }
+ const verification=await recordChangeReportReplicaVerification({
+  org,proposalId:id,source:"POLICY",bucket:row.bucket,key:row.objectKey,
+  versionId:row.versionId??null,expectedHash:String(row.contentHash)
+ });
+ await db.query(`UPDATE sidec_continuity_change_report_replicas
+  SET retain_until=GREATEST(retain_until,$1::timestamptz),legal_hold=(legal_hold OR $2)
+  WHERE proposal_id=$3 AND organization_id=$4`,[
+   verification.retainUntil??currentUntil,Boolean(verification.legalHold),id,org
+  ]);
+ return {enabled:true,synced:verification.existsRemote&&verification.hashValid===true,verification};
 }
 
 async function loadChangeReportPayload(org:string,id:string){
@@ -534,17 +713,28 @@ export async function evaluateContinuityChangeReportArchives(organizationId?:str
    a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",a.content_hash AS "contentHash"
   FROM sidec_continuity_change_report_archives a ${where}
   ORDER BY a.archived_at ASC LIMIT 500`,params);
- let checked=0,failed=0;
+ let checked=0,failed=0,replicaChecked=0,replicaFailed=0;
  for(const row of rows.rows as Array<any>){
+  const org=String(row.organizationId),proposalId=String(row.proposalId);
   const result=await recordChangeReportArchiveVerification({
-   org:String(row.organizationId),proposalId:String(row.proposalId),source:"SCHEDULED",
-   bucket:String(row.bucket),key:String(row.objectKey),
+   org,proposalId,source:"SCHEDULED",bucket:String(row.bucket),key:String(row.objectKey),
    versionId:row.versionId?String(row.versionId):null,expectedHash:String(row.contentHash)
   });
   checked++;
   if(!result.existsRemote||result.hashValid!==true)failed++;
+  const replica=await db.query(`SELECT bucket,object_key AS "objectKey",version_id AS "versionId",content_hash AS "contentHash"
+   FROM sidec_continuity_change_report_replicas WHERE proposal_id=$1 AND organization_id=$2`,[proposalId,org]);
+  if(replica.rows[0]){
+   const rr=replica.rows[0] as any;
+   const verification=await recordChangeReportReplicaVerification({
+    org,proposalId,source:"SCHEDULED",bucket:String(rr.bucket),key:String(rr.objectKey),
+    versionId:rr.versionId?String(rr.versionId):null,expectedHash:String(rr.contentHash)
+   });
+   replicaChecked++;
+   if(!verification.existsRemote||verification.hashValid!==true)replicaFailed++;
+  }
  }
- return {checked,failed};
+ return {checked,failed,replicaChecked,replicaFailed};
 }
 
 export async function continuityRoutes(app:FastifyInstance){
@@ -1226,6 +1416,73 @@ export async function continuityRoutes(app:FastifyInstance){
   return updated.rows[0];
  });
 
+ app.get("/api/v1/sidec/continuity/runbook/approval-delegations",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const result=await db.query(`SELECT d.id,d.delegator_user_id AS "delegatorUserId",du.display_name AS "delegatorName",
+    du.matricula AS "delegatorMatricula",d.delegate_user_id AS "delegateUserId",eu.display_name AS "delegateName",
+    eu.matricula AS "delegateMatricula",d.valid_from AS "validFrom",d.valid_until AS "validUntil",d.reason,
+    d.revoked_at AS "revokedAt",d.created_at AS "createdAt",
+    CASE WHEN d.revoked_at IS NOT NULL THEN 'REVOKED'
+      WHEN d.valid_until<=now() THEN 'EXPIRED'
+      WHEN d.valid_from>now() THEN 'SCHEDULED'
+      ELSE 'ACTIVE' END AS status
+   FROM sidec_continuity_approval_delegations d
+   JOIN users du ON du.id=d.delegator_user_id
+   JOIN users eu ON eu.id=d.delegate_user_id
+   WHERE d.organization_id=$1
+   ORDER BY CASE WHEN d.revoked_at IS NULL AND d.valid_from<=now() AND d.valid_until>now() THEN 1 ELSE 2 END,
+    d.created_at DESC LIMIT 100`,[org]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/approval-delegations",{preHandler:requirePermission("sidec_continuity_change.delegate")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId);
+  const parsed=approvalDelegationSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  if(parsed.data.delegateUserId===auth.userId)return reply.code(409).send({error:"SELF_DELEGATION_NOT_ALLOWED"});
+  const delegate=await db.query(`SELECT id,display_name AS "displayName",matricula FROM users
+    WHERE id=$1 AND organization_id=$2 AND active=true`,[parsed.data.delegateUserId,org]);
+  if(!delegate.rows[0])return reply.code(404).send({error:"DELEGATE_NOT_FOUND"});
+  const validFrom=parsed.data.validFrom??new Date(),validUntil=parsed.data.validUntil;
+  if(validUntil.getTime()<=validFrom.getTime())return reply.code(400).send({error:"INVALID_DELEGATION_WINDOW"});
+  if(validUntil.getTime()-validFrom.getTime()>90*24*60*60*1000)return reply.code(400).send({error:"DELEGATION_MAX_90_DAYS"});
+  const overlap=await db.query(`SELECT id FROM sidec_continuity_approval_delegations
+    WHERE organization_id=$1 AND delegator_user_id=$2 AND delegate_user_id=$3 AND revoked_at IS NULL
+      AND valid_from<$5 AND valid_until>$4 LIMIT 1`,[org,auth.userId,parsed.data.delegateUserId,validFrom,validUntil]);
+  if(overlap.rows[0])return reply.code(409).send({error:"OVERLAPPING_DELEGATION",delegationId:overlap.rows[0].id});
+  const created=await db.query(`INSERT INTO sidec_continuity_approval_delegations(
+     organization_id,delegator_user_id,delegate_user_id,valid_from,valid_until,reason,created_by
+    ) VALUES($1,$2,$3,$4,$5,$6,$2)
+    RETURNING id,delegator_user_id AS "delegatorUserId",delegate_user_id AS "delegateUserId",
+      valid_from AS "validFrom",valid_until AS "validUntil",reason,created_at AS "createdAt"`,[
+     org,auth.userId,parsed.data.delegateUserId,validFrom,validUntil,parsed.data.reason
+    ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.approval_delegation_create','sidec_continuity_approval_delegation',$2,$3,$4,$5::jsonb)`,[
+     auth.userId,created.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify(created.rows[0])
+    ]);
+  return reply.code(201).send(created.rows[0]);
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/approval-delegations/:id/revoke",{preHandler:requirePermission("sidec_continuity_change.delegate")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const current=await db.query(`SELECT id,delegator_user_id AS "delegatorUserId",revoked_at AS "revokedAt"
+    FROM sidec_continuity_approval_delegations WHERE id=$1 AND organization_id=$2`,[id,org]);
+  const item=current.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"DELEGATION_NOT_FOUND"});
+  if(item.revokedAt)return reply.code(409).send({error:"DELEGATION_ALREADY_REVOKED"});
+  const master=auth.permissions.includes("system.master");
+  if(String(item.delegatorUserId)!==String(auth.userId)&&!master)return reply.code(403).send({error:"FORBIDDEN"});
+  const updated=await db.query(`UPDATE sidec_continuity_approval_delegations
+    SET revoked_at=now(),revoked_by=$1 WHERE id=$2 AND organization_id=$3
+    RETURNING id,revoked_at AS "revokedAt"`,[auth.userId,id,org]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+    VALUES($1,'sidec_continuity.approval_delegation_revoke','sidec_continuity_approval_delegation',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(item),JSON.stringify(updated.rows[0])
+    ]);
+  return updated.rows[0];
+ });
+
  app.get("/api/v1/sidec/continuity/runbook/change-metrics",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const summary=await db.query(`SELECT
@@ -1238,6 +1495,8 @@ export async function continuityRoutes(app:FastifyInstance){
     count(*) FILTER(WHERE seal.proposal_id IS NOT NULL)::int AS sealed,
     count(*) FILTER(WHERE archive.proposal_id IS NOT NULL)::int AS archived,
     count(*) FILTER(WHERE archive.proposal_id IS NOT NULL AND av.exists_remote=true AND av.hash_valid=true)::int AS "archiveHealthy",
+    count(*) FILTER(WHERE replica.proposal_id IS NOT NULL)::int AS replicated,
+    count(*) FILTER(WHERE replica.proposal_id IS NOT NULL AND rv.exists_remote=true AND rv.hash_valid=true)::int AS "replicaHealthy",
     count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
     count(*) FILTER(WHERE cp.effectiveness_outcome='STABLE')::int AS stable,
     count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed,
@@ -1254,7 +1513,9 @@ export async function continuityRoutes(app:FastifyInstance){
     (SELECT count(*)::int FROM sidec_continuity_change_approvals ca
       JOIN sidec_continuity_change_proposals x ON x.id=ca.proposal_id
       WHERE x.organization_id=$1 AND x.status='PROPOSED' AND ca.decision='APPROVED'
-       AND (ca.valid_until IS NULL OR ca.valid_until<=now())) AS "approvalsExpired"
+       AND (ca.valid_until IS NULL OR ca.valid_until<=now())) AS "approvalsExpired",
+    (SELECT count(*)::int FROM sidec_continuity_approval_delegations d
+      WHERE d.organization_id=$1 AND d.revoked_at IS NULL AND d.valid_from<=now() AND d.valid_until>now()) AS "activeDelegations"
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
    LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
@@ -1263,6 +1524,11 @@ export async function continuityRoutes(app:FastifyInstance){
     SELECT exists_remote,hash_valid FROM sidec_continuity_change_report_archive_verifications x
     WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
    ) av ON true
+   LEFT JOIN sidec_continuity_change_report_replicas replica ON replica.proposal_id=cp.id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid FROM sidec_continuity_change_report_replica_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
+   ) rv ON true
    WHERE cp.organization_id=$1`,[org]);
   const [bySeverity,byMonth,byRecurrence]=await Promise.all([
    db.query(`SELECT rr.severity,count(*)::int AS total,
@@ -1329,10 +1595,17 @@ export async function continuityRoutes(app:FastifyInstance){
     seal.report_hash AS "reportHash",seal.key_id AS "reportSealKeyId",seal.public_key_fingerprint AS "reportSealFingerprint",
     seal.sealed_at AS "reportSealedAt",sealer.display_name AS "reportSealedByName",
     archive.bucket AS "reportArchiveBucket",archive.object_key AS "reportArchiveObjectKey",
-    archive.retain_until AS "reportArchiveRetainUntil",archive.legal_hold AS "reportArchiveLegalHold",
+    COALESCE(av.retain_until,archive.retain_until) AS "reportArchiveRetainUntil",
+    COALESCE(av.legal_hold,archive.legal_hold) AS "reportArchiveLegalHold",
     archive.archived_at AS "reportArchivedAt",
     av.exists_remote AS "reportArchiveExistsRemote",av.hash_valid AS "reportArchiveHashValid",
     av.verified_at AS "reportArchiveVerifiedAt",av.error_message AS "reportArchiveErrorMessage",
+    replica.bucket AS "reportReplicaBucket",replica.object_key AS "reportReplicaObjectKey",
+    COALESCE(rv.retain_until,replica.retain_until) AS "reportReplicaRetainUntil",
+    COALESCE(rv.legal_hold,replica.legal_hold) AS "reportReplicaLegalHold",
+    replica.replicated_at AS "reportReplicatedAt",
+    rv.exists_remote AS "reportReplicaExistsRemote",rv.hash_valid AS "reportReplicaHashValid",
+    rv.verified_at AS "reportReplicaVerifiedAt",rv.error_message AS "reportReplicaErrorMessage",
     COALESCE((SELECT json_agg(json_build_object(
       'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
       'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
@@ -1348,10 +1621,13 @@ export async function continuityRoutes(app:FastifyInstance){
     COALESCE((SELECT json_agg(json_build_object(
       'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
       'validUntil',ca.valid_until,'revalidatedAt',ca.revalidated_at,
-      'decidedById',ca.decided_by,'decidedByName',au.display_name
+      'decidedById',ca.decided_by,'decidedByName',au.display_name,
+      'authorityUserId',ca.authority_user_id,'authorityUserName',authority.display_name,
+      'delegationId',ca.delegation_id,'delegated',(ca.delegation_id IS NOT NULL)
     ) ORDER BY ca.decided_at)
      FROM sidec_continuity_change_approvals ca
      LEFT JOIN users au ON au.id=ca.decided_by
+     LEFT JOIN users authority ON authority.id=ca.authority_user_id
      WHERE ca.proposal_id=cp.id),'[]'::json) AS approvals
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
@@ -1366,24 +1642,39 @@ export async function continuityRoutes(app:FastifyInstance){
    LEFT JOIN users sealer ON sealer.id=seal.sealed_by
    LEFT JOIN sidec_continuity_change_report_archives archive ON archive.proposal_id=cp.id
    LEFT JOIN LATERAL (
-    SELECT exists_remote,hash_valid,verified_at,error_message
+    SELECT exists_remote,hash_valid,verified_at,error_message,retain_until,legal_hold
     FROM sidec_continuity_change_report_archive_verifications x
     WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
    ) av ON true
+   LEFT JOIN sidec_continuity_change_report_replicas replica ON replica.proposal_id=cp.id
+   LEFT JOIN LATERAL (
+    SELECT exists_remote,hash_valid,verified_at,error_message,retain_until,legal_hold
+    FROM sidec_continuity_change_report_replica_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1
+   ) rv ON true
    WHERE cp.organization_id=$1
    ORDER BY CASE cp.status WHEN 'PROPOSED' THEN 1 WHEN 'APPLIED' THEN 2 WHEN 'VERIFIED' THEN 3 ELSE 4 END,cp.created_at DESC`,[org]);
   const items=[];
   for(const row of r.rows as Array<any>){
    const diff=row.diffSnapshot??await buildRunbookDiff(org,String(row.targetPlanId),row.basePlanId?String(row.basePlanId):null);
    const approvals=Array.isArray(row.approvals)?row.approvals:[];
-   const now=Date.now();
-   const approvedCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&item.validUntil&&new Date(item.validUntil).getTime()>now).length;
-   const expiredApprovalCount=approvals.filter((item:any)=>item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=now)).length;
-   const rejectedCount=approvals.filter((item:any)=>item.decision==="REJECTED").length;
+   const now=Date.now(),latestByAuthority=new Map<string,any>();
+   for(const item of approvals){
+    const authority=String(item.authorityUserId??item.decidedById);
+    const previous=latestByAuthority.get(authority);
+    if(!previous||new Date(item.decidedAt).getTime()>=new Date(previous.decidedAt).getTime())latestByAuthority.set(authority,item);
+   }
+   const authorityDecisions=[...latestByAuthority.values()];
+   const approvedCount=authorityDecisions.filter((item:any)=>item.decision==="APPROVED"&&item.validUntil&&new Date(item.validUntil).getTime()>now).length;
+   const expiredApprovalCount=authorityDecisions.filter((item:any)=>item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=now)).length;
+   const rejectedCount=authorityDecisions.filter((item:any)=>item.decision==="REJECTED").length;
    items.push({...row,approvedCount,expiredApprovalCount,rejectedCount,
     criticalApprovalSatisfied:row.recommendationSeverity!=="CRITICAL"||(approvedCount>=2&&rejectedCount===0),
     reportSealed:Boolean(row.reportHash),reportArchived:Boolean(row.reportArchiveObjectKey),
     reportArchiveHealthy:Boolean(row.reportArchiveExistsRemote&&row.reportArchiveHashValid),
+    reportReplicaCreated:Boolean(row.reportReplicaObjectKey),
+    reportReplicaHealthy:Boolean(row.reportReplicaExistsRemote&&row.reportReplicaHashValid),
+    reportReplicationHealthy:Boolean(row.reportArchiveExistsRemote&&row.reportArchiveHashValid&&row.reportReplicaExistsRemote&&row.reportReplicaHashValid),
     diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
 
   }
@@ -1441,7 +1732,7 @@ export async function continuityRoutes(app:FastifyInstance){
   return reply.code(201).send(created.rows[0]);
  });
 
- app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/approval",{preHandler:requirePermission("sidec_continuity_change.approve")},async(request,reply)=>{
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/approval",{preHandler:requirePermission("sidec_continuity.read")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=changeApprovalSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
@@ -1453,29 +1744,38 @@ export async function continuityRoutes(app:FastifyInstance){
   if(!proposal)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
   if(proposal.severity!=="CRITICAL")return reply.code(409).send({error:"CRITICAL_PROPOSAL_REQUIRED"});
   if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
-  if(String(proposal.createdById)===String(auth.userId))return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
+  const directAuthority=auth.permissions.includes("sidec_continuity_change.approve")||auth.permissions.includes("system.master");
+  const delegation=directAuthority?null:await activeApprovalDelegation(org,auth.userId);
+  if(!directAuthority&&!delegation)return reply.code(403).send({error:"APPROVAL_AUTHORITY_REQUIRED"});
+  const authorityUserId=String(delegation?.delegatorUserId??auth.userId);
+  if(String(proposal.createdById)===String(auth.userId)||String(proposal.createdById)===authorityUserId){
+   return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
+  }
   const policy=await loadChangePolicy(org);
   const existingDecision=await db.query(`SELECT decision FROM sidec_continuity_change_approvals
     WHERE proposal_id=$1 AND decided_by=$2`,[id,auth.userId]);
   const revalidating=existingDecision.rows[0]?.decision==="APPROVED"&&parsed.data.decision==="APPROVED";
   const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(
-     proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by
+     proposal_id,decision,notes,decided_by,valid_until,revalidated_at,revalidated_by,delegation_id,authority_user_id
     ) VALUES(
      $1,$2,$3,$4,
      CASE WHEN $2='APPROVED' THEN now()+($5::text||' hours')::interval ELSE NULL END,
      CASE WHEN $6 THEN now() ELSE NULL END,
-     CASE WHEN $6 THEN $4 ELSE NULL END
+     CASE WHEN $6 THEN $4 ELSE NULL END,$7,$8
     )
     ON CONFLICT(proposal_id,decided_by) DO UPDATE
       SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),valid_until=EXCLUDED.valid_until,
-        revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,updated_at=now()
-    RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt",
-      valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
-     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating
+        revalidated_at=EXCLUDED.revalidated_at,revalidated_by=EXCLUDED.revalidated_by,
+        delegation_id=EXCLUDED.delegation_id,authority_user_id=EXCLUDED.authority_user_id,updated_at=now()
+    RETURNING id,decision,notes,decided_by AS "decidedById",authority_user_id AS "authorityUserId",
+      delegation_id AS "delegationId",decided_at AS "decidedAt",valid_until AS "validUntil",revalidated_at AS "revalidatedAt"`,[
+     id,parsed.data.decision,parsed.data.notes,auth.userId,Number(policy.approvalValidHours),revalidating,delegation?.id??null,authorityUserId
     ]);
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
     VALUES($1,'sidec_continuity.change_approval','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
-     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),JSON.stringify({decision:parsed.data.decision,approvalValidHours:policy.approvalValidHours,revalidating})
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),
+     JSON.stringify({decision:parsed.data.decision,approvalValidHours:policy.approvalValidHours,revalidating,
+      delegated:Boolean(delegation),delegationId:delegation?.id??null,authorityUserId})
     ]);
   return decision.rows[0];
  });
@@ -1515,11 +1815,16 @@ export async function continuityRoutes(app:FastifyInstance){
    const evidence=await db.query(`SELECT count(*)::int AS count FROM sidec_continuity_change_evidence WHERE proposal_id=$1`,[id]);
    if(Number(evidence.rows[0]?.count??0)<1)return reply.code(409).send({error:"CHANGE_EVIDENCE_REQUIRED"});
    if(current.recommendation_severity==="CRITICAL"){
-    const approvalState=await db.query(`SELECT
-      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND valid_until>now())::int AS approved,
-      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2 AND (valid_until IS NULL OR valid_until<=now()))::int AS expired,
+    const approvalState=await db.query(`WITH latest AS (
+      SELECT DISTINCT ON (authority_user_id) authority_user_id,decision,valid_until,decided_at
+      FROM sidec_continuity_change_approvals
+      WHERE proposal_id=$1 AND authority_user_id<>$2
+      ORDER BY authority_user_id,decided_at DESC
+     )
+     SELECT count(*) FILTER(WHERE decision='APPROVED' AND valid_until>now())::int AS approved,
+      count(*) FILTER(WHERE decision='APPROVED' AND (valid_until IS NULL OR valid_until<=now()))::int AS expired,
       count(*) FILTER(WHERE decision='REJECTED')::int AS rejected
-     FROM sidec_continuity_change_approvals WHERE proposal_id=$1`,[id,current.created_by]);
+     FROM latest`,[id,current.created_by]);
     const approved=Number(approvalState.rows[0]?.approved??0),expired=Number(approvalState.rows[0]?.expired??0),rejected=Number(approvalState.rows[0]?.rejected??0);
     if(rejected>0)return reply.code(409).send({error:"CRITICAL_CHANGE_REJECTED",rejected});
     if(approved<2)return reply.code(409).send({error:"CRITICAL_CHANGE_DUAL_APPROVAL_REQUIRED",approved,expired,required:2});
@@ -1744,6 +2049,140 @@ export async function continuityRoutes(app:FastifyInstance){
      auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification)
     ]);
   return verification;
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/replicate",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  try{
+   const result=await createChangeReportReplica(org,id,auth.userId);
+   if(!result.enabled)return reply.code(409).send(result);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.change_report_replica_create','sidec_continuity_change_report_replica',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   if(result.verification&&(!result.verification.existsRemote||result.verification.hashValid!==true)){
+    return reply.code(502).send({error:"REPORT_REPLICA_VERIFICATION_FAILED",...result});
+   }
+   return result.created?reply.code(201).send(result):result;
+  }catch(error){
+   return reply.code((error as any)?.statusCode??502).send({
+    error:(error as any)?.code??"REPORT_REPLICA_FAILED",message:error instanceof Error?error.message:String(error)
+   });
+  }
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/replica/verify",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const result=await db.query(`SELECT bucket,object_key AS "objectKey",version_id AS "versionId",content_hash AS "contentHash"
+    FROM sidec_continuity_change_report_replicas WHERE proposal_id=$1 AND organization_id=$2`,[id,org]);
+  const item=result.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"REPORT_REPLICA_NOT_FOUND"});
+  const verification=await recordChangeReportReplicaVerification({
+   org,proposalId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,
+   versionId:item.versionId??null,expectedHash:String(item.contentHash)
+  });
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.change_report_replica_verify','sidec_continuity_change_report_replica',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification)
+   ]);
+  return verification;
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/replica/sync-policy",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  try{
+   const result=await syncChangeReportReplicaPolicy(org,id,auth.userId,"Sincronização manual da política WORM principal para a réplica.");
+   if(!result.enabled)return reply.code(409).send(result);
+   if(result.error)return reply.code(404).send(result);
+   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+    VALUES($1,'sidec_continuity.change_report_replica_sync_policy','sidec_continuity_change_report_replica',$2,$3,$4,$5::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(result)
+   ]);
+   return result;
+  }catch(error){
+   return reply.code(502).send({error:"REPORT_REPLICA_POLICY_SYNC_FAILED",message:error instanceof Error?error.message:String(error)});
+  }
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/retention/extend",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=reportRetentionExtensionSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const result=await db.query(`SELECT a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",
+    a.object_lock_mode AS "objectLockMode",a.retain_until AS "receiptRetainUntil",a.legal_hold AS "receiptLegalHold",
+    a.content_hash AS "contentHash",v.retain_until AS "verifiedRetainUntil",v.legal_hold AS "verifiedLegalHold"
+   FROM sidec_continuity_change_report_archives a
+   LEFT JOIN LATERAL (
+    SELECT retain_until,legal_hold FROM sidec_continuity_change_report_archive_verifications x
+    WHERE x.proposal_id=a.proposal_id AND x.exists_remote=true AND x.hash_valid=true
+    ORDER BY verified_at DESC LIMIT 1
+   ) v ON true
+   WHERE a.proposal_id=$1 AND a.organization_id=$2`,[id,org]);
+  const item=result.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"REPORT_ARCHIVE_NOT_FOUND"});
+  const currentUntil=item.verifiedRetainUntil??item.receiptRetainUntil??null;
+  if(currentUntil&&parsed.data.retainUntil.getTime()<=new Date(currentUntil).getTime()){
+   return reply.code(409).send({error:"RETENTION_MUST_ONLY_INCREASE",currentRetainUntil:currentUntil});
+  }
+  await extendSidecArchiveRetention({
+   bucket:item.bucket,key:item.objectKey,versionId:item.versionId??null,
+   mode:(item.objectLockMode??wormMode()) as "GOVERNANCE"|"COMPLIANCE",retainUntil:parsed.data.retainUntil
+  });
+  const verification=await recordChangeReportArchiveVerification({
+   org,proposalId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,
+   versionId:item.versionId??null,expectedHash:String(item.contentHash)
+  });
+  await recordChangeReportPolicyEvent({
+   org,proposalId:id,destination:"PRIMARY",eventType:"RETENTION_EXTENDED",
+   previousRetainUntil:currentUntil,newRetainUntil:parsed.data.retainUntil,
+   previousLegalHold:Boolean(item.verifiedLegalHold??item.receiptLegalHold),newLegalHold:Boolean(verification.legalHold),
+   reason:parsed.data.reason,actorUserId:auth.userId
+  });
+  const replicaSync=await syncChangeReportReplicaPolicy(org,id,auth.userId,parsed.data.reason);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_report_retention_extend','sidec_continuity_change_report_archive',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification),
+    JSON.stringify({previousRetainUntil:currentUntil,newRetainUntil:parsed.data.retainUntil,reason:parsed.data.reason,replicaSync})
+   ]);
+  return {verification,replicaSync};
+ });
+
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/report/archive/legal-hold",{preHandler:requirePermission("sidec_continuity_change.archive")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=reportLegalHoldSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const result=await db.query(`SELECT a.bucket,a.object_key AS "objectKey",a.version_id AS "versionId",
+    a.retain_until AS "receiptRetainUntil",a.legal_hold AS "receiptLegalHold",a.content_hash AS "contentHash",
+    v.retain_until AS "verifiedRetainUntil",v.legal_hold AS "verifiedLegalHold"
+   FROM sidec_continuity_change_report_archives a
+   LEFT JOIN LATERAL (
+    SELECT retain_until,legal_hold FROM sidec_continuity_change_report_archive_verifications x
+    WHERE x.proposal_id=a.proposal_id AND x.exists_remote=true AND x.hash_valid=true
+    ORDER BY verified_at DESC LIMIT 1
+   ) v ON true
+   WHERE a.proposal_id=$1 AND a.organization_id=$2`,[id,org]);
+  const item=result.rows[0] as any;
+  if(!item)return reply.code(404).send({error:"REPORT_ARCHIVE_NOT_FOUND"});
+  const currentHold=Boolean(item.verifiedLegalHold??item.receiptLegalHold);
+  if(currentHold)return reply.code(409).send({error:"LEGAL_HOLD_ALREADY_ENABLED"});
+  await enableSidecArchiveLegalHold({bucket:item.bucket,key:item.objectKey,versionId:item.versionId??null});
+  const verification=await recordChangeReportArchiveVerification({
+   org,proposalId:id,source:"MANUAL",bucket:item.bucket,key:item.objectKey,
+   versionId:item.versionId??null,expectedHash:String(item.contentHash)
+  });
+  await recordChangeReportPolicyEvent({
+   org,proposalId:id,destination:"PRIMARY",eventType:"LEGAL_HOLD_ENABLED",
+   previousRetainUntil:item.verifiedRetainUntil??item.receiptRetainUntil,
+   newRetainUntil:verification.retainUntil??item.verifiedRetainUntil??item.receiptRetainUntil,
+   previousLegalHold:false,newLegalHold:true,reason:parsed.data.reason,actorUserId:auth.userId
+  });
+  const replicaSync=await syncChangeReportReplicaPolicy(org,id,auth.userId,parsed.data.reason);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_report_legal_hold_enable','sidec_continuity_change_report_archive',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+    auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(verification),
+    JSON.stringify({reason:parsed.data.reason,replicaSync})
+   ]);
+  return {verification,replicaSync};
  });
 
  app.patch("/api/v1/sidec/continuity/runbook/recommendations/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{

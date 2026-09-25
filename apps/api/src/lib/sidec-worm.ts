@@ -141,6 +141,21 @@ export function archiveSidecContinuityChangeReport(input:{
  });
 }
 
+export function archiveSidecContinuityChangeReportReplica(input:{
+ content:Buffer;reportHash:string;proposalId:string;fileName:string;retention:WormRetention;
+}){
+ return archiveObjectAt("REPLICA",{
+  content:input.content,contentHash:input.reportHash,key:wormContinuityChangeReportKey(input.reportHash),contentType:"application/pdf",
+  metadata:{
+   "sigdec-sha256":input.reportHash,
+   "sigdec-proposal-id":input.proposalId,
+   "sigdec-file-name":Buffer.from(input.fileName,"utf8").toString("base64url"),
+   "sigdec-artifact-kind":"continuity-change-report"
+  },
+  retention:input.retention
+ });
+}
+
 async function extendRetentionAt(destination:WormDestination,input:{
  bucket:string;key:string;versionId?:string|null;mode:ObjectLockMode;retainUntil:Date;
 }){

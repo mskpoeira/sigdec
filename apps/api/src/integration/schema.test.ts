@@ -512,6 +512,50 @@ test("SIDEC v1.34 possui politica temporal e arquivo WORM dos relatorios",async(
  assert.equal(permission.rowCount,1);
 });
 
+test("SIDEC v1.35 possui resiliencia WORM e delegacao temporaria",async()=>{
+ const approvalCols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_change_approvals'
+   AND column_name IN ('authority_user_id','delegation_id')
+  ORDER BY column_name`);
+ assert.deepEqual(approvalCols.rows.map(x=>x.column_name),["authority_user_id","delegation_id"]);
+
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_approval_delegations',
+   'sidec_continuity_change_report_policy_events',
+   'sidec_continuity_change_report_replicas',
+   'sidec_continuity_change_report_replica_verifications'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_approval_delegations",
+  "sidec_continuity_change_report_policy_events",
+  "sidec_continuity_change_report_replica_verifications",
+  "sidec_continuity_change_report_replicas"
+ ]);
+
+ const delegationDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_approval_delegations'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(delegationDefs,/delegator_user_id/);
+ assert.match(delegationDefs,/delegate_user_id/);
+ assert.match(delegationDefs,/valid_until/);
+ assert.match(delegationDefs,/valid_from/);
+
+ const verificationDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_replica_verifications'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(verificationDefs,/REPLICATION/);
+ assert.match(verificationDefs,/POLICY/);
+ assert.match(verificationDefs,/SCHEDULED/);
+ assert.match(verificationDefs,/MANUAL/);
+
+ const permission=await db.query(`SELECT p.code,count(rp.role_id)::int AS roles
+  FROM permissions p
+  LEFT JOIN role_permissions rp ON rp.permission_id=p.id
+  WHERE p.code='sidec_continuity_change.delegate'
+  GROUP BY p.code`);
+ assert.equal(permission.rowCount,1);
+ assert.ok(Number(permission.rows[0]?.roles??0)>=2);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
