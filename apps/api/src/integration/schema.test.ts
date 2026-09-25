@@ -587,6 +587,42 @@ test("SIGDEC v1.35.1 endurece historico e delegacoes apos auditoria",async()=>{
  assert.match(defs,/created_by/);
 });
 
+test("SIGDEC v1.36 possui retry, drills PDF e condicoes de resiliencia dos relatorios",async()=>{
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_change_report_retry_jobs',
+   'sidec_continuity_change_report_restore_drills',
+   'sidec_continuity_change_report_resilience_conditions'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_change_report_resilience_conditions",
+  "sidec_continuity_change_report_restore_drills",
+  "sidec_continuity_change_report_retry_jobs"
+ ]);
+
+ const retryDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_retry_jobs'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(retryDefs,/REPLICATE/);
+ assert.match(retryDefs,/SYNC_POLICY/);
+
+ const drillDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_restore_drills'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(drillDefs,/PRIMARY/);
+ assert.match(drillDefs,/REPLICA/);
+ assert.match(drillDefs,/SCHEDULED/);
+ assert.match(drillDefs,/MANUAL/);
+
+ const conditionDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_resilience_conditions'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(conditionDefs,/RESTORE_FAILURE/);
+ assert.match(conditionDefs,/MISSING_REPLICA/);
+ assert.match(conditionDefs,/POLICY_DRIFT/);
+
+ const trigger=await db.query(`SELECT tgname FROM pg_trigger
+  WHERE NOT tgisinternal AND tgname='sidec_continuity_change_report_restore_drills_immutable'`);
+ assert.equal(trigger.rowCount,1);
+});
+
 test("conectores aceitam somente modos e estados previstos",async()=>{
  const r=await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
   WHERE conrelid='monitoring_connectors'::regclass AND contype='c'`);
