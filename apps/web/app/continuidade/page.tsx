@@ -1,5 +1,5 @@
 "use client";
-import { formatDateTimeBR } from "../lib/datetime";
+import { formatDateTimeBR, ubatubaLocalDateTimeToIso } from "../lib/datetime";
 import Link from "next/link";
 import { useCallback,useEffect,useState } from "react";
 
@@ -202,7 +202,7 @@ export default function ContinuidadePage(){
 
  const createSchedule=()=>act(async()=>{
   await request("/api/v1/sidec/continuity/schedules",{method:"POST",body:JSON.stringify({
-   name:scheduleDraft.name,intervalDays:scheduleDraft.intervalDays,nextDueAt:scheduleDraft.nextDueAt,
+   name:scheduleDraft.name,intervalDays:scheduleDraft.intervalDays,nextDueAt:ubatubaLocalDateTimeToIso(scheduleDraft.nextDueAt),
    defaultScenario:scheduleDraft.defaultScenario,ownerUserId:scheduleDraft.ownerUserId||null,enabled:true
   })});
   setMessage("Agenda periódica criada.");
@@ -383,7 +383,7 @@ export default function ContinuidadePage(){
   if(!delegationDraft.validUntil)throw new Error("Informe a validade da delegação.");
   if(delegationDraft.reason.trim().length<5)throw new Error("Informe a fundamentação da delegação.");
   await request("/api/v1/sidec/continuity/runbook/approval-delegations",{
-   method:"POST",body:JSON.stringify({delegateUserId:delegationDraft.delegateUserId,validUntil:delegationDraft.validUntil,reason:delegationDraft.reason})
+   method:"POST",body:JSON.stringify({delegateUserId:delegationDraft.delegateUserId,validUntil:ubatubaLocalDateTimeToIso(delegationDraft.validUntil),reason:delegationDraft.reason})
   });
   setDelegationDraft({delegateUserId:"",validUntil:"",reason:"Substituição temporária formal para decisões críticas do runbook SIDEC."});
   setMessage("Delegação temporária registrada com trilha de auditoria.");
@@ -720,7 +720,7 @@ export default function ContinuidadePage(){
    <div className="dataGrid">{effectivenessHistory.length===0?<div className="infoCard">Ainda não há histórico de ações com chave de recorrência.</div>:effectivenessHistory.map(group=><article className="card" key={group.recurrenceKey}>
     <h2>{group.recurrenceKey}</h2>
     <p>{group.history.length} ação(ões) registrada(s) em {new Set(group.history.map(item=>item.exerciseId)).size} exercício(s).</p>
-    {group.history.slice(-8).map(item=><p key={item.actionId}><small>Runbook v{item.planVersion} · {new Date(item.startedAt).toLocaleDateString("pt-BR")} · {item.title} · {item.status} · eficácia {item.effectiveness}{item.effectivenessNotes?" · "+item.effectivenessNotes:""}</small></p>)}
+    {group.history.slice(-8).map(item=><p key={item.actionId}><small>Runbook v{item.planVersion} · {formatDateTimeBR(item.startedAt)} · {item.title} · {item.status} · eficácia {item.effectiveness}{item.effectivenessNotes?" · "+item.effectivenessNotes:""}</small></p>)}
    </article>)}</div>
   </section>
 
