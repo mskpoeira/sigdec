@@ -301,7 +301,7 @@ export async function authRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "INVALID_INPUT", message: "Matrícula ou senha inválida." });
+      return reply.code(400).send({ error: "INVALID_INPUT", message: "Matrícula, senha ou segundo fator inválidos." });
     }
 
     const matricula = normalizeMatricula(parsed.data.matricula);
@@ -386,6 +386,75 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(401).send(genericFailure);
     }
 
+    let mfaVerified=false;
+    if(user.mfa_enabled){
+      if(!parsed.data.mfaCode){
+        return reply.code(202).send({
+          mfaRequired:true,
+          message:"Informe o código do aplicativo autenticador ou um código de recuperação."
+        });
+      }
+
+      const credential=await db.query<{secret_ciphertext:string}>(
+        `SELECT secret_ciphertext FROM mfa_totp_credentials
+          WHERE user_id=$1 AND verified_at IS NOT NULL`,
+        [user.id]
+      );
+      const encrypted=credential.rows[0]?.secret_ciphertext;
+      if(!encrypted){
+        await audit({
+          userId:user.id,action:"auth.mfa_failed",entityId:user.id,ip:request.ip,
+          userAgent:request.headers["user-agent"],metadata:{reason:"credential_missing"}
+        });
+        return reply.code(403).send({error:"MFA_CREDENTIAL_MISSING",message:"A credencial MFA precisa ser reconfigurada."});
+      }
+
+      let valid=false,recoveryCodeUsed=false;
+      const code=parsed.data.mfaCode.trim();
+      if(/^\d{6}$/.test(code)){
+        try{valid=verifyTotp(decryptMfaSecret(encrypted),code)}catch{valid=false}
+      }else{
+        const recoveryHash=hashRecoveryCode(code);
+        const client=await db.connect();
+        try{
+          await client.query("BEGIN");
+          const recovery=await client.query<{id:string}>(
+            `SELECT id FROM recovery_codes
+              WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL
+              ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+            [user.id,recoveryHash]
+          );
+          if(recovery.rows[0]){
+            await client.query("UPDATE recovery_codes SET used_at=now() WHERE id=$1",[recovery.rows[0].id]);
+            valid=true;recoveryCodeUsed=true;
+          }
+          await client.query("COMMIT");
+        }catch(error){
+          await client.query("ROLLBACK");throw error;
+        }finally{client.release();}
+      }
+
+      if(!valid){
+        const nextAttempts=user.failed_login_attempts+1;
+        await db.query(
+          `UPDATE users SET failed_login_attempts=$2,
+             locked_until=CASE WHEN $2>=5 THEN now()+interval '15 minutes' ELSE NULL END,
+             updated_at=now() WHERE id=$1`,
+          [user.id,nextAttempts]
+        );
+        await audit({
+          userId:user.id,action:"auth.mfa_failed",entityId:user.id,ip:request.ip,
+          userAgent:request.headers["user-agent"],metadata:{attempts:nextAttempts}
+        });
+        return reply.code(401).send({error:"INVALID_MFA",message:"Código de autenticação inválido."});
+      }
+      mfaVerified=true;
+      await audit({
+        userId:user.id,action:"auth.mfa_verified",entityId:user.id,ip:request.ip,
+        userAgent:request.headers["user-agent"],metadata:{recoveryCodeUsed}
+      });
+    }
+
     await db.query(
       `UPDATE users
           SET failed_login_attempts = 0,
@@ -403,7 +472,8 @@ export async function authRoutes(app: FastifyInstance) {
       roles: access.roles,
       permissions: access.permissions,
       ip: request.ip,
-      userAgent: request.headers["user-agent"]
+      userAgent: request.headers["user-agent"],
+      mfaVerified
     });
 
     setSessionCookie(reply, session.token, session.expiresAt);
@@ -414,7 +484,7 @@ export async function authRoutes(app: FastifyInstance) {
       entityId: user.id,
       ip: request.ip,
       userAgent: request.headers["user-agent"],
-      metadata: { sessionId: session.sessionId }
+      metadata: { sessionId: session.sessionId, mfaVerified }
     });
 
     return {
