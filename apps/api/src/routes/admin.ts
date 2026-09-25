@@ -94,8 +94,8 @@ export async function adminRoutes(app:FastifyInstance){
   }
   const webhookSecret=v.integrationType==="WEBHOOK"?newWebhookSecret():null;
   const result=await db.query(`INSERT INTO integration_endpoints(
-    organization_id,name,integration_type,endpoint_url,active,config,webhook_secret_ciphertext
-   ) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)
+    organization_id,name,integration_type,endpoint_url,active,config,webhook_secret_ciphertext,webhook_active_from
+   ) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,CASE WHEN $3='WEBHOOK' THEN now() ELSE NULL END)
    RETURNING id,name,integration_type AS "integrationType",endpoint_url AS "endpointUrl",active,config,created_at AS "createdAt",
     (webhook_secret_ciphertext IS NOT NULL) AS "webhookSecretConfigured"`,[
    org,v.name,v.integrationType,v.endpointUrl??null,v.active,JSON.stringify(v.config),
@@ -110,7 +110,7 @@ export async function adminRoutes(app:FastifyInstance){
  app.post("/api/v1/admin/integrations/:id/rotate-secret",{preHandler:requirePermission("integrations.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const secret=newWebhookSecret();
-  const result=await db.query(`UPDATE integration_endpoints SET webhook_secret_ciphertext=$1
+  const result=await db.query(`UPDATE integration_endpoints SET webhook_secret_ciphertext=$1,webhook_active_from=now()
    WHERE id=$2 AND organization_id=$3 AND integration_type='WEBHOOK'
    RETURNING id,name`,[encryptWebhookSecret(secret),id,org]);
   if(!result.rows[0])return reply.code(404).send({error:"WEBHOOK_NOT_FOUND"});
