@@ -419,8 +419,8 @@ function resolvedGovernancePeriod(input:{from?:Date;to?:Date}){
 
 async function evaluateEffectivenessTargets(org:string,from:Date,to:Date){
  const targets=await db.query(`SELECT id,scope_type AS "scopeType",scope_value AS "scopeValue",
-   min_verified_rate AS "minVerifiedRate",min_improved_rate AS "minImprovedRate",
-   max_avg_apply_hours AS "maxAvgApplyHours",max_avg_verification_hours AS "maxAvgVerificationHours",
+   min_verified_rate::float8 AS "minVerifiedRate",min_improved_rate::float8 AS "minImprovedRate",
+   max_avg_apply_hours::float8 AS "maxAvgApplyHours",max_avg_verification_hours::float8 AS "maxAvgVerificationHours",
    enabled,updated_at AS "updatedAt"
   FROM sidec_continuity_effectiveness_targets WHERE organization_id=$1
   ORDER BY enabled DESC,scope_type,scope_value`,[org]);
@@ -451,7 +451,7 @@ async function evaluateEffectivenessTargets(org:string,from:Date,to:Date){
    checkMin(target.minImprovedRate,actual.improvedRate),
    checkMax(target.maxAvgApplyHours,actual.avgApplyHours),
    checkMax(target.maxAvgVerificationHours,actual.avgVerificationHours)
-  ])if(value!==null||checks.length>=0)checks.push(value);
+  ])checks.push(value);
   const relevantChecks=checks.filter((_,i)=>[
    target.minVerifiedRate,target.minImprovedRate,target.maxAvgApplyHours,target.maxAvgVerificationHours
   ][i]!=null);
