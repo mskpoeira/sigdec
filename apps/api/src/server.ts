@@ -23,21 +23,30 @@ const app=Fastify({logger:true,trustProxy:true});
 const release=apiPackage.version;
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
-app.addHook("onResponse",async(request,reply)=>{
+app.addHook("onSend",async(request,reply,payload)=>{
  const method=request.method.toUpperCase();
- if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return;
+ if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return payload;
  const auth=(request as typeof request & {auth?:{userId:string}}).auth;
- if(!auth?.userId)return;
+ if(!auth?.userId)return payload;
  const routePath=request.routeOptions?.url??request.url.split("?")[0]??request.url;
+ let responseEntityId:string|null=null;
+ if(typeof payload==="string"&&payload.length<200000){
+  try{
+   const parsed=JSON.parse(payload) as Record<string,unknown>;
+   const candidate=parsed.id??(parsed.document as Record<string,unknown>|undefined)?.id??(parsed.item as Record<string,unknown>|undefined)?.id;
+   if(typeof candidate==="string"||typeof candidate==="number")responseEntityId=String(candidate);
+  }catch{}
+ }
  try{
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata)
    VALUES($1,$2,'request_mutation',$3,$4,$5,$6::jsonb)`,[
-    auth.userId,`REQUEST_${method}`,routePath,request.ip,request.headers["user-agent"]??null,
-    JSON.stringify({method,path:routePath,statusCode:reply.statusCode})
+    auth.userId,`REQUEST_${method}`,responseEntityId??routePath,request.ip,request.headers["user-agent"]??null,
+    JSON.stringify({method,path:routePath,statusCode:reply.statusCode,responseEntityId})
   ]);
  }catch(error){
   request.log.error({err:error,method,path:routePath},"Falha ao registrar auditoria universal da atividade.");
  }
+ return payload;
 });
 app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:release,timestamp:new Date().toISOString()}));
 app.get("/api/v1/ready",async(_request,reply)=>{
