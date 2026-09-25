@@ -29,6 +29,7 @@ type Sitrep = { generatedAt:string; activeIncidents:number; p1Incidents:number; 
 type FieldPosition = {
   userId: string;
   displayName: string;
+  matricula: string;
   teamCode: string | null;
   latitude: number;
   longitude: number;
@@ -337,7 +338,7 @@ export default function CampoPage() {
           {positions.map((position) => (
             <article className="card" key={position.userId}>
               <h2>{position.teamCode ? `Equipe ${position.teamCode}` : position.displayName}</h2>
-              <p>{position.teamCode ? position.displayName : "Agente em campo"}</p>
+              <p>{position.teamCode ? position.displayName : "Agente em campo"} · matrícula {position.matricula}</p>
               <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)}</p>
               {position.capturedAt&&<p><small>Coletada pelo dispositivo em {formatDateTimeBR(position.capturedAt)}</small></p>}
               <a
