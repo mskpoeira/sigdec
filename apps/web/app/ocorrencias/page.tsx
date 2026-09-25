@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -91,7 +92,7 @@ export default function OcorrenciasPage() {
             </div>
             <div className="incidentSide">
               <span className="statusTag">{item.status}</span>
-              <time>{new Date(item.createdAt).toLocaleString("pt-BR")}</time>
+              <time>{formatDateTimeBR(item.createdAt)}</time>
             </div>
           </Link>
         ))}
