@@ -464,13 +464,28 @@ export default function ContinuidadePage(){
 
   <section style={{marginTop:18}}>
    <h2>Governança e eficácia das mudanças</h2>
-   <p>Indicadores do ciclo recomendação → alteração → aplicação → exercício → verificação → selagem.</p>
+   <p>Indicadores do ciclo recomendação → alteração → aplicação → exercício → verificação → selagem → preservação WORM.</p>
+   <div className="card" style={{marginBottom:12}}>
+    <h2>Política operacional</h2>
+    <p>Validade das aprovações críticas: <strong>{changePolicy?.approvalValidHours??168} h</strong> · retenção WORM: <strong>{changePolicy?.reportWormRetentionDays?changePolicy.reportWormRetentionDays+" dias":"sem prazo definido"}</strong> · legal hold: <strong>{changePolicy?.reportWormLegalHold?"ativo":"inativo"}</strong></p>
+    <p><small>A política é operacional e não substitui eventual temporalidade legal ou arquivística aplicável.</small></p>
+    <button type="button" className="secondaryLink" disabled={busy} onClick={()=>void configureChangePolicy()}>Configurar política</button>
+   </div>
    {changeMetrics&&<div className="dataGrid">
     <article className="card"><h2>Total de propostas</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.total}</p><p>{changeMetrics.summary.proposed} proposta(s) · {changeMetrics.summary.applied} aplicada(s) · {changeMetrics.summary.verified} verificada(s)</p></article>
-    <article className="card"><h2>Verificação</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.verifiedRate==null?"—":Number(changeMetrics.summary.verifiedRate).toFixed(1)+"%"}</p><p>{changeMetrics.summary.sealed} relatório(s) selado(s)</p></article>
+    <article className="card"><h2>Verificação</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.verifiedRate==null?"—":Number(changeMetrics.summary.verifiedRate).toFixed(1)+"%"}</p><p>{changeMetrics.summary.sealed} selado(s) · {changeMetrics.summary.archived} em WORM · {changeMetrics.summary.archiveHealthy} íntegro(s)</p></article>
     <article className={changeMetrics.summary.regressed>0?"warningCard":"card"}><h2>Eficácia</h2><p>{changeMetrics.summary.improved} melhorou · {changeMetrics.summary.stable} estável · {changeMetrics.summary.regressed} regrediu</p><p>{changeMetrics.summary.noBaseline} sem baseline · taxa de melhora {changeMetrics.summary.improvedRate==null?"—":Number(changeMetrics.summary.improvedRate).toFixed(1)+"%"}</p></article>
-    <article className="card"><h2>Governança crítica</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.critical}</p><p>proposta(s) crítica(s) sob dupla aprovação independente.</p></article>
+    <article className={changeMetrics.summary.approvalsExpired>0?"warningCard":"card"}><h2>Governança crítica</h2><p style={{fontSize:"1.6rem",fontWeight:900}}>{changeMetrics.summary.critical}</p><p>{changeMetrics.summary.approvalsExpired} aprovação(ões) vencida(s) · {changeMetrics.summary.approvalsExpiring24h} vence(m) em até 24 h.</p></article>
     <article className="card"><h2>Tempo médio</h2><p>Aplicação: {changeMetrics.summary.avgApplyHours==null?"—":Number(changeMetrics.summary.avgApplyHours).toFixed(1)+" h"}</p><p>Aplicação → verificação: {changeMetrics.summary.avgVerificationHours==null?"—":Number(changeMetrics.summary.avgVerificationHours).toFixed(1)+" h"}</p></article>
+   </div>}
+   {changeMetrics&&changeMetrics.byRecurrence.length>0&&<div style={{marginTop:12}}>
+    <h3>Tendências por recorrência</h3>
+    <div className="dataGrid">{changeMetrics.byRecurrence.map(item=><article className={item.regressed>0?"warningCard":"card"} key={item.recurrenceKey}>
+     <h2>{item.recurrenceKey}</h2>
+     <p>{item.proposals} proposta(s) · {item.verified} verificada(s)</p>
+     <p>{item.improved} melhorou · {item.regressed} regrediu</p>
+     <p><small>Última proposta: {new Date(item.lastProposalAt).toLocaleString("pt-BR")}</small></p>
+    </article>)}</div>
    </div>}
   </section>
 
@@ -486,22 +501,26 @@ export default function ContinuidadePage(){
     <p><strong>Diff:</strong> {proposal.diffSummary.totalChanges} alteração(ões) · {proposal.diffSummary.fieldsChanged} campo(s) gerais · {proposal.diffSummary.stepsAdded} etapa(s) adicionada(s) · {proposal.diffSummary.stepsModified} modificada(s) · {proposal.diffSummary.stepsRemoved} removida(s)</p>
     {proposal.status==="PROPOSED"&&proposal.diffSummary.totalChanges===0&&<p><strong>Atenção:</strong> nenhuma alteração estrutural foi detectada entre a revisão-base e o rascunho-alvo.</p>}
     {proposal.effectivenessOutcome&&<p><strong>Eficácia:</strong> {proposal.effectivenessOutcome==="IMPROVED"?"Melhorou":proposal.effectivenessOutcome==="REGRESSED"?"Regrediu":proposal.effectivenessOutcome==="STABLE"?"Estável":"Sem baseline"}{proposal.baselineExerciseResult?" · antes "+proposal.baselineExerciseResult:""}{proposal.verificationExerciseResult?" · depois "+proposal.verificationExerciseResult:""}</p>}
-    {proposal.recommendationSeverity==="CRITICAL"&&<p><strong>Dupla aprovação:</strong> {proposal.approvedCount}/2 aprovações · {proposal.rejectedCount} rejeição(ões) · {proposal.criticalApprovalSatisfied?"liberada":"pendente"}</p>}
-    {proposal.approvals?.map(item=><p key={item.id}><small>{item.decision} · {item.decidedByName??"Usuário"} · {new Date(item.decidedAt).toLocaleString("pt-BR")} · {item.notes}</small></p>)}
+    {proposal.recommendationSeverity==="CRITICAL"&&<p><strong>Dupla aprovação:</strong> {proposal.approvedCount}/2 válidas · {proposal.expiredApprovalCount} vencida(s) · {proposal.rejectedCount} rejeição(ões) · {proposal.criticalApprovalSatisfied?"liberada":"pendente"}</p>}
+    {proposal.approvals?.map(item=>{const expired=item.decision==="APPROVED"&&(!item.validUntil||new Date(item.validUntil).getTime()<=Date.now());return <p key={item.id}><small>{item.decision}{expired?" · VENCIDA":""} · {item.decidedByName??"Usuário"} · decisão {new Date(item.decidedAt).toLocaleString("pt-BR")}{item.validUntil?" · válida até "+new Date(item.validUntil).toLocaleString("pt-BR"):""}{item.revalidatedAt?" · revalidada "+new Date(item.revalidatedAt).toLocaleString("pt-BR"):""} · {item.notes}</small></p>})}
     <p><strong>Evidências:</strong> {proposal.evidence.length}</p>
     {proposal.evidence.slice(-5).map(ev=><p key={ev.id}><small>{ev.evidenceType} · {ev.title} · {ev.reference}</small></p>)}
     {proposal.statusNotes&&<p><strong>Fundamentação:</strong> {proposal.statusNotes}</p>}
     {proposal.appliedAt&&<p>Aplicada em {new Date(proposal.appliedAt).toLocaleString("pt-BR")}{proposal.appliedByName?" · "+proposal.appliedByName:""}</p>}
     {proposal.verifiedAt&&<p>Verificada em {new Date(proposal.verifiedAt).toLocaleString("pt-BR")}{proposal.verifiedByName?" · "+proposal.verifiedByName:""}{proposal.verificationExerciseResult?" · exercício "+proposal.verificationExerciseResult:""}</p>}
     {proposal.reportSealed&&<p><strong>Relatório selado:</strong> {proposal.reportSealedAt?new Date(proposal.reportSealedAt).toLocaleString("pt-BR"):"sim"}{proposal.reportSealedByName?" · "+proposal.reportSealedByName:""} · SHA-256 {proposal.reportHash?.slice(0,16)}… · chave {proposal.reportSealKeyId}</p>}
+    {proposal.reportArchived&&<p><strong>WORM:</strong> arquivado em {proposal.reportArchivedAt?new Date(proposal.reportArchivedAt).toLocaleString("pt-BR"):"—"} · {proposal.reportArchiveHealthy?"íntegro":"aguardando/verificação com problema"}{proposal.reportArchiveRetainUntil?" · retenção até "+new Date(proposal.reportArchiveRetainUntil).toLocaleString("pt-BR"):""}{proposal.reportArchiveLegalHold?" · legal hold ativo":""}{proposal.reportArchiveVerifiedAt?" · verificado "+new Date(proposal.reportArchiveVerifiedAt).toLocaleString("pt-BR"):""}</p>}
+    {proposal.reportArchiveErrorMessage&&<p><strong>Arquivo WORM:</strong> {proposal.reportArchiveErrorMessage}</p>}
     <div className="headerActions">
      {(proposal.status==="PROPOSED"||proposal.status==="APPLIED")&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void addChangeEvidence(proposal)}>Adicionar evidência</button>}
-     {proposal.status==="PROPOSED"&&proposal.recommendationSeverity==="CRITICAL"&&<><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"APPROVED")}>Aprovar mudança crítica</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"REJECTED")}>Rejeitar mudança crítica</button></>}
+     {proposal.status==="PROPOSED"&&proposal.recommendationSeverity==="CRITICAL"&&<><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"APPROVED")}>{proposal.expiredApprovalCount>0?"Aprovar / revalidar":"Aprovar mudança crítica"}</button><button type="button" className="secondaryLink" disabled={busy} onClick={()=>void decideCriticalProposal(proposal,"REJECTED")}>Rejeitar mudança crítica</button></>}
      {proposal.status==="PROPOSED"&&proposal.targetPlanStatus!=="DRAFT"&&proposal.evidence.length>0&&proposal.diffSummary.totalChanges>0&&proposal.criticalApprovalSatisfied&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void applyChangeProposal(proposal)}>Confirmar aplicação</button>}
      {proposal.status==="PROPOSED"&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void cancelChangeProposal(proposal)}>Cancelar proposta</button>}
      {proposal.status==="APPLIED"&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void verifyChangeProposal(proposal)}>Verificar por exercício/AAR</button>}
      {proposal.status==="VERIFIED"&&!proposal.reportSealed&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void sealChangeReport(proposal)}>Selar relatório</button>}
      {proposal.reportSealed&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyChangeReportSeal(proposal)}>Verificar selo</button>}
+     {proposal.reportSealed&&!proposal.reportArchived&&<button type="button" className="primaryButton" disabled={busy} onClick={()=>void archiveChangeReport(proposal)}>Arquivar no WORM</button>}
+     {proposal.reportArchived&&<button type="button" className="secondaryLink" disabled={busy} onClick={()=>void verifyArchivedChangeReport(proposal)}>Verificar WORM</button>}
      <a className="secondaryLink" href={`${API}/api/v1/sidec/continuity/runbook/change-proposals/${proposal.id}/report.pdf`}>{proposal.reportSealed?"Relatório selado PDF":"Relatório da mudança PDF"}</a>
     </div>
    </article>)}</div>
