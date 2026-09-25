@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useEffect, useState } from "react";
+import type { MouseEvent } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
@@ -22,7 +23,7 @@ type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
 export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
- const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);
+ const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
  useEffect(()=>{
   fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
   fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
@@ -45,12 +46,13 @@ export default function PainelPage(){
  const googleSatelliteUrl="https://maps.google.com/maps?ll=-23.4332,-45.0834&z=10&t=k&output=embed";
  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
  const pinPosition=(x:MapIncident)=>{const lat=Number(x.latitude),lon=Number(x.longitude);const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));return {left:`${left}%`,top:`${top}%`}};
+ const handleSideInteraction=(event:MouseEvent<HTMLElement>)=>{if(typeof window==="undefined"||!window.matchMedia("(max-width: 800px)").matches||mobileMenuOpen)return;const target=event.target as HTMLElement;if(!target.closest("a,button"))return;event.preventDefault();event.stopPropagation();setMobileMenuOpen(true)};
  return <main className="opsDashboard">
-  <aside className="opsSide">
-   <div className="opsSideBrand"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios"><span>♙</span>Usuários</Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route}><span>›</span>{item.label}</Link>)}</nav>
-   <div className="opsUser"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div>
-   <button onClick={logout}>↪ &nbsp; Sair</button>
+  <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
+   <div className="opsSideBrand"><span className="opsCompactMark" aria-hidden="true">DC</span><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios" title="Usuários"><span className="opsMenuIcon">♙</span><span className="opsMenuLabel">Usuários</span></Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
+   <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div></div>
+   <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
   </aside>
   <section className="opsMain">
    <header className="opsHero">
@@ -68,7 +70,7 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap googleSituationMap"><iframe src={googleSatelliteUrl} title="Mapa de Situação — imagem de satélite do Google Maps" loading="lazy" referrerPolicy="no-referrer-when-downgrade"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">Google Maps · Satélite</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.46.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC v1.47.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }
