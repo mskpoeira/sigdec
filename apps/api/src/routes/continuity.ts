@@ -293,6 +293,45 @@ async function buildChangeEffectivenessSnapshot(org:string,basePlanId:string|nul
  return {outcome,baseline:exerciseEffectivenessView(baseline),verification:exerciseEffectivenessView(verification),evaluatedAt:new Date().toISOString()};
 }
 
+async function loadChangeReportPayload(org:string,id:string){
+ const result=await db.query(`SELECT cp.id,cp.status,cp.proposal_text AS "proposalText",cp.status_notes AS "statusNotes",
+   cp.created_at AS "createdAt",cp.applied_at AS "appliedAt",cp.verified_at AS "verifiedAt",
+   cp.target_plan_id AS "targetPlanId",p.version AS "targetPlanVersion",p.title AS "targetPlanTitle",
+   cp.base_plan_id AS "basePlanId",bp.version AS "basePlanVersion",bp.title AS "basePlanTitle",
+   cp.diff_snapshot AS "diffSnapshot",cp.effectiveness_snapshot AS "effectivenessSnapshot",
+   cp.effectiveness_outcome AS "effectivenessOutcome",
+   rr.recurrence_key AS "recurrenceKey",rr.title AS "recommendationTitle",rr.severity AS "recommendationSeverity",
+   creator.display_name AS "createdByName",applier.display_name AS "appliedByName",verifier.display_name AS "verifiedByName",
+   COALESCE((SELECT json_agg(json_build_object(
+     'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
+     'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
+   ) ORDER BY ev.created_at)
+    FROM sidec_continuity_change_evidence ev
+    LEFT JOIN users eu ON eu.id=ev.created_by
+    WHERE ev.proposal_id=cp.id),'[]'::json) AS evidence,
+   COALESCE((SELECT json_agg(json_build_object(
+     'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
+     'decidedById',ca.decided_by,'decidedByName',cu.display_name
+   ) ORDER BY ca.decided_at)
+    FROM sidec_continuity_change_approvals ca
+    LEFT JOIN users cu ON cu.id=ca.decided_by
+    WHERE ca.proposal_id=cp.id),'[]'::json) AS approvals
+  FROM sidec_continuity_change_proposals cp
+  JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+  JOIN sidec_continuity_plans p ON p.id=cp.target_plan_id
+  LEFT JOIN sidec_continuity_plans bp ON bp.id=cp.base_plan_id
+  LEFT JOIN users creator ON creator.id=cp.created_by
+  LEFT JOIN users applier ON applier.id=cp.applied_by
+  LEFT JOIN users verifier ON verifier.id=cp.verified_by
+  WHERE cp.id=$1 AND cp.organization_id=$2`,[id,org]);
+ const proposal=result.rows[0] as any;
+ if(!proposal)return null;
+ const diff=proposal.diffSnapshot??await buildRunbookDiff(org,String(proposal.targetPlanId),proposal.basePlanId?String(proposal.basePlanId):null);
+ const effectiveness=proposal.effectivenessSnapshot??null;
+ const organization=await db.query(`SELECT name FROM organizations WHERE id=$1`,[org]);
+ return {organizationName:String(organization.rows[0]?.name??"Organização"),proposal,diff,effectiveness};
+}
+
 async function operators(org:string){
  const r=await db.query(`SELECT id,matricula,display_name AS "displayName",job_title AS "jobTitle",department
   FROM users WHERE organization_id=$1 ORDER BY display_name,matricula`,[org]);
@@ -1116,7 +1155,7 @@ export async function continuityRoutes(app:FastifyInstance){
  app.get("/api/v1/sidec/continuity/runbook/change-proposals",{preHandler:requirePermission("sidec_continuity.read")},async(request)=>{
   const org=organizationId(authFrom(request).organizationId);
   const r=await db.query(`SELECT cp.id,cp.recommendation_id AS "recommendationId",rr.recurrence_key AS "recurrenceKey",
-    rr.title AS "recommendationTitle",rr.status AS "recommendationStatus",cp.target_plan_id AS "targetPlanId",
+    rr.title AS "recommendationTitle",rr.status AS "recommendationStatus",rr.severity AS "recommendationSeverity",cp.target_plan_id AS "targetPlanId",
     p.version AS "targetPlanVersion",p.title AS "targetPlanTitle",p.status AS "targetPlanStatus",
     cp.base_plan_id AS "basePlanId",bp.version AS "basePlanVersion",bp.title AS "basePlanTitle",
     cp.proposal_text AS "proposalText",cp.status,cp.status_notes AS "statusNotes",
@@ -1125,8 +1164,10 @@ export async function continuityRoutes(app:FastifyInstance){
     cp.baseline_exercise_id AS "baselineExerciseId",be.result AS "baselineExerciseResult",be.started_at AS "baselineExerciseStartedAt",
     cp.diff_snapshot AS "diffSnapshot",cp.effectiveness_outcome AS "effectivenessOutcome",
     cp.effectiveness_snapshot AS "effectivenessSnapshot",
-    cp.created_at AS "createdAt",cp.updated_at AS "updatedAt",
+    cp.created_at AS "createdAt",cp.updated_at AS "updatedAt",cp.created_by AS "createdById",
     creator.display_name AS "createdByName",applier.display_name AS "appliedByName",verifier.display_name AS "verifiedByName",
+    seal.report_hash AS "reportHash",seal.key_id AS "reportSealKeyId",seal.public_key_fingerprint AS "reportSealFingerprint",
+    seal.sealed_at AS "reportSealedAt",sealer.display_name AS "reportSealedByName",
     COALESCE((SELECT json_agg(json_build_object(
       'id',ev.id,'evidenceType',ev.evidence_type,'title',ev.title,'reference',ev.reference,
       'contentHash',ev.content_hash,'createdAt',ev.created_at,'createdByName',eu.display_name
@@ -1138,7 +1179,14 @@ export async function continuityRoutes(app:FastifyInstance){
       'id',ci.id,'stepKey',ci.step_key,'changeType',ci.change_type,'phase',ci.phase,'sortOrder',ci.sort_order,
       'title',ci.title,'changedFields',ci.changed_fields
     ) ORDER BY ci.sort_order,ci.change_type)
-     FROM sidec_continuity_change_impacts ci WHERE ci.proposal_id=cp.id),'[]'::json) AS impacts
+     FROM sidec_continuity_change_impacts ci WHERE ci.proposal_id=cp.id),'[]'::json) AS impacts,
+    COALESCE((SELECT json_agg(json_build_object(
+      'id',ca.id,'decision',ca.decision,'notes',ca.notes,'decidedAt',ca.decided_at,
+      'decidedById',ca.decided_by,'decidedByName',au.display_name
+    ) ORDER BY ca.decided_at)
+     FROM sidec_continuity_change_approvals ca
+     LEFT JOIN users au ON au.id=ca.decided_by
+     WHERE ca.proposal_id=cp.id),'[]'::json) AS approvals
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
    JOIN sidec_continuity_plans p ON p.id=cp.target_plan_id
@@ -1148,12 +1196,19 @@ export async function continuityRoutes(app:FastifyInstance){
    LEFT JOIN users creator ON creator.id=cp.created_by
    LEFT JOIN users applier ON applier.id=cp.applied_by
    LEFT JOIN users verifier ON verifier.id=cp.verified_by
+   LEFT JOIN sidec_continuity_change_report_seals seal ON seal.proposal_id=cp.id
+   LEFT JOIN users sealer ON sealer.id=seal.sealed_by
    WHERE cp.organization_id=$1
    ORDER BY CASE cp.status WHEN 'PROPOSED' THEN 1 WHEN 'APPLIED' THEN 2 WHEN 'VERIFIED' THEN 3 ELSE 4 END,cp.created_at DESC`,[org]);
   const items=[];
   for(const row of r.rows as Array<any>){
    const diff=row.diffSnapshot??await buildRunbookDiff(org,String(row.targetPlanId),row.basePlanId?String(row.basePlanId):null);
-   items.push({...row,diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
+   const approvals=Array.isArray(row.approvals)?row.approvals:[];
+   const approvedCount=approvals.filter((item:any)=>item.decision==="APPROVED").length;
+   const rejectedCount=approvals.filter((item:any)=>item.decision==="REJECTED").length;
+   items.push({...row,approvedCount,rejectedCount,criticalApprovalSatisfied:row.recommendationSeverity!=="CRITICAL"||(approvedCount>=2&&rejectedCount===0),
+    reportSealed:Boolean(row.reportHash),diffSummary:diff?.summary??{fieldsChanged:0,stepsAdded:0,stepsModified:0,stepsRemoved:0,totalChanges:0}});
+
   }
   return {items};
  });
@@ -1209,11 +1264,38 @@ export async function continuityRoutes(app:FastifyInstance){
   return reply.code(201).send(created.rows[0]);
  });
 
+ app.post("/api/v1/sidec/continuity/runbook/change-proposals/:id/approval",{preHandler:requirePermission("sidec_continuity_change.approve")},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
+  const parsed=changeApprovalSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const current=await db.query(`SELECT cp.id,cp.status,cp.created_by AS "createdById",rr.severity
+    FROM sidec_continuity_change_proposals cp
+    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+    WHERE cp.id=$1 AND cp.organization_id=$2`,[id,org]);
+  const proposal=current.rows[0] as any;
+  if(!proposal)return reply.code(404).send({error:"PROPOSAL_NOT_FOUND"});
+  if(proposal.severity!=="CRITICAL")return reply.code(409).send({error:"CRITICAL_PROPOSAL_REQUIRED"});
+  if(proposal.status!=="PROPOSED")return reply.code(409).send({error:"PROPOSED_STATUS_REQUIRED",status:proposal.status});
+  if(String(proposal.createdById)===String(auth.userId))return reply.code(409).send({error:"CREATOR_CANNOT_APPROVE_CRITICAL_CHANGE"});
+  const decision=await db.query(`INSERT INTO sidec_continuity_change_approvals(proposal_id,decision,notes,decided_by)
+    VALUES($1,$2,$3,$4)
+    ON CONFLICT(proposal_id,decided_by) DO UPDATE
+      SET decision=EXCLUDED.decision,notes=EXCLUDED.notes,decided_at=now(),updated_at=now()
+    RETURNING id,decision,notes,decided_by AS "decidedById",decided_at AS "decidedAt"`,[
+     id,parsed.data.decision,parsed.data.notes,auth.userId
+    ]);
+  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data,metadata)
+    VALUES($1,'sidec_continuity.change_approval','sidec_continuity_change_proposal',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+     auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(decision.rows[0]),JSON.stringify({decision:parsed.data.decision})
+    ]);
+  return decision.rows[0];
+ });
+
  app.patch("/api/v1/sidec/continuity/runbook/change-proposals/:id",{preHandler:requirePermission("sidec_continuity_improvement.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(auth.organizationId),{id}=request.params as {id:string};
   const parsed=changeProposalTransitionSchema.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
-  const currentResult=await db.query(`SELECT cp.*,rr.status AS recommendation_status,p.status AS plan_status,p.activated_at,
+  const currentResult=await db.query(`SELECT cp.*,rr.status AS recommendation_status,rr.severity AS recommendation_severity,p.status AS plan_status,p.activated_at,
     p.version AS plan_version,rr.id AS recommendation_id_value
    FROM sidec_continuity_change_proposals cp
    JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
@@ -1243,6 +1325,15 @@ export async function continuityRoutes(app:FastifyInstance){
    }
    const evidence=await db.query(`SELECT count(*)::int AS count FROM sidec_continuity_change_evidence WHERE proposal_id=$1`,[id]);
    if(Number(evidence.rows[0]?.count??0)<1)return reply.code(409).send({error:"CHANGE_EVIDENCE_REQUIRED"});
+   if(current.recommendation_severity==="CRITICAL"){
+    const approvalState=await db.query(`SELECT
+      count(*) FILTER(WHERE decision='APPROVED' AND decided_by<>$2)::int AS approved,
+      count(*) FILTER(WHERE decision='REJECTED')::int AS rejected
+     FROM sidec_continuity_change_approvals WHERE proposal_id=$1`,[id,current.created_by]);
+    const approved=Number(approvalState.rows[0]?.approved??0),rejected=Number(approvalState.rows[0]?.rejected??0);
+    if(rejected>0)return reply.code(409).send({error:"CRITICAL_CHANGE_REJECTED",rejected});
+    if(approved<2)return reply.code(409).send({error:"CRITICAL_CHANGE_DUAL_APPROVAL_REQUIRED",approved,required:2});
+   }
    const diff=await buildRunbookDiff(org,String(current.target_plan_id),current.base_plan_id?String(current.base_plan_id):null);
    if(!diff)return reply.code(409).send({error:"RUNBOOK_DIFF_UNAVAILABLE"});
    if(Number(diff.summary?.totalChanges??0)<1)return reply.code(409).send({error:"NO_RUNBOOK_CHANGE_DETECTED"});
