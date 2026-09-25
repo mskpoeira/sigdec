@@ -31,6 +31,7 @@ test("todas as migrations recentes foram aplicadas",async()=>{
  assert.ok(files.includes("0038_sidec_continuity_change_governance.sql"));
  assert.ok(files.includes("0039_sidec_continuity_change_effectiveness.sql"));
  assert.ok(files.includes("0040_sidec_continuity_step_identity_critical_seals.sql"));
+ assert.ok(files.includes("0041_sidec_continuity_worm_approval_policy.sql"));
 });
 
 test("runbook SIDEC possui versionamento, etapas e exercícios controlados",async()=>{
@@ -469,6 +470,46 @@ test("SIDEC v1.33 possui identidade persistente dupla aprovacao e selo imutavel"
   GROUP BY r.code`);
  assert.equal(role.rowCount,1);
  assert.equal(Number(role.rows[0]?.permissions??0),2);
+});
+
+test("SIDEC v1.34 possui politica temporal e arquivo WORM dos relatorios",async()=>{
+ const approvalCols=await db.query(`SELECT column_name FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='sidec_continuity_change_approvals'
+   AND column_name IN ('valid_until','revalidated_at','revalidated_by')
+  ORDER BY column_name`);
+ assert.deepEqual(approvalCols.rows.map(x=>x.column_name),["revalidated_at","revalidated_by","valid_until"]);
+
+ const tables=await db.query(`SELECT table_name FROM information_schema.tables
+  WHERE table_schema='public' AND table_name IN (
+   'sidec_continuity_change_policies',
+   'sidec_continuity_change_report_archives',
+   'sidec_continuity_change_report_archive_verifications'
+  ) ORDER BY table_name`);
+ assert.deepEqual(tables.rows.map(x=>x.table_name),[
+  "sidec_continuity_change_policies",
+  "sidec_continuity_change_report_archive_verifications",
+  "sidec_continuity_change_report_archives"
+ ]);
+
+ const policyDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_policies'::regclass`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(policyDefs,/approval_valid_hours/);
+ assert.match(policyDefs,/2160/);
+ assert.match(policyDefs,/report_worm_retention_days/);
+
+ const archiveTrigger=await db.query(`SELECT tgname FROM pg_trigger
+  WHERE tgrelid='sidec_continuity_change_report_archives'::regclass AND NOT tgisinternal
+   AND tgname='sidec_continuity_change_report_archives_immutable'`);
+ assert.equal(archiveTrigger.rowCount,1);
+
+ const verificationDefs=(await db.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+  WHERE conrelid='sidec_continuity_change_report_archive_verifications'::regclass AND contype='c'`)).rows.map(x=>String(x.definition)).join(" ");
+ assert.match(verificationDefs,/ARCHIVE/);
+ assert.match(verificationDefs,/MANUAL/);
+ assert.match(verificationDefs,/SCHEDULED/);
+
+ const permission=await db.query(`SELECT code FROM permissions WHERE code='sidec_continuity_change.archive'`);
+ assert.equal(permission.rowCount,1);
 });
 
 test("conectores aceitam somente modos e estados previstos",async()=>{
