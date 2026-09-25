@@ -176,6 +176,40 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   }
 }
 
+export async function requireSecurityReady(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  if (reply.sent) return;
+
+  const auth=authFrom(request);
+  const state=await db.query<{
+    must_change_password:boolean;
+    organization_id:string|null;
+    mfa_required:boolean;
+    mfa_enabled:boolean;
+    mfa_verified_at:Date|null;
+  }>(
+    `SELECT u.must_change_password,u.organization_id::text AS organization_id,u.mfa_required,u.mfa_enabled,s.mfa_verified_at
+       FROM users u
+       JOIN auth_sessions s ON s.id=$2 AND s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>now()
+      WHERE u.id=$1 AND u.active=true`,
+    [auth.userId,auth.sessionId]
+  );
+  const user=state.rows[0];
+  if(!user)return reply.code(401).send({error:"UNAUTHENTICATED",message:"Usuário ou sessão inativos."});
+  if((user.organization_id??null)!==(auth.organizationId??null)){
+    return reply.code(401).send({error:"SESSION_CONTEXT_STALE",message:"A vinculação organizacional mudou. Entre novamente."});
+  }
+  if(user.must_change_password){
+    return reply.code(403).send({error:"PASSWORD_CHANGE_REQUIRED",message:"Altere a senha temporária antes de continuar."});
+  }
+  if(user.mfa_required&&!user.mfa_enabled){
+    return reply.code(403).send({error:"MFA_SETUP_REQUIRED",message:"Configure o segundo fator de autenticação antes de continuar."});
+  }
+  if(user.mfa_enabled&&!user.mfa_verified_at){
+    return reply.code(403).send({error:"MFA_REAUTH_REQUIRED",message:"Autentique esta sessão novamente com o segundo fator."});
+  }
+}
+
 export function requirePermission(permission: string) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     await requireAuth(request, reply);
