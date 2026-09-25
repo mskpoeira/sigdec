@@ -28,7 +28,8 @@ app.addHook("onSend",async(request,reply,payload)=>{
  if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return payload;
  const auth=(request as typeof request & {auth?:{userId:string}}).auth;
  if(!auth?.userId)return payload;
- const routePath=request.routeOptions?.url??request.url.split("?")[0]??request.url;
+ const requestPath=request.url.split("?")[0]??request.url;
+ const routePath=request.routeOptions?.url??requestPath;
  let responseEntityId:string|null=null;
  if(typeof payload==="string"&&payload.length<200000){
   try{
@@ -40,8 +41,8 @@ app.addHook("onSend",async(request,reply,payload)=>{
  try{
   await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata)
    VALUES($1,$2,'request_mutation',$3,$4,$5,$6::jsonb)`,[
-    auth.userId,`REQUEST_${method}`,responseEntityId??routePath,request.ip,request.headers["user-agent"]??null,
-    JSON.stringify({method,path:routePath,statusCode:reply.statusCode,responseEntityId})
+    auth.userId,`REQUEST_${method}`,responseEntityId??requestPath,request.ip,request.headers["user-agent"]??null,
+    JSON.stringify({method,path:routePath,requestPath,statusCode:reply.statusCode,responseEntityId})
   ]);
  }catch(error){
   request.log.error({err:error,method,path:routePath},"Falha ao registrar auditoria universal da atividade.");
