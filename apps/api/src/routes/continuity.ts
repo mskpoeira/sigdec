@@ -6,6 +6,7 @@ import { db } from "../db.js";
 import { defaultSidecRunbookSteps, summarizeSidecContinuityExercise, validateSidecRunbookActivation } from "../lib/sidec-runbook.js";
 import { buildContinuityExerciseReportPdf } from "../lib/sidec-continuity-report.js";
 import { buildContinuityChangeReportPdf } from "../lib/sidec-continuity-change-report.js";
+import { buildContinuityGovernancePdf } from "../lib/sidec-continuity-governance-report.js";
 import { signSidecContinuityChangeReport,verifySidecContinuityChangeReport } from "../lib/sidec-asymmetric.js";
 import { archiveSidecContinuityChangeReport,archiveSidecContinuityChangeReportReplica,enableSidecArchiveLegalHold,enableSidecReplicaLegalHold,extendSidecArchiveRetention,extendSidecReplicaRetention,restoreSidecArchiveObject,restoreSidecReplicaObject,verifySidecArchive,verifySidecReplica,wormMode,wormReplicaEnabled,wormReplicaMode } from "../lib/sidec-worm.js";
 import { hasPdfSignature,nextResilienceRetryAt,shouldAlertResilience } from "../lib/sidec-resilience.js";
@@ -152,6 +153,25 @@ const reportLegalHoldSchema=z.object({
 
 const reportRestoreDrillSchema=z.object({
  destination:z.enum(["PRIMARY","REPLICA"])
+});
+
+const effectivenessTargetSchema=z.object({
+ scopeType:z.enum(["DEFAULT","CATEGORY","RECURRENCE"]),
+ scopeValue:z.string().trim().max(120).default("*"),
+ minVerifiedRate:z.number().min(0).max(100).nullable().optional(),
+ minImprovedRate:z.number().min(0).max(100).nullable().optional(),
+ maxAvgApplyHours:z.number().positive().max(100000).nullable().optional(),
+ maxAvgVerificationHours:z.number().positive().max(100000).nullable().optional(),
+ enabled:z.boolean().default(true)
+}).refine(value=>
+ value.minVerifiedRate!=null||value.minImprovedRate!=null||
+ value.maxAvgApplyHours!=null||value.maxAvgVerificationHours!=null,
+ {message:"Informe pelo menos uma meta quantitativa."}
+);
+const effectivenessTargetsReplaceSchema=z.object({items:z.array(effectivenessTargetSchema).max(100)});
+const governancePeriodSchema=z.object({
+ from:z.coerce.date().optional(),
+ to:z.coerce.date().optional()
 });
 
 const changeProposalTransitionSchema=z.discriminatedUnion("status",[
@@ -387,6 +407,147 @@ async function loadChangePolicy(org:string){
   reportWormLegalHold:false,
   updatedAt:null
  };
+}
+
+function resolvedGovernancePeriod(input:{from?:Date;to?:Date}){
+ const to=input.to??new Date();
+ const from=input.from??new Date(to.getTime()-90*24*60*60*1000);
+ if(from.getTime()>=to.getTime())throw Object.assign(new Error("Período inválido: início deve anteceder o fim."),{statusCode:400,code:"INVALID_PERIOD"});
+ if(to.getTime()-from.getTime()>730*24*60*60*1000)throw Object.assign(new Error("Período máximo para o relatório é de 730 dias."),{statusCode:400,code:"PERIOD_TOO_LARGE"});
+ return {from,to};
+}
+
+async function evaluateEffectivenessTargets(org:string,from:Date,to:Date){
+ const targets=await db.query(`SELECT id,scope_type AS "scopeType",scope_value AS "scopeValue",
+   min_verified_rate AS "minVerifiedRate",min_improved_rate AS "minImprovedRate",
+   max_avg_apply_hours AS "maxAvgApplyHours",max_avg_verification_hours AS "maxAvgVerificationHours",
+   enabled,updated_at AS "updatedAt"
+  FROM sidec_continuity_effectiveness_targets WHERE organization_id=$1
+  ORDER BY enabled DESC,scope_type,scope_value`,[org]);
+ const items=[];
+ for(const target of targets.rows as Array<any>){
+  const params:unknown[]=[org,from,to];
+  let scope="";
+  if(target.scopeType==="CATEGORY"){params.push(target.scopeValue);scope=` AND rr.category=$${params.length}`;}
+  if(target.scopeType==="RECURRENCE"){params.push(target.scopeValue);scope=` AND rr.recurrence_key=$${params.length}`;}
+  const result=await db.query(`SELECT count(*)::int AS total,
+    count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+    round((100.0*count(*) FILTER(WHERE cp.status='VERIFIED')/NULLIF(count(*),0))::numeric,1) AS "verifiedRate",
+    round((100.0*count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')/
+      NULLIF(count(*) FILTER(WHERE cp.effectiveness_outcome IN ('IMPROVED','STABLE','REGRESSED')),0))::numeric,1) AS "improvedRate",
+    round(avg(EXTRACT(EPOCH FROM (cp.applied_at-cp.created_at))/3600.0) FILTER(WHERE cp.applied_at IS NOT NULL)::numeric,1) AS "avgApplyHours",
+    round(avg(EXTRACT(EPOCH FROM (cp.verified_at-cp.applied_at))/3600.0)
+      FILTER(WHERE cp.verified_at IS NOT NULL AND cp.applied_at IS NOT NULL)::numeric,1) AS "avgVerificationHours"
+   FROM sidec_continuity_change_proposals cp
+   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3 AND cp.status<>'CANCELLED'${scope}`,params);
+  const actual=result.rows[0] as any;
+  const checks:Array<boolean|null>=[];
+  const checkMin=(targetValue:any,actualValue:any)=>targetValue==null?null:actualValue==null?null:Number(actualValue)>=Number(targetValue);
+  const checkMax=(targetValue:any,actualValue:any)=>targetValue==null?null:actualValue==null?null:Number(actualValue)<=Number(targetValue);
+  for(const value of [
+   checkMin(target.minVerifiedRate,actual.verifiedRate),
+   checkMin(target.minImprovedRate,actual.improvedRate),
+   checkMax(target.maxAvgApplyHours,actual.avgApplyHours),
+   checkMax(target.maxAvgVerificationHours,actual.avgVerificationHours)
+  ])if(value!==null||checks.length>=0)checks.push(value);
+  const relevantChecks=checks.filter((_,i)=>[
+   target.minVerifiedRate,target.minImprovedRate,target.maxAvgApplyHours,target.maxAvgVerificationHours
+  ][i]!=null);
+  const state=!target.enabled?"DISABLED":Number(actual.total??0)===0||relevantChecks.some(x=>x===null)?"NO_DATA":
+   relevantChecks.every(x=>x===true)?"PASS":"FAIL";
+  items.push({...target,actual,state});
+ }
+ return items;
+}
+
+async function buildContinuityGovernanceExecutiveReport(org:string,from:Date,to:Date){
+ const [organization,summary,bySeverity,byRecurrence,governance,worm,resilience,targets]=await Promise.all([
+  db.query("SELECT name FROM organizations WHERE id=$1",[org]),
+  db.query(`SELECT count(*)::int AS total,
+    count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+    count(*) FILTER(WHERE rr.severity='CRITICAL')::int AS critical,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='STABLE')::int AS stable,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed,
+    round((100.0*count(*) FILTER(WHERE cp.status='VERIFIED')/NULLIF(count(*) FILTER(WHERE cp.status<>'CANCELLED'),0))::numeric,1) AS "verifiedRate",
+    round((100.0*count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')/
+      NULLIF(count(*) FILTER(WHERE cp.effectiveness_outcome IN ('IMPROVED','STABLE','REGRESSED')),0))::numeric,1) AS "improvedRate",
+    round(avg(EXTRACT(EPOCH FROM (cp.applied_at-cp.created_at))/3600.0) FILTER(WHERE cp.applied_at IS NOT NULL)::numeric,1) AS "avgApplyHours",
+    round(avg(EXTRACT(EPOCH FROM (cp.verified_at-cp.applied_at))/3600.0)
+      FILTER(WHERE cp.verified_at IS NOT NULL AND cp.applied_at IS NOT NULL)::numeric,1) AS "avgVerificationHours"
+   FROM sidec_continuity_change_proposals cp
+   JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3`,[org,from,to]),
+  db.query(`SELECT rr.severity,count(*)::int AS total,count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed
+   FROM sidec_continuity_change_proposals cp JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3
+   GROUP BY rr.severity ORDER BY CASE rr.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`,[org,from,to]),
+  db.query(`SELECT rr.recurrence_key AS "recurrenceKey",count(*)::int AS proposals,
+    count(*) FILTER(WHERE cp.status='VERIFIED')::int AS verified,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='IMPROVED')::int AS improved,
+    count(*) FILTER(WHERE cp.effectiveness_outcome='REGRESSED')::int AS regressed
+   FROM sidec_continuity_change_proposals cp JOIN sidec_continuity_runbook_recommendations rr ON rr.id=cp.recommendation_id
+   WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3
+   GROUP BY rr.recurrence_key ORDER BY count(*) DESC,rr.recurrence_key LIMIT 100`,[org,from,to]),
+  db.query(`SELECT
+    (SELECT count(*)::int FROM sidec_continuity_change_approvals a JOIN sidec_continuity_change_proposals cp ON cp.id=a.proposal_id
+      WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3) AS approvals,
+    (SELECT count(*)::int FROM sidec_continuity_change_approvals a JOIN sidec_continuity_change_proposals cp ON cp.id=a.proposal_id
+      WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3 AND a.decision='REJECTED') AS rejections,
+    (SELECT count(*)::int FROM sidec_continuity_approval_delegations d
+      WHERE d.organization_id=$1 AND d.valid_from<$3 AND d.valid_until>=$2) AS delegations`,[org,from,to]),
+  db.query(`SELECT
+    count(*) FILTER(WHERE s.proposal_id IS NOT NULL)::int AS sealed,
+    count(*) FILTER(WHERE a.proposal_id IS NOT NULL)::int AS archived,
+    count(*) FILTER(WHERE a.proposal_id IS NOT NULL AND av.exists_remote=true AND av.hash_valid=true)::int AS "primaryHealthy",
+    count(*) FILTER(WHERE r.proposal_id IS NOT NULL)::int AS replicated,
+    count(*) FILTER(WHERE r.proposal_id IS NOT NULL AND rv.exists_remote=true AND rv.hash_valid=true)::int AS "replicaHealthy"
+   FROM sidec_continuity_change_proposals cp
+   LEFT JOIN sidec_continuity_change_report_seals s ON s.proposal_id=cp.id
+   LEFT JOIN sidec_continuity_change_report_archives a ON a.proposal_id=cp.id
+   LEFT JOIN sidec_continuity_change_report_replicas r ON r.proposal_id=cp.id
+   LEFT JOIN LATERAL (SELECT exists_remote,hash_valid FROM sidec_continuity_change_report_archive_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1) av ON true
+   LEFT JOIN LATERAL (SELECT exists_remote,hash_valid FROM sidec_continuity_change_report_replica_verifications x
+    WHERE x.proposal_id=cp.id ORDER BY verified_at DESC LIMIT 1) rv ON true
+   WHERE cp.organization_id=$1 AND cp.created_at>=$2 AND cp.created_at<$3`,[org,from,to]),
+  db.query(`SELECT
+    (SELECT count(*)::int FROM sidec_continuity_change_report_resilience_conditions c
+      JOIN sidec_continuity_change_proposals cp ON cp.id=c.proposal_id
+      WHERE c.organization_id=$1 AND c.resolved_at IS NULL AND cp.created_at>=$2 AND cp.created_at<$3) AS "openConditions",
+    (SELECT count(*)::int FROM sidec_continuity_change_report_retry_jobs j
+      JOIN sidec_continuity_change_proposals cp ON cp.id=j.proposal_id
+      WHERE j.organization_id=$1 AND j.succeeded_at IS NULL AND cp.created_at>=$2 AND cp.created_at<$3) AS "pendingRetries",
+    (SELECT count(*)::int FROM sidec_continuity_change_report_restore_drills d
+      WHERE d.organization_id=$1 AND d.success=false AND d.performed_at>=$2 AND d.performed_at<$3) AS "restoreFailures"`,[org,from,to]),
+  evaluateEffectivenessTargets(org,from,to)
+ ]);
+ return {
+  reportVersion:"sigdec-continuity-governance/1.0",generatedAt:new Date().toISOString(),
+  organizationName:String(organization.rows[0]?.name??"Organização"),
+  period:{from:from.toISOString(),to:to.toISOString()},
+  summary:summary.rows[0],bySeverity:bySeverity.rows,byRecurrence:byRecurrence.rows,
+  governance:governance.rows[0],worm:worm.rows[0],resilience:resilience.rows[0],targets
+ };
+}
+
+function governanceCsv(report:any){
+ const escape=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
+ const rows:Array<unknown[]>=[["section","scope","value","metric","actual","target","state"]];
+ const s=report.summary??{};
+ for(const [metricName,value] of Object.entries(s))rows.push(["summary","period","",metricName,value,"",""]);
+ for(const item of report.targets??[]){
+  rows.push(["target",item.scopeType,item.scopeValue,"verifiedRate",item.actual?.verifiedRate,item.minVerifiedRate,item.state]);
+  rows.push(["target",item.scopeType,item.scopeValue,"improvedRate",item.actual?.improvedRate,item.minImprovedRate,item.state]);
+  rows.push(["target",item.scopeType,item.scopeValue,"avgApplyHours",item.actual?.avgApplyHours,item.maxAvgApplyHours,item.state]);
+  rows.push(["target",item.scopeType,item.scopeValue,"avgVerificationHours",item.actual?.avgVerificationHours,item.maxAvgVerificationHours,item.state]);
+ }
+ for(const item of report.byRecurrence??[])rows.push(["recurrence","RECURRENCE",item.recurrenceKey,"proposals",item.proposals,"",item.regressed>0?"ATTENTION":""]);
+ return rows.map(row=>row.map(escape).join(",")).join("\n")+"\n";
 }
 
 async function recordChangeReportArchiveVerification(input:{
