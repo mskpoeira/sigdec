@@ -7,25 +7,40 @@ import { useEffect, useState } from "react";
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
 
-const nav: Array<[string, string, Route]> =[
-["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias"],["◉","Riscos e Mapas","/campo"],["▲","Alertas","/monitoramento"],
-["♥","Assistência Humanitária","/assistencia"],["⌂","Abrigos","/assistencia"],["♟","Famílias","/assistencia"],["◇","Doações e Estoque","/assistencia"],
-["♥","Voluntariado","/voluntarios"],["♟","Treinamentos e Simulados","/gestao"],["♻","Recuperação","/gestao"],["▥","Relatórios e BI","/gestao"],
-["↻","Integrações (S2iD)","/gestao"],["▤","Documentos","/documentos"],["⚙","Administração","/gestao"]
+const nav: Array<[string,string,Route,string?]> =[
+["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias","incidents"],["◉","Riscos e Mapas","/campo","field"],["▲","Alertas","/monitoramento","monitoring"],
+["♥","Assistência Humanitária","/assistencia","humanitarian"],["⌂","Abrigos","/assistencia","humanitarian"],["♟","Famílias","/assistencia","humanitarian"],["◇","Doações e Estoque","/assistencia","humanitarian"],
+["♥","Voluntariado","/voluntarios","volunteers"],["♟","Treinamentos e Simulados","/gestao","training"],["♻","Recuperação","/gestao","recovery"],["▥","Relatórios e BI","/gestao","bi"],
+["↻","Integrações (S2iD)","/gestao","s2id"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
 ];
-const stats: Array<[string,string,string,string]> =[["2","Ocorrências Ativas","+1 nas últimas 24h","red"],["12","Famílias em Abrigos","-3 desde ontem","blue"],["1.245","Itens em Estoque","+320 esta semana","green"],["18","Voluntários Ativos","+5 esta semana","orange"],["3","Treinamentos","Próximo em 5 dias","purple"]];
-const quick: Array<[string, string, Route, string]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red"],["♟","Cadastrar Família","/assistencia","blue"],["⌂","Gerenciar Abrigos","/assistencia","green"],["◇","Registrar Entrega","/assistencia","orange"],["▤","Planejar Treinamento","/gestao","navy"],["▥","Relatórios e Indicadores","/gestao","gray"]];
+const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia","blue","humanitarian"],["⌂","Gerenciar Abrigos","/assistencia","green","humanitarian"],["◇","Registrar Entrega","/assistencia","orange","humanitarian"],["▤","Planejar Treinamento","/gestao","navy","training"],["▥","Relatórios e Indicadores","/gestao","gray","bi"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
+type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
+type Feature={code:string;enabled:boolean};
 
 export default function PainelPage(){
- const [user,setUser]=useState<SessionUser|null>(null); const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
- useEffect(()=>{fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{})},[]);
+ const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
+ const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
+ useEffect(()=>{
+  fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
+  fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
+  fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
+  fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
+ },[]);
  async function logout(){await fetch(`${API_URL}/auth/logout`,{method:"POST",credentials:"include"});location.href="/login"}
  if(!user)return <main className="shell"><p>Carregando sessão...</p></main>;
+ const stats:Array<[string,string,string,string]>=[
+  [String(summary?.activeIncidents??"—"),"Ocorrências Ativas",summary?`${summary.incidents24h} registrada(s) nas últimas 24h`:"Carregando...","red"],
+  [String(summary?.activeHouseholds??"—"),"Famílias Acompanhadas","Desalojadas/desabrigadas ativas","blue"],
+  [summary?Number(summary.stockBalance).toLocaleString("pt-BR",{maximumFractionDigits:2}):"—","Saldo de Itens","Movimentação humanitária consolidada","green"],
+  [String(summary?.activeVolunteers??"—"),"Voluntários Ativos","Cadastro operacional vigente","orange"],
+  [String(summary?.upcomingTrainings??"—"),"Treinamentos Futuros","Programações ainda não iniciadas","purple"]
+ ];
+ const featureOn=(code?:string)=>!code||features[code]!==false;
  return <main className="opsDashboard">
   <aside className="opsSide">
    <div className="opsSideBrand"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div>
-   <nav>{nav.map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}</nav>
+   <nav>{nav.filter(([, , ,feature])=>featureOn(feature)).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""}><span>{i}</span>{n}</Link>)}</nav>
    <div className="opsUser"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div>
    <button onClick={logout}>↪ &nbsp; Sair</button>
   </aside>
@@ -39,10 +54,10 @@ export default function PainelPage(){
    <div className="opsContent">
     <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}<br/><small>Ubatuba - SP</small></div></div>
     <div className="opsStats">{stats.map(([v,l,d,c])=><article className={"stat "+c} key={l}><b>{v}</b><span>{l}</span><small>{d}</small></article>)}</div>
-    <div className="opsQuick">{quick.map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
+    <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
      <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {x.priority}</small></div><span>{x.status}</span></Link>)}</section>
-     <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap"><div className="coast">UBATUBA</div><i className="pin p1">!</i><i className="pin p2">▲</i><i className="pin p3">⌂</i><i className="pin p4">⌂</i><div className="legend">🔴 Ocorrência ativa<br/>🟡 Em monitoramento<br/>🟢 Resolvida<br/>🔵 Abrigo</div></div></section>
+     <section className="opsCard"><header><h2>Resumo Territorial</h2><Link href="/campo">Abrir operação de campo</Link></header><div className="situationMap"><div className="coast">UBATUBA · DADOS ATUAIS</div>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map(x=><div className="incidentMini" key={"territorial-"+x.id}><div><b>{x.neighborhood??"Local não informado"}</b><small>{x.priority} · {x.status}</small></div></div>)}<div className="legend">Resumo derivado das ocorrências reais carregadas pelo SIGDEC.</div></div></section>
     </div>
    </div>
    <footer className="opsFooter"><span>SIGDEC v1.38.1 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
