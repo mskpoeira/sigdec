@@ -102,6 +102,7 @@ export async function createSession(params: {
   permissions: string[];
   ip?: string;
   userAgent?: string;
+  mfaVerified?: boolean;
 }) {
   const sessionId = randomUUID();
   const sessionHours = Math.max(1, Math.min(24, Number(process.env.SESSION_HOURS ?? 8)));
@@ -109,9 +110,9 @@ export async function createSession(params: {
 
   await db.query(
     `INSERT INTO auth_sessions
-       (id, user_id, expires_at, ip, user_agent)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [sessionId, params.userId, expiresAt, params.ip ?? null, params.userAgent ?? null]
+       (id, user_id, expires_at, ip, user_agent, mfa_verified_at)
+     VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END)`,
+    [sessionId, params.userId, expiresAt, params.ip ?? null, params.userAgent ?? null, params.mfaVerified === true]
   );
 
   const token = await new SignJWT({
@@ -181,9 +182,19 @@ export function requirePermission(permission: string) {
     if (reply.sent) return;
 
     const auth = authFrom(request);
-    const userState = await db.query<{ must_change_password: boolean; organization_id: string | null }>(
-      "SELECT must_change_password, organization_id::text AS organization_id FROM users WHERE id = $1 AND active = true",
-      [auth.userId]
+    const userState = await db.query<{
+      must_change_password: boolean;
+      organization_id: string | null;
+      mfa_required: boolean;
+      mfa_enabled: boolean;
+      mfa_verified_at: Date | null;
+    }>(
+      `SELECT u.must_change_password,u.organization_id::text AS organization_id,u.mfa_required,u.mfa_enabled,
+              s.mfa_verified_at
+         FROM users u
+         JOIN auth_sessions s ON s.id=$2 AND s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>now()
+        WHERE u.id=$1 AND u.active=true`,
+      [auth.userId,auth.sessionId]
     );
 
     const user = userState.rows[0];
@@ -205,6 +216,20 @@ export function requirePermission(permission: string) {
       return reply.code(403).send({
         error: "PASSWORD_CHANGE_REQUIRED",
         message: "Altere a senha temporária antes de continuar."
+      });
+    }
+
+    if(user.mfa_required&&!user.mfa_enabled){
+      return reply.code(403).send({
+        error:"MFA_SETUP_REQUIRED",
+        message:"Configure o segundo fator de autenticação antes de continuar."
+      });
+    }
+
+    if(user.mfa_enabled&&!user.mfa_verified_at){
+      return reply.code(403).send({
+        error:"MFA_REAUTH_REQUIRED",
+        message:"Esta sessão precisa ser autenticada novamente com o segundo fator."
       });
     }
 
