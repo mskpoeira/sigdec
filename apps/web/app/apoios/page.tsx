@@ -60,11 +60,11 @@ export default function ApoiosPage(){
  },[]);
 
  const load=useCallback(async()=>{
-  const body=await request("/api/v1/support-requests");setItems(body.items??[]);
+  const body=await request("/api/v1/external-support-requests");setItems(body.items??[]);
  },[request]);
 
  const open=useCallback(async(id:string)=>{
-  const body=await request("/api/v1/support-requests/"+id);setSelected(body);
+  const body=await request("/api/v1/external-support-requests/"+id);setSelected(body);
  },[request]);
 
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar."))},[load]);
@@ -79,7 +79,7 @@ export default function ApoiosPage(){
  async function createRequest(e:FormEvent<HTMLFormElement>){
   e.preventDefault();const form=e.currentTarget,d=new FormData(form),deadline=String(d.get("deadlineAt")??""),amount=String(d.get("requestedAmount")??"").trim();
   await perform(async()=>{
-   const body=await request("/api/v1/support-requests",{method:"POST",body:JSON.stringify({
+   const body=await request("/api/v1/external-support-requests",{method:"POST",body:JSON.stringify({
     scope:String(d.get("scope")??"STATE"),serviceType:String(d.get("serviceType")??"STATE_HUMANITARIAN"),
     incidentProtocol:String(d.get("incidentProtocol")??""),cobradeCode:String(d.get("cobradeCode")??""),
     title:String(d.get("title")??""),summary:String(d.get("summary")??""),externalSystem:String(d.get("externalSystem")??""),
@@ -102,7 +102,7 @@ export default function ApoiosPage(){
   }
   const notes=window.prompt("Observação sobre a mudança de status:","")?.trim()??"";
   await perform(async()=>{
-   await request("/api/v1/support-requests/"+selected.item.id,{method:"PATCH",body:JSON.stringify({status:next,externalProtocol:protocol,approvedAmount,notes})});
+   await request("/api/v1/external-support-requests/"+selected.item.id,{method:"PATCH",body:JSON.stringify({status:next,externalProtocol:protocol,approvedAmount,notes})});
    setMessage("Situação atualizada com registro de horário e matrícula.");
   });
  }
@@ -111,7 +111,7 @@ export default function ApoiosPage(){
   let notes="";
   if(status==="REJECTED"||status==="NOT_APPLICABLE")notes=window.prompt("Justificativa/observação:","")?.trim()??"";
   await perform(async()=>{
-   await request("/api/v1/support-requests/"+selected!.item.id+"/requirements/"+item.id,{method:"PATCH",body:JSON.stringify({status,notes})});
+   await request("/api/v1/external-support-requests/"+selected!.item.id+"/requirements/"+item.id,{method:"PATCH",body:JSON.stringify({status,notes})});
   });
  }
 
@@ -119,7 +119,7 @@ export default function ApoiosPage(){
   e.preventDefault();if(!selected)return;
   const form=e.currentTarget,d=new FormData(form),due=String(d.get("dueAt")??"");
   await perform(async()=>{
-   await request("/api/v1/support-requests/"+selected.item.id+"/requirements",{method:"POST",body:JSON.stringify({
+   await request("/api/v1/external-support-requests/"+selected.item.id+"/requirements",{method:"POST",body:JSON.stringify({
     code:String(d.get("code")??""),title:String(d.get("title")??""),required:d.get("required")==="on",
     dueAt:due?ubatubaLocalDateTimeToIso(due):undefined,notes:String(d.get("notes")??"")
    })});form.reset();
