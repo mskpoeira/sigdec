@@ -4,6 +4,7 @@ import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 const PENDING_LOCATION_KEY="sigdec.field.pending-location.v1";
@@ -41,6 +42,8 @@ type FieldPosition = {
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 
 export default function CampoPage() {
+  const searchParams=useSearchParams();
+  const monitorMode=searchParams.get("monitor")==="1";
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
   const [positions, setPositions] = useState<FieldPosition[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
@@ -87,9 +90,14 @@ export default function CampoPage() {
   }
 
   useEffect(() => {
-    void load().catch((error) => {
+    const refresh=()=>void load().catch((error) => {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar.");
     });
+    refresh();
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)refresh()},5000);
+    const onRealtime=()=>refresh();
+    window.addEventListener("sigdec:realtime-tick",onRealtime);
+    return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:realtime-tick",onRealtime)};
   }, []);
 
   useEffect(()=>{
@@ -133,7 +141,16 @@ export default function CampoPage() {
   );
   const selectedPoint=useMemo(()=>points.find(item=>`point:${item.id}`===selectedId)??null,[points,selectedId]);
 
+  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
+  const locatedIncidents=useMemo(()=>incidents.filter(item=>item.latitude!==null&&item.longitude!==null&&Number.isFinite(Number(item.latitude))&&Number.isFinite(Number(item.longitude))),[incidents]);
+  const pinPosition=(item:FieldIncident)=>{
+    const lat=Number(item.latitude),lon=Number(item.longitude);
+    const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));
+    const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));
+    return {left:`${left}%`,top:`${top}%`};
+  };
   const mapUrl = useMemo(() => {
+    if(monitorMode)return "https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
     const target=selectedPoint??selected;
     if (!target || target.latitude === null || target.longitude === null) return "";
     const lat = Number(target.latitude);
@@ -141,7 +158,7 @@ export default function CampoPage() {
     const delta = 0.012;
     const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join(",");
     return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lon}`;
-  }, [selected,selectedPoint]);
+  }, [selected,selectedPoint,monitorMode]);
 
   async function savePoint(event:React.FormEvent<HTMLFormElement>){
     event.preventDefault();setSavingPoint(true);
@@ -219,12 +236,12 @@ export default function CampoPage() {
   }
 
   return (
-    <main className="shell moduleShell">
+    <main className={`shell moduleShell ${monitorMode?"realtimeMonitorMode":""}`}>
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · {SIGDEC_VERSION_LABEL}</span>
-          <h1>Mapa operacional</h1>
-          <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · {SIGDEC_VERSION_LABEL} {monitorMode?"· MONITOR TEMPO REAL":""}</span>
+          <h1>{monitorMode?"Monitor de ocorrências em tempo real":"Mapa operacional"}</h1>
+          <p>{monitorMode?"Painel contínuo para sala de situação e monitor dedicado. Atualização automática a cada 5 segundos.":"Ocorrências, pontos registrados e últimas posições informadas pelas equipes."}</p>
         </div>
         <div className="headerActions">
           <span className={online?"secondaryLink":"warningCard"}>{online?"Online":"Offline"}</span>
@@ -244,14 +261,22 @@ export default function CampoPage() {
         <div className="fieldMap card">
           {mapUrl ? (
             <>
-              <iframe
-                className="mapFrame"
-                src={mapUrl}
-                title={`Mapa de ${selectedPoint?.title??selected?.protocol??"Ubatuba"}`}
-                loading="lazy"
-              />
+              <div className={monitorMode?"monitorMapWrap":""}>
+                <iframe
+                  className="mapFrame"
+                  src={mapUrl}
+                  title={monitorMode?"Mapa de ocorrências ativas em tempo real":`Mapa de ${selectedPoint?.title??selected?.protocol??"Ubatuba"}`}
+                  loading="lazy"
+                />
+                {monitorMode&&locatedIncidents.map(item=><Link
+                  href={`/ocorrencias/${item.id}`} target="_blank" rel="noreferrer"
+                  className={`mapIncidentPin priorityMap-${item.priority}`} style={pinPosition(item)}
+                  key={`live-${item.id}`} title={`${item.protocol} · ${item.summary} · ${item.neighborhood??"localização georreferenciada"}`}>
+                  <span>!</span>
+                </Link>)}
+              </div>
               <small>
-                Mapa © OpenStreetMap. Selecione um ponto ou ocorrência para centralizar.
+                {monitorMode?`Tempo real · ${locatedIncidents.length} ocorrência(s) georreferenciada(s) · atualização a cada 5 s`:"Mapa © OpenStreetMap. Selecione um ponto ou ocorrência para centralizar."}
               </small>
             </>
           ) : (
