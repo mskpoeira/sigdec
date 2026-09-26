@@ -8,6 +8,7 @@ import {db} from "../db.js";
 const uuid=z.string().uuid();
 const userInput=z.object({
  matricula:z.string().trim().min(1).max(32),displayName:z.string().trim().min(3).max(160),
+ warName:z.string().trim().max(80).default(""),
  email:z.union([z.string().trim().email().max(254),z.literal("")]).default(""),
  phone:z.string().trim().max(40).default(""),jobTitle:z.string().trim().max(120).default(""),
  department:z.string().trim().max(120).default(""),roleIds:z.array(uuid).min(1).max(8),
@@ -26,7 +27,7 @@ const audit=async(client:any,request:FastifyRequest,action:string,entityType:str
   VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)`,[authFrom(request).userId,action,entityType,entityId,
   request.ip,request.headers["user-agent"]??null,JSON.stringify(before??null),JSON.stringify(after??null)]);
 };
-const userSelect=`SELECT u.id,u.matricula,u.display_name AS "displayName",u.email,u.phone,
+const userSelect=`SELECT u.id,u.matricula,u.display_name AS "displayName",u.war_name AS "warName",u.email,u.phone,
  u.job_title AS "jobTitle",u.department,u.active,u.must_change_password AS "mustChangePassword",
  u.mfa_required AS "mfaRequired",u.mfa_enabled AS "mfaEnabled",u.last_login_at AS "lastLoginAt",
  u.created_at AS "createdAt",COALESCE(array_agg(r.id) FILTER(WHERE r.id IS NOT NULL),'{}') AS "roleIds",
@@ -98,13 +99,13 @@ export async function adminUserRoutes(app:FastifyInstance){
    const roles=await validateRoles(client,v.roleIds);
    if(!roles){await client.query("ROLLBACK");return reply.code(400).send({error:"INVALID_ROLES"});}
    const mfa=roles.rows.some((r:any)=>r.code==="MASTER"||r.level>=80);
-   const result=await client.query<{id:string}>(`INSERT INTO users(organization_id,matricula,display_name,email,phone,job_title,department,
+   const result=await client.query<{id:string}>(`INSERT INTO users(organization_id,matricula,display_name,war_name,email,phone,job_title,department,
     password_hash,active,must_change_password,mfa_required)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10) RETURNING id`,[
-    org,matricula,v.displayName,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11) RETURNING id`,[
+    org,matricula,v.displayName,v.warName||null,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
    const id=result.rows[0]!.id;
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
-   await audit(client,request,"ADMIN_USER_CREATED","user",id,null,{matricula,displayName:v.displayName,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
+   await audit(client,request,"ADMIN_USER_CREATED","user",id,null,{matricula,displayName:v.displayName,warName:v.warName||null,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
    await client.query("COMMIT");return reply.code(201).send({id,temporaryPassword:password});
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"MATRICULA_EXISTS"});throw error}finally{client.release()}
  });
@@ -132,14 +133,14 @@ export async function adminUserRoutes(app:FastifyInstance){
     if(Number(masters.rows[0]?.count??0)<=1){await client.query("ROLLBACK");return reply.code(409).send({error:"LAST_MASTER"});}
    }
    const mfa=roles.rows.some((r:any)=>r.code==="MASTER"||r.level>=80);
-   await client.query(`UPDATE users SET matricula=$3,display_name=$4,email=$5,phone=$6,job_title=$7,department=$8,
-    active=$9,mfa_required=CASE WHEN $10 THEN true ELSE mfa_required END,updated_at=now()
-    WHERE id=$1 AND organization_id=$2`,[id,org,matricula,v.displayName,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,v.active,mfa]);
+   await client.query(`UPDATE users SET matricula=$3,display_name=$4,war_name=$5,email=$6,phone=$7,job_title=$8,department=$9,
+    active=$10,mfa_required=CASE WHEN $11 THEN true ELSE mfa_required END,updated_at=now()
+    WHERE id=$1 AND organization_id=$2`,[id,org,matricula,v.displayName,v.warName||null,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,v.active,mfa]);
    await client.query("DELETE FROM user_roles WHERE user_id=$1",[id]);
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
    await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[id]);
    await audit(client,request,"ADMIN_USER_UPDATED","user",id,{...before.rows[0],roles:original.rows.map((r:any)=>r.code)},
-    {matricula,displayName:v.displayName,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
+    {matricula,displayName:v.displayName,warName:v.warName||null,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
    await client.query("COMMIT");return {id};
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"MATRICULA_EXISTS"});throw error}finally{client.release()}
  });
