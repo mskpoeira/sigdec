@@ -315,3 +315,24 @@
  .realtimeMonitorMode .fieldLayout{grid-template-columns:1fr}
  .realtimeMonitorMode .fieldMap,.realtimeMonitorMode .monitorMapWrap{min-height:62vh}
 }
+
+
+/* v1.63 — indicador global de sincronização em tempo real */
+.realtimeStatus{
+ position:fixed;left:18px;bottom:18px;z-index:845;display:inline-flex;align-items:center;gap:7px;
+ min-height:34px;padding:7px 10px;border:1px solid #cfdce8;border-radius:999px;background:rgba(255,255,255,.94);
+ color:#49657e;box-shadow:0 8px 24px rgba(4,34,62,.12);backdrop-filter:blur(8px);font-size:.7rem;
+ pointer-events:none
+}
+.realtimeStatus span{font-size:.72rem}.realtimeStatus strong{font-weight:900;letter-spacing:.02em}
+.realtimeStatus.sse{color:#16743a;border-color:#b8dfc5;background:rgba(239,251,243,.96)}
+.realtimeStatus.sse span{animation:sigdecLivePulse 1.6s ease-in-out infinite}
+.realtimeStatus.polling{color:#0b5ea8;border-color:#bdd5e9;background:rgba(240,247,253,.96)}
+.realtimeStatus.connecting{color:#8a5a00;border-color:#ead8a7;background:rgba(255,250,235,.97)}
+.realtimeStatus.offline{color:#9a2e2e;border-color:#ecc5c5;background:rgba(255,243,243,.97)}
+@keyframes sigdecLivePulse{0%,100%{opacity:.45}50%{opacity:1}}
+.presentationMode~.realtimeStatus{color:#fff}
+@media(max-width:640px){
+ .realtimeStatus{left:10px;bottom:10px;min-height:30px;padding:6px 8px}
+ .realtimeStatus strong{font-size:.63rem}
+}
