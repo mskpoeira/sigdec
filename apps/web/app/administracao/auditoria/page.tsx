@@ -22,7 +22,7 @@ type AuditItem={
  integrityValid:boolean;
 };
 type Integrity={status:"verified"|"failed";algorithm:string;appendOnly:boolean;checkedAt:string;total:number;unsealed:number;invalid:number;oldestAt:string|null;newestAt:string|null};
-type Checkpoint={id:string;createdAt:string;createdByMatricula:string;createdByName:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;checkpointHash:string;integrityVersion:number;algorithm:string;checkpointValid:boolean};
+type Checkpoint={id:string;createdAt:string;createdByMatricula:string;createdByName:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;checkpointHash:string;integrityVersion:number;algorithm:string;checkpointValid:boolean;ed25519KeyId?:string|null;ed25519Fingerprint?:string|null;attestedAt?:string|null};
 type CheckpointVerification={status:"none"|"verified"|"failed";checkedAt:string;checkpointCount:number;chainInvalid?:number;contentInvalid?:number;latest?:Checkpoint;audit?:{rootValid:boolean;invalid:number;unsealed:number}};
 
 const activityLabel=(action:string)=>{
@@ -157,8 +157,8 @@ export default function AuditPage(){
 
   {checkpoints.length>0&&<section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Checkpoints criptográficos</h2><p>Âncoras append-only da trilha de auditoria, encadeadas entre si.</p></div></div>
-   <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th><th>Comprovante</th></tr></thead>
-    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td><td><div className="headerActions"><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointReceipt(item)}>JSON</button><Link className="secondaryLink" href={`/integridade/auditoria/${item.checkpointHash}`} target="_blank">Ver público</Link></div></td></tr>)}</tbody>
+   <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th><th>Ed25519</th><th>Comprovante</th></tr></thead>
+    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td><td>{item.ed25519Fingerprint?<><strong>✓ Assinado</strong><br/><small title={item.ed25519Fingerprint}>{item.ed25519KeyId??"Ed25519"} · {item.ed25519Fingerprint.slice(0,12)}…</small></>:<small>Será assinado ao emitir comprovante</small>}</td><td><div className="headerActions"><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointReceipt(item)}>JSON</button><Link className="secondaryLink" href={`/integridade/auditoria/${item.checkpointHash}`} target="_blank">Ver público</Link></div></td></tr>)}</tbody>
    </table></div>
   </section>}
 
