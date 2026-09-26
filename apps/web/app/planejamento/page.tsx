@@ -30,7 +30,8 @@ export default function PlanejamentoPage(){
   try{
    const data=await Promise.all([request("/api/v1/planning/summary"),request("/api/v1/plancon"),request("/api/v1/anomaly-cases")]);
    setSummary(data[0]);setPlans(data[1].items??[]);setCases(data[2].items??[]);
-   if(!activationPlan&&data[1].items?.[0])setActivationPlan(data[1].items[0].id);setMessage("");
+   const candidate=(data[1].items??[]).find((x:Plan)=>x.status==="APPROVED"||x.status==="ACTIVE");
+   if(!activationPlan&&candidate)setActivationPlan(candidate.id);setMessage("");
   }catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar.");}
  },[request,activationPlan]);
  useEffect(()=>{void load()},[load]);
