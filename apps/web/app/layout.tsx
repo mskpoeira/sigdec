@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./theme-buttons.css";
 import PwaRegister from "./PwaRegister";
 import GlobalExperience from "./GlobalExperience";
 
