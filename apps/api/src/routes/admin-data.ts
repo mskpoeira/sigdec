@@ -199,41 +199,52 @@ export async function adminDataRoutes(app:FastifyInstance){
    organizationId,createdAt,matricula,auditCount:integrity.auditCount,firstAuditId:integrity.firstAuditId,
    lastAuditId:integrity.lastAuditId,auditRootHash:integrity.auditRootHash,previousCheckpointHash,integrityVersion
   }));
-  const result=await db.query(`INSERT INTO audit_integrity_checkpoints(
-    organization_id,created_at,created_by,created_by_matricula,audit_count,first_audit_id,last_audit_id,
-    audit_root_hash,previous_checkpoint_hash,checkpoint_hash,integrity_version,algorithm,metadata
-   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'SHA-256',$12::jsonb)
-   RETURNING id::text AS id,created_at AS "createdAt",created_by_matricula AS "createdByMatricula",
-    audit_count::int AS "auditCount",first_audit_id::text AS "firstAuditId",last_audit_id::text AS "lastAuditId",
-    audit_root_hash AS "auditRootHash",previous_checkpoint_hash AS "previousCheckpointHash",
-    checkpoint_hash AS "checkpointHash",integrity_version AS "integrityVersion",algorithm`,[
-   organizationId,createdAt,auth.userId,matricula,integrity.auditCount,integrity.firstAuditId,integrity.lastAuditId,
-   integrity.auditRootHash,previousCheckpointHash,checkpointHash,integrityVersion,JSON.stringify({invalid:0,unsealed:0})
-  ]);
-  return reply.code(201).send({...result.rows[0],checkpointValid:true});
+  try{
+   const result=await db.query(`INSERT INTO audit_integrity_checkpoints(
+     organization_id,created_at,created_by,created_by_matricula,audit_count,first_audit_id,last_audit_id,
+     audit_root_hash,previous_checkpoint_hash,checkpoint_hash,integrity_version,algorithm,metadata
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'SHA-256',$12::jsonb)
+    RETURNING id::text AS id,created_at AS "createdAt",created_by_matricula AS "createdByMatricula",
+     audit_count::int AS "auditCount",first_audit_id::text AS "firstAuditId",last_audit_id::text AS "lastAuditId",
+     audit_root_hash AS "auditRootHash",previous_checkpoint_hash AS "previousCheckpointHash",
+     checkpoint_hash AS "checkpointHash",integrity_version AS "integrityVersion",algorithm`,[
+    organizationId,createdAt,auth.userId,matricula,integrity.auditCount,integrity.firstAuditId,integrity.lastAuditId,
+    integrity.auditRootHash,previousCheckpointHash,checkpointHash,integrityVersion,JSON.stringify({invalid:0,unsealed:0})
+   ]);
+   return reply.code(201).send({...result.rows[0],checkpointValid:true});
+  }catch(error:any){
+   if(error?.code==="23505")return reply.code(409).send({error:"CHECKPOINT_CONFLICT",message:"Outro checkpoint foi criado simultaneamente. Atualize a tela e tente novamente."});
+   throw error;
+  }
  });
 
- app.get("/api/v1/admin/audit/checkpoints/verify",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+ app.get("/api/v1/admin/audit/checkpoints/verify",{preHandler:requirePermission("audit.read")},async request=>{
   const organizationId=org(request);
-  const latest=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
+  const all=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
     c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
     c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
     c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
-    FROM audit_integrity_checkpoints c WHERE c.organization_id=$1 ORDER BY c.created_at DESC,c.id DESC LIMIT 1`,[organizationId]);
-  if(!latest.rows[0])return {status:"none",message:"Nenhum ponto de verificação criado.",checkedAt:new Date().toISOString()};
-  const row=latest.rows[0];
-  const audit=await computeAuditRoot(organizationId,row.lastAuditId);
-  const expected=sha256(checkpointCanonical({
-   organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
-   auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
-   auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
-  }));
-  const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
-   audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
-  const checkpointValid=expected===row.checkpointHash;
+    FROM audit_integrity_checkpoints c WHERE c.organization_id=$1 ORDER BY c.created_at ASC,c.id ASC`,[organizationId]);
+  if(!all.rows.length)return {status:"none",message:"Nenhum ponto de verificação criado.",checkedAt:new Date().toISOString(),checkpointCount:0};
+  let previousHash:string|null=null,chainInvalid=0,contentInvalid=0;
+  for(const row of all.rows){
+   const expected=sha256(checkpointCanonical({
+    organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+    auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+   }));
+   if(expected!==row.checkpointHash)contentInvalid+=1;
+   if((row.previousCheckpointHash??null)!==previousHash)chainInvalid+=1;
+   previousHash=row.checkpointHash;
+  }
+  const latest=all.rows[all.rows.length-1],audit=await computeAuditRoot(organizationId,latest.lastAuditId);
+  const rootValid=audit.auditRootHash===latest.auditRootHash&&audit.auditCount===Number(latest.auditCount)&&
+   audit.firstAuditId===latest.firstAuditId&&audit.lastAuditId===latest.lastAuditId;
+  const status=rootValid&&audit.invalid===0&&audit.unsealed===0&&chainInvalid===0&&contentInvalid===0?"verified":"failed";
   return {
-   status:rootValid&&checkpointValid&&audit.invalid===0&&audit.unsealed===0?"verified":"failed",
-   checkedAt:new Date().toISOString(),checkpoint:{...row,checkpointValid},audit:{...audit,rootValid}
+   status,checkedAt:new Date().toISOString(),checkpointCount:all.rows.length,chainInvalid,contentInvalid,
+   latest:{...latest,checkpointValid:contentInvalid===0&&chainInvalid===0},
+   audit:{...audit,rootValid}
   };
  });
 
