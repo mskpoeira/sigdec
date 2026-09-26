@@ -25,6 +25,7 @@ type Incident = {
   reference_point: string | null;
   latitude: number | null;
   longitude: number | null;
+  incident_type_id: string;
   type_name: string;
   type_group: string;
   team_code: string | null;
@@ -66,7 +67,17 @@ type Resource = {
   name?: string;
   description?: string;
   plate?: string | null;
+  vehicleType?: string | null;
+  passengerCapacity?: number | null;
+  totalOccupants?: number | null;
   status: string;
+};
+
+type IncidentTypeOption = { id:string; code:string; name:string; groupName:string; defaultPriority:string };
+type EditIncident = {
+  typeId:string;source:string;priority:string;riskToLife:boolean;summary:string;description:string;
+  callerName:string;callerPhone:string;callerPhoneType:"LANDLINE"|"MOBILE";callerPhoneWhatsapp:boolean;
+  addressLine:string;neighborhood:string;referencePoint:string;latitude:string;longitude:string;
 };
 
 type DetailResponse = {
@@ -98,6 +109,7 @@ const statusLabels: Record<string, string> = {
 const eventLabels: Record<string, string> = {
   "incident.created": "Ocorrência registrada",
   "incident.status_changed": "Situação atualizada",
+  "incident.updated": "Chamado editado",
   "dispatch.created": "Equipe despachada",
   "dispatch.status_changed": "Despacho atualizado",
   "civil_action.created": "Ação da Defesa Civil registrada",
@@ -143,6 +155,9 @@ export default function OcorrenciaDetalhePage() {
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [teams, setTeams] = useState<Resource[]>([]);
   const [vehicles, setVehicles] = useState<Resource[]>([]);
+  const [incidentTypes, setIncidentTypes] = useState<IncidentTypeOption[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [editIncident, setEditIncident] = useState<EditIncident|null>(null);
   const [message, setMessage] = useState("Carregando ocorrência...");
   const [busy, setBusy] = useState(false);
   const [nextStatus, setNextStatus] = useState("");
@@ -177,10 +192,11 @@ export default function OcorrenciaDetalhePage() {
 
   const load = useCallback(async () => {
     try {
-      const [detailResponse, teamsResponse, vehiclesResponse] = await Promise.all([
+      const [detailResponse, teamsResponse, vehiclesResponse, typesResponse] = await Promise.all([
         fetch(`${API_URL}/api/v1/incidents/${id}`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/teams`, { credentials: "include" }),
-        fetch(`${API_URL}/api/v1/vehicles`, { credentials: "include" })
+        fetch(`${API_URL}/api/v1/vehicles`, { credentials: "include" }),
+        fetch(`${API_URL}/api/v1/incident-types`, { credentials: "include" })
       ]);
 
       if (!(await handleAuth(detailResponse))) return;
@@ -198,6 +214,10 @@ export default function OcorrenciaDetalhePage() {
         const vehiclesBody = await vehiclesResponse.json();
         setVehicles(vehiclesBody.items ?? []);
       }
+      if (typesResponse.ok) {
+        const typesBody = await typesResponse.json();
+        setIncidentTypes(typesBody.items ?? []);
+      }
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar dados.");
@@ -207,6 +227,48 @@ export default function OcorrenciaDetalhePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  function beginEdit(){
+    if(!detail)return;
+    const incident=detail.incident;
+    const digits=(incident.caller_phone??"").replace(/\D/g,"");
+    const phoneType=incident.caller_phone_type??(digits.length===10?"LANDLINE":"MOBILE");
+    setEditIncident({
+      typeId:incident.incident_type_id,source:incident.source,priority:incident.priority,riskToLife:incident.risk_to_life,
+      summary:incident.summary,description:incident.description??"",callerName:incident.caller_name??"",
+      callerPhone:formatPhoneBR(incident.caller_phone,phoneType),callerPhoneType:phoneType,callerPhoneWhatsapp:incident.caller_phone_whatsapp,
+      addressLine:incident.address_line??"",neighborhood:incident.neighborhood??"",referencePoint:incident.reference_point??"",
+      latitude:incident.latitude==null?"":String(incident.latitude),longitude:incident.longitude==null?"":String(incident.longitude)
+    });
+    setEditing(true);
+  }
+
+  async function saveIncident(event:FormEvent){
+    event.preventDefault();
+    if(!editIncident)return;
+    setBusy(true);setMessage("");
+    try{
+      const response=await fetch(`${API_URL}/api/v1/incidents/${id}`,{
+        method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          typeId:editIncident.typeId,source:editIncident.source,summary:editIncident.summary,
+          description:editIncident.description||undefined,priority:editIncident.priority,riskToLife:editIncident.riskToLife,
+          callerName:editIncident.callerName||undefined,callerPhone:editIncident.callerPhone||undefined,
+          callerPhoneType:editIncident.callerPhone?editIncident.callerPhoneType:undefined,
+          callerPhoneWhatsapp:editIncident.callerPhone?editIncident.callerPhoneWhatsapp:false,
+          addressLine:editIncident.addressLine||undefined,neighborhood:editIncident.neighborhood||undefined,
+          referencePoint:editIncident.referencePoint||undefined,
+          latitude:editIncident.latitude.trim()?Number(editIncident.latitude.replace(",",".")):undefined,
+          longitude:editIncident.longitude.trim()?Number(editIncident.longitude.replace(",",".")):undefined
+        })
+      });
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(body.message??body.error??"Não foi possível salvar a edição.");
+      setEditing(false);setEditIncident(null);setMessage("Chamado atualizado com sucesso. A alteração foi registrada na auditoria.");
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha ao editar o chamado.");}
+    finally{setBusy(false)}
+  }
 
   async function updateIncidentStatus(event: FormEvent) {
     event.preventDefault();
@@ -356,6 +418,7 @@ export default function OcorrenciaDetalhePage() {
           <p>{incident.type_group} · {incident.type_name}</p>
         </div>
         <div className="headerActions">
+          <button className="primaryButton" type="button" onClick={beginEdit}>Editar chamado</button>
           <Link className="secondaryLink" href={`/ocorrencias/${id}/sidec`}>Pacotes SIDEC</Link>
           <Link className="secondaryLink" href={`/ocorrencias/${id}/extrato`}>Extrato operacional</Link>
           <Link className="secondaryLink" href="/ocorrencias">Voltar</Link>
@@ -402,13 +465,41 @@ export default function OcorrenciaDetalhePage() {
         </article>
       </section>
 
+      {editing&&editIncident&&<section className="detailSection">
+        <form className="incidentForm" onSubmit={saveIncident}>
+          <div className="listHeader"><div><span className="eyebrow">EDIÇÃO DO CHAMADO</span><h2>Editar dados da ocorrência</h2><p>Os dados podem ser corrigidos a qualquer momento. Toda alteração fica registrada com matrícula, data e hora.</p></div><button className="secondaryLink" type="button" onClick={()=>{setEditing(false);setEditIncident(null)}}>Cancelar edição</button></div>
+          <div className="formGrid">
+            <label>Tipo da ocorrência<select required value={editIncident.typeId} onChange={e=>setEditIncident({...editIncident,typeId:e.target.value})}>{incidentTypes.map(t=><option key={t.id} value={t.id}>{t.groupName} · {t.name}</option>)}</select></label>
+            <label>Origem<select value={editIncident.source} onChange={e=>setEditIncident({...editIncident,source:e.target.value})}>{Object.entries(sourceLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+            <label>Prioridade<select value={editIncident.priority} onChange={e=>setEditIncident({...editIncident,priority:e.target.value})}><option value="P1">P1 · Crítica · Vermelho</option><option value="P2">P2 · Muito alta · Laranja</option><option value="P3">P3 · Alta · Amarelo</option><option value="P4">P4 · Normal · Verde</option><option value="P5">P5 · Programada · Azul</option></select></label>
+            <label className="checkLabel"><input type="checkbox" checked={editIncident.riskToLife} onChange={e=>setEditIncident({...editIncident,riskToLife:e.target.checked})}/> Risco à vida</label>
+          </div>
+          <label>Resumo<input required minLength={5} maxLength={240} value={editIncident.summary} onChange={e=>setEditIncident({...editIncident,summary:e.target.value})}/></label>
+          <label>Descrição<textarea rows={4} value={editIncident.description} onChange={e=>setEditIncident({...editIncident,description:e.target.value})}/></label>
+          <fieldset><legend>Contato do solicitante</legend><div className="formGrid">
+            <label>Solicitante<input value={editIncident.callerName} onChange={e=>setEditIncident({...editIncident,callerName:e.target.value})}/></label>
+            <label>Tipo do telefone<select value={editIncident.callerPhoneType} onChange={e=>{const phoneType=e.target.value as "LANDLINE"|"MOBILE";setEditIncident({...editIncident,callerPhoneType:phoneType,callerPhone:formatPhoneBR(editIncident.callerPhone,phoneType)})}}><option value="MOBILE">Celular</option><option value="LANDLINE">Telefone fixo</option></select></label>
+            <label>Telefone<input inputMode="tel" value={editIncident.callerPhone} onChange={e=>setEditIncident({...editIncident,callerPhone:formatPhoneBR(e.target.value,editIncident.callerPhoneType)})} placeholder={editIncident.callerPhoneType==="MOBILE"?"(12) 99999-9999":"(12) 3333-4444"}/></label>
+            <label className="checkLabel"><input type="checkbox" checked={editIncident.callerPhoneWhatsapp} disabled={!editIncident.callerPhone} onChange={e=>setEditIncident({...editIncident,callerPhoneWhatsapp:e.target.checked})}/> Este número possui WhatsApp</label>
+          </div></fieldset>
+          <fieldset><legend>Local</legend><div className="formGrid">
+            <label>Endereço<input value={editIncident.addressLine} onChange={e=>setEditIncident({...editIncident,addressLine:e.target.value})}/></label>
+            <label>Bairro<input value={editIncident.neighborhood} onChange={e=>setEditIncident({...editIncident,neighborhood:e.target.value})}/></label>
+            <label>Ponto de referência<input value={editIncident.referencePoint} onChange={e=>setEditIncident({...editIncident,referencePoint:e.target.value})}/></label>
+            <label>Latitude<input inputMode="decimal" value={editIncident.latitude} onChange={e=>setEditIncident({...editIncident,latitude:e.target.value})}/></label>
+            <label>Longitude<input inputMode="decimal" value={editIncident.longitude} onChange={e=>setEditIncident({...editIncident,longitude:e.target.value})}/></label>
+          </div></fieldset>
+          <div className="headerActions"><button className="primaryButton" disabled={busy} type="submit">Salvar alterações</button><button className="secondaryLink" type="button" disabled={busy} onClick={()=>{setEditing(false);setEditIncident(null)}}>Cancelar</button></div>
+        </form>
+      </section>}
+
       <section className="operationsGrid">
         <form className="incidentForm compactForm" onSubmit={updateIncidentStatus}>
-          <div><span className="eyebrow">FLUXO</span><h2>Atualizar situação</h2></div>
+          <div><span className="eyebrow">SITUAÇÃO DO CHAMADO</span><h2>Alterar situação</h2><p>A situação pode ser alterada a qualquer momento, inclusive para reabrir um chamado encerrado ou cancelado. O histórico é preservado.</p></div>
           {detail.allowedTransitions.length ? (
             <>
               <label>
-                Próxima situação
+                Nova situação
                 <select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>
                   {detail.allowedTransitions.map((status) => (
                     <option value={status} key={status}>{statusLabels[status] ?? status}</option>
@@ -421,7 +512,7 @@ export default function OcorrenciaDetalhePage() {
               </label>
               <button disabled={busy} type="submit">Registrar situação</button>
             </>
-          ) : <p>Não há transições disponíveis para esta ocorrência.</p>}
+          ) : <p>Nenhuma outra situação disponível.</p>}
         </form>
 
         <form className="incidentForm compactForm" onSubmit={createDispatch}>
@@ -441,7 +532,7 @@ export default function OcorrenciaDetalhePage() {
               <option value="">Sem viatura</option>
               {availableVehicles.map((vehicle) => (
                 <option value={vehicle.id} key={vehicle.id}>
-                  {vehicle.code} · {vehicle.description}{vehicle.plate ? ` · ${vehicle.plate}` : ""}
+                  {vehicle.code} · {vehicle.description}{vehicle.plate ? ` · ${vehicle.plate}` : ""}{vehicle.totalOccupants!=null ? ` · ${vehicle.passengerCapacity} passageiro(s) + motorista` : ""}
                 </option>
               ))}
             </select>

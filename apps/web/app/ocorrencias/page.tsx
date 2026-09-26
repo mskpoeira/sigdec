@@ -30,6 +30,13 @@ const priorityLabel: Record<string, string> = {
   P5: "Programada"
 };
 
+const statusLabel: Record<string,string> = {
+  RECEIVED:"Recebida",TRIAGE:"Em triagem",WAITING_DISPATCH:"Aguardando despacho",DISPATCHED:"Despachada",
+  EN_ROUTE:"Em deslocamento",ON_SCENE:"No local",IN_SERVICE:"Em atendimento",WAITING_SUPPORT:"Aguardando apoio",
+  INSPECTION:"Em vistoria",MONITORING:"Em monitoramento",COMPLETED:"Concluída",CLOSED:"Encerrada",
+  CANCELLED:"Cancelada",DUPLICATE:"Duplicada"
+};
+
 export default function OcorrenciasPage() {
   const [items, setItems] = useState<Incident[]>([]);
   const [message, setMessage] = useState("Carregando ocorrências...");
@@ -79,6 +86,17 @@ export default function OcorrenciasPage() {
         <section className="infoCard">Nenhuma ocorrência cadastrada.</section>
       )}
 
+      <section className="infoCard">
+        <strong>Prioridade de atendimento</strong>
+        <div className="priorityLegend" style={{marginTop:10}}>
+          <span><i className="p1"/>P1 · Crítica · Vermelho</span>
+          <span><i className="p2"/>P2 · Muito alta · Laranja</span>
+          <span><i className="p3"/>P3 · Alta · Amarelo</span>
+          <span><i className="p4"/>P4 · Normal · Verde</span>
+          <span><i className="p5"/>P5 · Programada · Azul</span>
+        </div>
+      </section>
+
       <section className="incidentList">
         {items.map((item) => (
           <Link className="incidentRow" href={`/ocorrencias/${item.id}`} key={item.id}>
@@ -100,7 +118,7 @@ export default function OcorrenciasPage() {
               </p>
             </div>
             <div className="incidentSide">
-              <span className="statusTag">{item.status}</span>
+              <span className="statusTag">{statusLabel[item.status] ?? item.status}</span>
               <time>{formatDateTimeBR(item.createdAt)}</time><small>Matrícula {item.createdByMatricula??"—"}</small>
             </div>
           </Link>

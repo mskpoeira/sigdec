@@ -7,18 +7,22 @@ import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
 type Team={id:string;code:string;name:string;status:string;active:boolean;memberCount:number};
-type Vehicle={id:string;code:string;plate:string|null;description:string;status:string;active:boolean;odometerKm:number|null};
+type Vehicle={id:string;code:string;plate:string|null;description:string;vehicleType:string|null;passengerCapacity:number|null;totalOccupants:number|null;status:string;active:boolean;odometerKm:number|null};
 type IncidentType={id:string;code:string;name:string;groupName:string;cobradeCode:string|null;defaultPriority:string;active:boolean;systemType:boolean};
 type Item={id:string;code:string;name:string;unit:string;category:string;active:boolean;balance:number;movementCount:number};
 type User={id:string;matricula:string;displayName:string;jobTitle:string|null;active:boolean};
 type Member={userId:string;matricula:string;displayName:string;jobTitle:string|null;roleName:string|null};
+type JobTitle={id:string;code:string;name:string;employmentType:"COMMISSIONED"|"EFFECTIVE"|"FUNCTION"|"OTHER";sourceReference:string|null;active:boolean};
 
 const teamStatuses=["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","UNAVAILABLE"];
 const vehicleStatuses=["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","MAINTENANCE","UNAVAILABLE"];
 const statusPt:Record<string,string>={AVAILABLE:"Disponível",DISPATCHED:"Despachado",EN_ROUTE:"Em deslocamento",ON_SCENE:"No local",RETURNING:"Retornando",UNAVAILABLE:"Indisponível",MAINTENANCE:"Manutenção"};
+const vehicleTypes=[["PICKUP","Picape"],["SUV","SUV"],["CAR","Automóvel"],["VAN","Van"],["TRUCK","Caminhão"],["MOTORCYCLE","Motocicleta"],["BOAT","Embarcação"],["TRAILER","Reboque/Carreta"],["OTHER","Outro"]] as const;
+const vehicleTypePt:Record<string,string>=Object.fromEntries(vehicleTypes);
+const employmentPt:Record<string,string>={COMMISSIONED:"Cargo em comissão",EFFECTIVE:"Cargo efetivo",FUNCTION:"Função",OTHER:"Outro"};
 
 export default function CadastrosOperacionaisPage(){
- const[teams,setTeams]=useState<Team[]>([]),[vehicles,setVehicles]=useState<Vehicle[]>([]),[types,setTypes]=useState<IncidentType[]>([]),[items,setItems]=useState<Item[]>([]),[users,setUsers]=useState<User[]>([]);
+ const[teams,setTeams]=useState<Team[]>([]),[vehicles,setVehicles]=useState<Vehicle[]>([]),[types,setTypes]=useState<IncidentType[]>([]),[items,setItems]=useState<Item[]>([]),[users,setUsers]=useState<User[]>([]),[jobTitles,setJobTitles]=useState<JobTitle[]>([]);
  const[selectedTeam,setSelectedTeam]=useState<Team|null>(null),[members,setMembers]=useState<Member[]>([]);
  const[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
 
@@ -31,11 +35,12 @@ export default function CadastrosOperacionaisPage(){
  },[]);
 
  const load=useCallback(async()=>{
-  const [t,v,ty,i,u]=await Promise.all([
+  const [t,v,ty,i,u,j]=await Promise.all([
    request("/api/v1/admin/resources/teams"),request("/api/v1/admin/resources/vehicles"),
-   request("/api/v1/admin/resources/incident-types"),request("/api/v1/admin/items"),request("/api/v1/admin/users")
+   request("/api/v1/admin/resources/incident-types"),request("/api/v1/admin/items"),request("/api/v1/admin/users"),
+   request("/api/v1/admin/resources/job-titles")
   ]);
-  setTeams(t.items??[]);setVehicles(v.items??[]);setTypes(ty.items??[]);setItems(i.items??[]);setUsers(u.items??[]);
+  setTeams(t.items??[]);setVehicles(v.items??[]);setTypes(ty.items??[]);setItems(i.items??[]);setUsers(u.items??[]);setJobTitles(j.items??[]);
  },[request]);
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar cadastros."))},[load]);
 
@@ -82,21 +87,47 @@ export default function CadastrosOperacionaisPage(){
   await perform(async()=>{await request("/api/v1/admin/resources/teams/"+selectedTeam.id+"/members/"+member.userId,{method:"DELETE"});});
  }
 
+ async function createJobTitle(e:FormEvent<HTMLFormElement>){
+  e.preventDefault();const form=e.currentTarget,d=new FormData(form);
+  await perform(async()=>{await request("/api/v1/admin/resources/job-titles",{method:"POST",body:JSON.stringify({
+   code:String(d.get("code")??""),name:String(d.get("name")??""),employmentType:String(d.get("employmentType")??"OTHER"),
+   sourceReference:String(d.get("sourceReference")??""),active:true
+  })});form.reset();setMessage("Cargo/função cadastrado.");});
+ }
+
+ async function editJobTitle(item:JobTitle){
+  const name=window.prompt("Nome do cargo/função:",item.name)?.trim();if(!name)return;
+  const sourceReference=window.prompt("Referência legal/origem:",item.sourceReference??"")??"";
+  await perform(async()=>{await request("/api/v1/admin/resources/job-titles/"+item.id,{method:"PUT",body:JSON.stringify({
+   code:item.code,name,employmentType:item.employmentType,sourceReference,active:item.active
+  })});});
+ }
+
+ async function deactivateJobTitle(item:JobTitle){
+  if(!window.confirm("Desativar o cargo/função "+item.name+"?"))return;
+  await perform(async()=>{await request("/api/v1/admin/resources/job-titles/"+item.id,{method:"DELETE"});});
+ }
+
  async function createVehicle(e:FormEvent<HTMLFormElement>){
-  e.preventDefault();const form=e.currentTarget,d=new FormData(form),odo=String(d.get("odometerKm")??"").trim();
+  e.preventDefault();const form=e.currentTarget,d=new FormData(form),odo=String(d.get("odometerKm")??"").trim(),capacity=String(d.get("passengerCapacity")??"").trim();
   await perform(async()=>{await request("/api/v1/admin/resources/vehicles",{method:"POST",body:JSON.stringify({
    code:String(d.get("code")??""),plate:String(d.get("plate")??""),description:String(d.get("description")??""),
+   vehicleType:String(d.get("vehicleType")??"OTHER"),passengerCapacity:capacity?Number(capacity):null,
    status:String(d.get("status")??"AVAILABLE"),odometerKm:odo?Number(odo):null,active:true
   })});form.reset();setMessage("Viatura cadastrada.");});
  }
 
  async function editVehicle(v:Vehicle){
-  const description=window.prompt("Descrição:",v.description)?.trim();if(!description)return;
+  const description=window.prompt("Modelo/descrição:",v.description)?.trim();if(!description)return;
+  const type=window.prompt("Tipo: "+vehicleTypes.map(([code,label])=>code+"="+label).join(", "),v.vehicleType??"OTHER")?.trim().toUpperCase();
+  if(!type||!vehicleTypes.some(([code])=>code===type))return;
   const status=window.prompt("Status: "+vehicleStatuses.join(", "),v.status)?.trim().toUpperCase();if(!status||!vehicleStatuses.includes(status))return;
   const plate=window.prompt("Placa:",v.plate??"")??"";
+  const capacityRaw=window.prompt("Quantidade de passageiros (sem contar o motorista):",v.passengerCapacity?.toString()??"")??"";
   const odoRaw=window.prompt("Hodômetro (km):",v.odometerKm?.toString()??"")??"";
   await perform(async()=>{await request("/api/v1/admin/resources/vehicles/"+v.id,{method:"PUT",body:JSON.stringify({
-   code:v.code,plate,description,status,odometerKm:odoRaw.trim()?Number(odoRaw.replace(",",".")):null,active:v.active
+   code:v.code,plate,description,vehicleType:type,passengerCapacity:capacityRaw.trim()?Number(capacityRaw):null,
+   status,odometerKm:odoRaw.trim()?Number(odoRaw.replace(",",".")):null,active:v.active
   })});});
  }
 
@@ -137,10 +168,23 @@ export default function CadastrosOperacionaisPage(){
   {message&&<section className="infoCard">{message}</section>}
 
   <section className="dataGrid">
+   <article className="card"><h2>Cargos/Funções</h2><p className="adminNumber">{jobTitles.filter(x=>x.active).length}</p><p>cargos e funções operacionais</p></article>
    <article className="card"><h2>Equipes</h2><p className="adminNumber">{teams.filter(x=>x.active).length}</p><p>equipes ativas</p></article>
    <article className="card"><h2>Viaturas</h2><p className="adminNumber">{vehicles.filter(x=>x.active).length}</p><p>viaturas ativas</p></article>
    <article className="card"><h2>Tipos de ocorrência</h2><p className="adminNumber">{types.filter(x=>x.active).length}</p><p>sistema + municipais</p></article>
    <article className="card"><h2>Itens humanitários</h2><p className="adminNumber">{items.filter(x=>x.active).length}</p><p>itens ativos</p></article>
+  </section>
+
+  <section style={{marginTop:22}}>
+   <h2>Cargos e funções da Defesa Civil</h2>
+   <div className="infoCard"><strong>Base inicial de Ubatuba</strong><p>O SIGDEC traz pré-cadastrados os cargos diretamente relacionados à estrutura atual da Defesa Civil: Diretor de Gestão de Defesa Civil, Assessor da Diretoria de Gestão de Defesa Civil e Agente de Defesa Civil. O catálogo pode ser ampliado sem alterar o RH oficial.</p></div>
+   <form className="incidentForm compactForm" onSubmit={createJobTitle}><div className="formGrid">
+    <label>Código<input name="code" required placeholder="AGENTE_DEFESA_CIVIL"/></label>
+    <label>Cargo/Função<input name="name" required placeholder="Agente de Defesa Civil"/></label>
+    <label>Vínculo<select name="employmentType"><option value="EFFECTIVE">Cargo efetivo</option><option value="COMMISSIONED">Cargo em comissão</option><option value="FUNCTION">Função</option><option value="OTHER">Outro</option></select></label>
+    <label>Referência legal/origem<input name="sourceReference" placeholder="Lei, concurso, portaria..."/></label>
+   </div><button className="primaryButton" disabled={busy}>Cadastrar cargo/função</button></form>
+   <div className="adminTableWrap"><table><thead><tr><th>Código</th><th>Cargo/Função</th><th>Vínculo</th><th>Referência</th><th>Status</th><th>Ações</th></tr></thead><tbody>{jobTitles.map(j=><tr key={j.id}><td><code>{j.code}</code></td><td><strong>{j.name}</strong></td><td>{employmentPt[j.employmentType]??j.employmentType}</td><td>{j.sourceReference??"—"}</td><td>{j.active?"Ativo":"Inativo"}</td><td><div className="headerActions"><button type="button" className="secondaryLink" onClick={()=>void editJobTitle(j)}>Editar</button>{j.active&&<button type="button" className="secondaryLink" onClick={()=>void deactivateJobTitle(j)}>Desativar</button>}</div></td></tr>)}</tbody></table></div>
   </section>
 
   <section style={{marginTop:22}}>
@@ -159,18 +203,30 @@ export default function CadastrosOperacionaisPage(){
    <div className="listHeader"><div><h2>{selectedTeam.code} · Integrantes e funções</h2><p>A função operacional é específica desta equipe e não altera o perfil de acesso do usuário.</p></div><button type="button" className="secondaryLink" onClick={()=>{setSelectedTeam(null);setMembers([])}}>Fechar</button></div>
    <form className="incidentForm compactForm" onSubmit={addMember}><div className="formGrid">
     <label>Servidor<select name="userId" required><option value="">Selecione</option>{activeUsers.map(u=><option key={u.id} value={u.id}>{u.matricula} · {u.displayName}{u.jobTitle?" · "+u.jobTitle:""}</option>)}</select></label>
-    <label>Função na equipe<input name="roleName" placeholder="Chefe de equipe, motorista, vistoriador..."/></label>
+    <label>Função na equipe<input name="roleName" list="sigdec-job-titles" placeholder="Chefe de equipe, motorista, vistoriador..."/><datalist id="sigdec-job-titles">{jobTitles.filter(j=>j.active).map(j=><option key={j.id} value={j.name}/>)}</datalist></label>
    </div><button className="primaryButton" disabled={busy}>Vincular integrante</button></form>
    <div className="adminTableWrap"><table><thead><tr><th>Matrícula</th><th>Servidor</th><th>Função</th><th></th></tr></thead><tbody>{members.map(m=><tr key={m.userId}><td>{m.matricula}</td><td>{m.displayName}<br/><small>{m.jobTitle??"Sem cargo informado"}</small></td><td>{m.roleName??"—"}</td><td><button type="button" className="secondaryLink" onClick={()=>void removeMember(m)}>Remover</button></td></tr>)}</tbody></table></div>
   </section>}
 
   <section style={{marginTop:24}}>
    <h2>Viaturas</h2>
+   <div className="infoCard"><strong>Frota Defesa Civil</strong><p>As viaturas <strong>DC-001 a DC-007</strong> são pré-cadastradas para Ubatuba. Como placa, tipo e lotação não foram presumidos, esses campos ficam disponíveis para preenchimento com os dados reais.</p></div>
    <form className="incidentForm compactForm" onSubmit={createVehicle}><div className="formGrid">
-    <label>Código<input name="code" required placeholder="VTR-01"/></label><label>Placa<input name="plate"/></label><label>Descrição<input name="description" required placeholder="Fiat Strada 4x4"/></label>
-    <label>Status<select name="status">{vehicleStatuses.map(x=><option key={x} value={x}>{statusPt[x]??x}</option>)}</select></label><label>Hodômetro<input name="odometerKm" type="number" min="0" step="0.1"/></label>
+    <label>Código<input name="code" required placeholder="DC-008"/></label>
+    <label>Tipo<select name="vehicleType" defaultValue="OTHER">{vehicleTypes.map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
+    <label>Placa<input name="plate" maxLength={16} placeholder="ABC1D23"/></label>
+    <label>Modelo / descrição<input name="description" required placeholder="Ex.: Mitsubishi L200 Triton"/></label>
+    <label>Passageiros + motorista<input name="passengerCapacity" type="number" min="0" max="99" placeholder="4"/><small>Informe apenas passageiros. O sistema soma 1 motorista automaticamente.</small></label>
+    <label>Status<select name="status">{vehicleStatuses.map(x=><option key={x} value={x}>{statusPt[x]??x}</option>)}</select></label>
+    <label>Hodômetro<input name="odometerKm" type="number" min="0" step="0.1"/></label>
    </div><button className="primaryButton" disabled={busy}>Cadastrar viatura</button></form>
-   <div className="dataGrid">{vehicles.map(v=><article className={v.active?"card":"warningCard"} key={v.id}><h3>{v.code} · {v.description}</h3><p>{v.plate??"Sem placa"} · <strong>{statusPt[v.status]??v.status}</strong></p><p>{v.odometerKm!=null?Number(v.odometerKm).toLocaleString("pt-BR")+" km":"Hodômetro não informado"} · {v.active?"ativa":"desativada"}</p><div className="headerActions"><button type="button" className="secondaryLink" onClick={()=>void editVehicle(v)}>Editar</button>{v.active&&<button type="button" className="secondaryLink" onClick={()=>void deactivateVehicle(v)}>Desativar</button>}</div></article>)}</div>
+   <div className="dataGrid">{vehicles.map(v=><article className={v.active?"card":"warningCard"} key={v.id}>
+    <h3>{v.code} · {v.description}</h3>
+    <p><strong>{vehicleTypePt[v.vehicleType??"OTHER"]??v.vehicleType??"Tipo não informado"}</strong> · {v.plate??"Sem placa"} · {statusPt[v.status]??v.status}</p>
+    <p>{v.passengerCapacity!=null?<>{v.passengerCapacity} passageiro(s) + 1 motorista = <strong>{v.totalOccupants} ocupante(s)</strong></>:"Lotação não informada"}</p>
+    <p>{v.odometerKm!=null?Number(v.odometerKm).toLocaleString("pt-BR")+" km":"Hodômetro não informado"} · {v.active?"ativa":"desativada"}</p>
+    <div className="headerActions"><button type="button" className="secondaryLink" onClick={()=>void editVehicle(v)}>Editar</button>{v.active&&<button type="button" className="secondaryLink" onClick={()=>void deactivateVehicle(v)}>Desativar</button>}</div>
+   </article>)}</div>
   </section>
 
   <section style={{marginTop:24}}>

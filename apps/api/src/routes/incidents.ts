@@ -53,12 +53,13 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50)
 });
 
+const incidentStatusValues = [
+  "RECEIVED","TRIAGE","WAITING_DISPATCH","DISPATCHED","EN_ROUTE","ON_SCENE",
+  "IN_SERVICE","WAITING_SUPPORT","INSPECTION","MONITORING",
+  "COMPLETED","CLOSED","CANCELLED","DUPLICATE"
+] as const;
 const statusSchema = z.object({
-  status: z.enum([
-    "TRIAGE","WAITING_DISPATCH","DISPATCHED","EN_ROUTE","ON_SCENE",
-    "IN_SERVICE","WAITING_SUPPORT","INSPECTION","MONITORING",
-    "COMPLETED","CLOSED","CANCELLED","DUPLICATE"
-  ]),
+  status: z.enum(incidentStatusValues),
   note: z.string().trim().max(2000).optional()
 });
 
@@ -371,7 +372,7 @@ export async function incidentRoutes(app: FastifyInstance) {
       incident: incidentRow,
       timeline: timeline.rows,
       dispatches: dispatches.rows,
-      allowedTransitions: transitions[incidentRow.status] ?? []
+      allowedTransitions: incidentStatusValues.filter(status=>status!==incidentRow.status)
     };
   });
 
@@ -487,6 +488,90 @@ export async function incidentRoutes(app: FastifyInstance) {
     return r.rows[0];
   });
 
+  app.put("/api/v1/incidents/:id", {
+    preHandler: requirePermission("incidents.update")
+  }, async (request, reply) => {
+    const auth=authFrom(request);
+    const organizationId=requireOrganization(auth.organizationId);
+    const {id}=request.params as {id:string};
+    const parsed=createIncidentSchema.safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+    const input=parsed.data;
+
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      const currentResult=await client.query(`SELECT i.*,t.name AS type_name
+        FROM incidents i JOIN incident_types t ON t.id=i.incident_type_id
+        WHERE i.id=$1 AND i.organization_id=$2 FOR UPDATE`,[id,organizationId]);
+      const current=currentResult.rows[0];
+      if(!current){
+        await client.query("ROLLBACK");
+        return reply.code(404).send({error:"NOT_FOUND"});
+      }
+
+      const typeResult=await client.query(`SELECT id,name,default_priority
+        FROM incident_types WHERE id=$1 AND active=true AND (organization_id IS NULL OR organization_id=$2)`,[input.typeId,organizationId]);
+      const type=typeResult.rows[0];
+      if(!type){
+        await client.query("ROLLBACK");
+        return reply.code(404).send({error:"INCIDENT_TYPE_NOT_FOUND",message:"Tipo de ocorrência não localizado ou inativo."});
+      }
+
+      const result=await client.query(`UPDATE incidents SET
+        incident_type_id=$3,source=$4,priority=$5,risk_to_life=$6,summary=$7,description=$8,
+        caller_name=$9,caller_phone=$10,caller_phone_type=$11,caller_phone_whatsapp=$12,
+        address_line=$13,neighborhood=$14,reference_point=$15,latitude=$16,longitude=$17,
+        location=CASE WHEN $16::double precision IS NULL OR $17::double precision IS NULL THEN NULL
+          ELSE ST_SetSRID(ST_MakePoint($17::double precision,$16::double precision),4326)::geography END,
+        updated_at=now()
+        WHERE id=$1 AND organization_id=$2
+        RETURNING id,protocol,status,priority,risk_to_life AS "riskToLife",summary,description,source,
+          caller_name AS "callerName",caller_phone AS "callerPhone",caller_phone_type AS "callerPhoneType",
+          caller_phone_whatsapp AS "callerPhoneWhatsapp",address_line AS "addressLine",neighborhood,
+          reference_point AS "referencePoint",latitude,longitude,updated_at AS "updatedAt"`,[
+        id,organizationId,input.typeId,input.source,input.priority??current.priority,input.riskToLife,input.summary,input.description||null,
+        input.callerName||null,input.callerPhone||null,input.callerPhone?input.callerPhoneType??null:null,input.callerPhone?input.callerPhoneWhatsapp:false,
+        input.addressLine||null,input.neighborhood||null,input.referencePoint||null,input.latitude??null,input.longitude??null
+      ]);
+
+      const after=result.rows[0];
+      const changes:Record<string,{antes:unknown;depois:unknown}>={};
+      const compare=(key:string,before:unknown,afterValue:unknown)=>{if(JSON.stringify(before??null)!==JSON.stringify(afterValue??null))changes[key]={antes:before??null,depois:afterValue??null}};
+      compare("tipo",current.incident_type_id,input.typeId);
+      compare("origem",current.source,input.source);
+      compare("prioridade",current.priority,after.priority);
+      compare("risco_a_vida",current.risk_to_life,input.riskToLife);
+      compare("resumo",current.summary,input.summary);
+      compare("descricao",current.description,input.description||null);
+      compare("solicitante",current.caller_name,input.callerName||null);
+      compare("telefone",current.caller_phone,input.callerPhone||null);
+      compare("tipo_telefone",current.caller_phone_type,input.callerPhone?input.callerPhoneType??null:null);
+      compare("whatsapp",current.caller_phone_whatsapp,input.callerPhone?input.callerPhoneWhatsapp:false);
+      compare("endereco",current.address_line,input.addressLine||null);
+      compare("bairro",current.neighborhood,input.neighborhood||null);
+      compare("referencia",current.reference_point,input.referencePoint||null);
+      compare("latitude",current.latitude,input.latitude??null);
+      compare("longitude",current.longitude,input.longitude??null);
+
+      await client.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+        VALUES($1,'incident.updated',$2,$3,$4::jsonb)`,[
+        id,auth.userId,"Chamado editado.",JSON.stringify({changes})
+      ]);
+      await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+        VALUES($1,'incident.update','incident',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
+        auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(current),JSON.stringify(after)
+      ]);
+      await client.query("COMMIT");
+      return {ok:true,incident:after,changes:Object.keys(changes)};
+    }catch(error){
+      await client.query("ROLLBACK");
+      throw error;
+    }finally{
+      client.release();
+    }
+  });
+
   app.post("/api/v1/incidents/:id/status", {
     preHandler: requirePermission("incidents.update")
   }, async (request, reply) => {
@@ -513,14 +598,6 @@ export async function incidentRoutes(app: FastifyInstance) {
       if (!current) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ error: "NOT_FOUND" });
-      }
-
-      if (!(transitions[current.status] ?? []).includes(parsed.data.status)) {
-        await client.query("ROLLBACK");
-        return reply.code(409).send({
-          error: "INVALID_TRANSITION",
-          message: `Transição ${current.status} → ${parsed.data.status} não permitida.`
-        });
       }
 
       await client.query(
@@ -831,7 +908,10 @@ export async function incidentRoutes(app: FastifyInstance) {
     const auth = authFrom(request);
     const organizationId = requireOrganization(auth.organizationId);
     const result = await db.query(
-      `SELECT id, code, plate, description, status, odometer_km AS "odometerKm"
+      `SELECT id, code, plate, description, vehicle_type AS "vehicleType",
+              passenger_capacity AS "passengerCapacity",
+              CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
+              status, odometer_km AS "odometerKm"
          FROM vehicles
         WHERE organization_id=$1 AND active=true
         ORDER BY code`,
