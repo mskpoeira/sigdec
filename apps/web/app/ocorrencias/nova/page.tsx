@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 
@@ -44,6 +44,41 @@ export default function NovaOcorrenciaPage() {
   const [referencePoint, setReferencePoint] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [attachments,setAttachments]=useState<File[]>([]);
+  const photoInputRef=useRef<HTMLInputElement|null>(null);
+  const videoInputRef=useRef<HTMLInputElement|null>(null);
+  const filesInputRef=useRef<HTMLInputElement|null>(null);
+
+  function addAttachments(list:FileList|null){
+    if(!list)return;
+    const accepted=Array.from(list).filter(file=>file.type.startsWith("image/")||file.type.startsWith("video/"));
+    setAttachments(current=>{
+      const next=[...current];
+      for(const file of accepted){
+        const duplicate=next.some(item=>item.name===file.name&&item.size===file.size&&item.lastModified===file.lastModified);
+        if(!duplicate)next.push(file);
+      }
+      return next.slice(0,20);
+    });
+  }
+
+  async function uploadAttachments(incidentId:string){
+    const failures:string[]=[];
+    for(const file of attachments){
+      try{
+        const response=await fetch(`${API_URL}/api/v1/incidents/${incidentId}/attachments`,{
+          method:"POST",credentials:"include",
+          headers:{"Content-Type":file.type||"application/octet-stream","X-File-Name":encodeURIComponent(file.name)},
+          body:file
+        });
+        if(!response.ok){
+          const body=await response.json().catch(()=>({}));
+          failures.push(`${file.name}: ${body.message??"falha no envio"}`);
+        }
+      }catch{failures.push(`${file.name}: falha de comunicação`)}
+    }
+    return failures;
+  }
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/incident-types`, { credentials: "include" })
@@ -97,18 +132,15 @@ export default function NovaOcorrenciaPage() {
         return;
       }
 
-      setMessage(`Ocorrência ${body.incident.protocol} registrada com sucesso.`);
-      setSummary("");
-      setDescription("");
-      setCallerName("");
-      setCallerPhone("");
-      setCallerPhoneType("MOBILE");
-      setCallerPhoneWhatsapp(false);
-      setAddressLine("");
-      setNeighborhood("");
-      setReferencePoint("");
-      setPriority("");
-      setRiskToLife(false);
+      const failures=attachments.length?await uploadAttachments(body.incident.id):[];
+      if(failures.length){
+        setMessage(`Ocorrência ${body.incident.protocol} registrada. Alguns anexos não foram enviados: ${failures.join(" | ")}`);
+        setSaving(false);
+        return;
+      }
+      setMessage(`Ocorrência ${body.incident.protocol} registrada${attachments.length?` com ${attachments.length} anexo(s)`:""} com sucesso.`);
+      setAttachments([]);
+      window.setTimeout(()=>{window.location.href=`/ocorrencias/${body.incident.id}`},450);
     } catch {
       setMessage("Falha de comunicação com o servidor.");
     } finally {
@@ -251,6 +283,27 @@ export default function NovaOcorrenciaPage() {
             <input value={referencePoint} onChange={(e) => setReferencePoint(e.target.value)} />
           </label>
         </div>
+
+        <fieldset className="incidentMediaFieldset">
+          <legend>Fotos e vídeos da ocorrência</legend>
+          <p className="mediaHelp">Registre evidências diretamente pela câmera do celular ou selecione arquivos já existentes no celular ou computador.</p>
+          <div className="incidentMediaActions">
+            <button type="button" className="sigdecButton blue" onClick={()=>photoInputRef.current?.click()}>📷 Tirar foto</button>
+            <button type="button" className="sigdecButton orange" onClick={()=>videoInputRef.current?.click()}>🎥 Gravar vídeo</button>
+            <button type="button" className="secondaryButton" onClick={()=>filesInputRef.current?.click()}>📁 Buscar no dispositivo</button>
+          </div>
+          <input ref={photoInputRef} className="mediaHiddenInput" type="file" accept="image/*" capture="environment" multiple onChange={e=>{addAttachments(e.target.files);e.currentTarget.value=""}}/>
+          <input ref={videoInputRef} className="mediaHiddenInput" type="file" accept="video/*" capture="environment" onChange={e=>{addAttachments(e.target.files);e.currentTarget.value=""}}/>
+          <input ref={filesInputRef} className="mediaHiddenInput" type="file" accept="image/*,video/*" multiple onChange={e=>{addAttachments(e.target.files);e.currentTarget.value=""}}/>
+          {attachments.length>0&&<div className="mediaQueue">
+            {attachments.map((file,index)=><div className="mediaQueueItem" key={`${file.name}-${file.size}-${index}`}>
+              <span>{file.type.startsWith("video/")?"🎥":"📷"}</span>
+              <div><strong>{file.name}</strong><small>{(file.size/1024/1024).toLocaleString("pt-BR",{maximumFractionDigits:1})} MB</small></div>
+              <button type="button" aria-label={`Remover ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,i)=>i!==index))}>×</button>
+            </div>)}
+          </div>}
+          <small>Até 20 anexos por registro. Fotos: até 20 MB cada. Vídeos: até 120 MB cada.</small>
+        </fieldset>
 
         {message && <p className="formMessage">{message}</p>}
 
