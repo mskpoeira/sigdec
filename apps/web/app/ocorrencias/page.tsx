@@ -57,8 +57,8 @@ export default function OcorrenciasPage() {
       <header className="listHeader">
         <div>
           <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA</span>
-          <h1>Ocorrências</h1>
-          <p>Fila operacional ordenada por prioridade e horário.</p>
+          <h1>Ocorrências e Monitoramento</h1>
+          <p>Ocorrências, riscos, mapas, alertas, vistorias e acompanhamento operacional em um único contexto.</p>
         </div>
         <div className="headerActions">
           <Link className="secondaryLink" href="/painel">Painel</Link>
@@ -67,6 +67,13 @@ export default function OcorrenciasPage() {
       </header>
 
       {message && <section className="infoCard">{message}</section>}
+
+      <section className="dataGrid">
+        <article className="card"><h2>Nova ocorrência</h2><p>Registro operacional com protocolo, prioridade, localização e despacho.</p><Link className="primaryButton" href="/ocorrencias/nova">Registrar ocorrência</Link></article>
+        <article className="card"><h2>Riscos e Mapas</h2><p>Mapa operacional, pontos de risco, posições de campo e dados georreferenciados.</p><Link className="secondaryLink" href="/campo">Abrir mapa e riscos</Link></article>
+        <article className="card"><h2>Alertas e Monitoramento</h2><p>Estações, leituras, limiares, eventos operacionais, protocolos e rascunhos de alerta.</p><Link className="secondaryLink" href="/monitoramento">Abrir monitoramento</Link></article>
+        <article className="card"><h2>Vistorias</h2><p>Vistorias preventivas/emergenciais, evidências e histórico de campo.</p><Link className="secondaryLink" href="/vistorias">Abrir vistorias</Link></article>
+      </section>
 
       {!message && items.length === 0 && (
         <section className="infoCard">Nenhuma ocorrência cadastrada.</section>
