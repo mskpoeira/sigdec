@@ -24,6 +24,8 @@ type AuditItem={
 type Integrity={status:"verified"|"failed";algorithm:string;appendOnly:boolean;checkedAt:string;total:number;unsealed:number;invalid:number;oldestAt:string|null;newestAt:string|null};
 type Checkpoint={id:string;createdAt:string;createdByMatricula:string;createdByName:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;checkpointHash:string;integrityVersion:number;algorithm:string;checkpointValid:boolean;ed25519KeyId?:string|null;ed25519Fingerprint?:string|null;attestedAt?:string|null};
 type CheckpointVerification={status:"none"|"verified"|"failed";checkedAt:string;checkpointCount:number;chainInvalid?:number;contentInvalid?:number;latest?:Checkpoint;audit?:{rootValid:boolean;invalid:number;unsealed:number}};
+type AuditKey={keyId:string;publicKeyFingerprint:string;firstSeenAt:string;lastSeenAt:string;attestationCount:number;activatedByMatricula:string;lastUsedByMatricula:string;status:"ACTIVE"|"HISTORICAL"};
+type AuditKeys={currentKeyId:string;items:AuditKey[]};
 
 const activityLabel=(action:string)=>{
  if(action==="REQUEST_POST")return "Registro";
@@ -43,6 +45,7 @@ export default function AuditPage(){
  const[integrity,setIntegrity]=useState<Integrity|null>(null);
  const[checkpoints,setCheckpoints]=useState<Checkpoint[]>([]);
  const[checkpointVerification,setCheckpointVerification]=useState<CheckpointVerification|null>(null);
+ const[keys,setKeys]=useState<AuditKeys|null>(null);
  const[checkpointBusy,setCheckpointBusy]=useState(false);
  const[busy,setBusy]=useState(false);
 
@@ -79,14 +82,17 @@ export default function AuditPage(){
  },[]);
  const loadCheckpoints=useCallback(async()=>{
   try{
-   const [listResponse,verifyResponse]=await Promise.all([
+   const [listResponse,verifyResponse,keysResponse]=await Promise.all([
     fetch(`${API}/api/v1/admin/audit/checkpoints?limit=20`,{credentials:"include",cache:"no-store"}),
-    fetch(`${API}/api/v1/admin/audit/checkpoints/verify`,{credentials:"include",cache:"no-store"})
+    fetch(`${API}/api/v1/admin/audit/checkpoints/verify`,{credentials:"include",cache:"no-store"}),
+    fetch(`${API}/api/v1/admin/audit/keys`,{credentials:"include",cache:"no-store"})
    ]);
    const listBody=await listResponse.json().catch(()=>({}));
    const verifyBody=await verifyResponse.json().catch(()=>({}));
+   const keysBody=await keysResponse.json().catch(()=>({}));
    if(listResponse.ok)setCheckpoints(listBody.items??[]);
    if(verifyResponse.ok)setCheckpointVerification(verifyBody);
+   if(keysResponse.ok)setKeys(keysBody);
   }catch{}
  },[]);
  const createCheckpoint=useCallback(async()=>{
@@ -114,6 +120,21 @@ export default function AuditPage(){
    link.href=href;link.download=`sigdec-audit-checkpoint-${item.id}.json`;
    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href);
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao baixar comprovante.");}
+ },[]);
+ const downloadCheckpointDossier=useCallback(async(item:Checkpoint)=>{
+  try{
+   const response=await fetch(`${API}/api/v1/admin/audit/checkpoints/${encodeURIComponent(item.id)}/dossier`,{credentials:"include",cache:"no-store"});
+   if(response.status===401){location.href="/login";return}
+   if(!response.ok){
+    const body=await response.json().catch(()=>({}));
+    throw new Error(body.message??body.error??"Não foi possível gerar o dossiê.");
+   }
+   const blob=await response.blob();
+   const href=URL.createObjectURL(blob);
+   const link=document.createElement("a");
+   link.href=href;link.download=`sigdec-audit-dossier-${item.id}.json`;
+   document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href);
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao baixar dossiê.");}
  },[]);
  useEffect(()=>{void load();void verify();void loadCheckpoints()},[verify,loadCheckpoints]);
 
@@ -155,10 +176,17 @@ export default function AuditPage(){
   </section>
   {message&&<section className="infoCard">{message}</section>}
 
+  {keys&&<section style={{marginTop:18}}>
+   <div className="listHeader"><div><h2>Chaves Ed25519 da auditoria</h2><p>Chave atual: <code>{keys.currentKeyId}</code>. Chaves históricas permanecem disponíveis para validar comprovantes antigos.</p></div></div>
+   <div className="adminTableWrap"><table><thead><tr><th>Status</th><th>Key ID</th><th>Fingerprint</th><th>Primeiro uso</th><th>Matrícula</th><th>Atestações</th></tr></thead>
+    <tbody>{keys.items.map(item=><tr key={item.keyId+item.publicKeyFingerprint}><td>{item.status==="ACTIVE"?"✓ Ativa":"Histórica"}</td><td><code>{item.keyId}</code></td><td><code title={item.publicKeyFingerprint}>{item.publicKeyFingerprint.slice(0,18)}…</code></td><td>{formatDateTimeBR(item.firstSeenAt)}</td><td><strong>{item.activatedByMatricula}</strong></td><td>{item.attestationCount}</td></tr>)}</tbody>
+   </table>{keys.items.length===0&&<p>Nenhuma chave utilizada ainda. A primeira atestação será criada ao gerar um checkpoint/comprovante.</p>}</div>
+  </section>}
+
   {checkpoints.length>0&&<section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Checkpoints criptográficos</h2><p>Âncoras append-only da trilha de auditoria, encadeadas entre si.</p></div></div>
    <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th><th>Ed25519</th><th>Comprovante</th></tr></thead>
-    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td><td>{item.ed25519Fingerprint?<><strong>✓ Assinado</strong><br/><small title={item.ed25519Fingerprint}>{item.ed25519KeyId??"Ed25519"} · {item.ed25519Fingerprint.slice(0,12)}…</small></>:<small>Será assinado ao emitir comprovante</small>}</td><td><div className="headerActions"><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointReceipt(item)}>JSON</button><Link className="secondaryLink" href={`/integridade/auditoria/${item.checkpointHash}`} target="_blank">Ver público</Link></div></td></tr>)}</tbody>
+    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td><td>{item.ed25519Fingerprint?<><strong>✓ Assinado</strong><br/><small title={item.ed25519Fingerprint}>{item.ed25519KeyId??"Ed25519"} · {item.ed25519Fingerprint.slice(0,12)}…</small></>:<small>Será assinado ao emitir comprovante</small>}</td><td><div className="headerActions"><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointReceipt(item)}>Comprovante</button><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointDossier(item)}>Dossiê</button><Link className="secondaryLink" href={`/integridade/auditoria/${item.checkpointHash}`} target="_blank">Ver público</Link></div></td></tr>)}</tbody>
    </table></div>
   </section>}
 
