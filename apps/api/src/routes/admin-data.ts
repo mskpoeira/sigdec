@@ -425,7 +425,12 @@ export async function adminDataRoutes(app:FastifyInstance){
    checkpointHash:row.checkpointHash,
    integrityVersion:Number(row.integrityVersion),
    algorithm:row.algorithm,
-   verification:{checkpointValid,rootValid,previousExists,invalid:audit.invalid,unsealed:audit.unsealed},
+   ed25519:attestation?{
+    algorithm:"Ed25519",keyId:attestation.keyId,signature:attestation.signature,
+    publicKey:attestation.publicKey,publicKeyFingerprint:attestation.publicKeyFingerprint,
+    attestedAt:attestation.attestedAt,valid:asymmetricValid
+   }:null,
+   verification:{checkpointValid,rootValid,previousExists,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed},
    checkedAt:new Date().toISOString()
   };
  });
