@@ -55,6 +55,46 @@ const fvdUpdate=z.object({
  responseNotes:z.string().trim().max(8000).nullable().optional()
 });
 
+const callTargetInput=z.object({
+ targetName:z.string().trim().min(2).max(300),
+ organizationName:z.string().trim().max(300).optional().default(""),
+ roleName:z.string().trim().max(200).optional().default(""),
+ contact:z.string().trim().max(300).optional().default(""),
+ channel:z.enum(["PHONE","WHATSAPP","RADIO","EMAIL","OTHER"]).default("OTHER"),
+ required:z.boolean().default(true)
+});
+const callEventInput=z.object({
+ status:z.enum(["CALLED","ACKNOWLEDGED","UNREACHABLE","SKIPPED","RESET"]),
+ notes:z.string().trim().max(4000).optional().default("")
+}).superRefine((value,ctx)=>{
+ if((value.status==="SKIPPED"||value.status==="UNREACHABLE")&&value.notes.length<3){
+  ctx.addIssue({code:z.ZodIssueCode.custom,path:["notes"],message:"Informe uma justificativa."});
+ }
+});
+const checklistItemInput=z.object({
+ level:z.enum(levels),
+ title:z.string().trim().min(3).max(1000),
+ required:z.boolean().default(true)
+});
+const checklistEventInput=z.object({
+ status:z.enum(["DONE","NOT_APPLICABLE","REOPENED"]),
+ notes:z.string().trim().max(4000).optional().default("")
+}).superRefine((value,ctx)=>{
+ if(value.status==="NOT_APPLICABLE"&&value.notes.length<3){
+  ctx.addIssue({code:z.ZodIssueCode.custom,path:["notes"],message:"Justifique o item não aplicável."});
+ }
+});
+const resourceEventInput=z.object({
+ resourceType:z.enum(["TEAM","VEHICLE","INVENTORY","COMMUNICATION","MANUAL"]),
+ resourceId:z.string().uuid().optional(),
+ resourceLabel:z.string().trim().max(300).optional().default(""),
+ eventType:z.enum(["MOBILIZED","DEMOBILIZED"]),
+ quantity:z.number().positive().max(1_000_000).optional(),
+ unit:z.string().trim().max(30).optional().default(""),
+ notes:z.string().trim().max(4000).optional().default("")
+});
+const incidentLinkInput=z.object({protocol:z.string().trim().min(3).max(80)});
+
 function organization(request:FastifyRequest){
  const value=authFrom(request).organizationId;
  if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});
@@ -71,6 +111,37 @@ async function actorMatricula(request:FastifyRequest){
 function dateOrNull(value:string|null|undefined){
  if(!value)return null;
  return value;
+}
+
+
+async function operationalContext(organizationId:string,planId:string,requireActive=false){
+ const plan=await db.query(`SELECT id,code,version,title,status,current_level AS "currentLevel"
+   FROM contingency_plans WHERE id=$1 AND organization_id=$2`,[planId,organizationId]);
+ const row=plan.rows[0];
+ if(!row)throw Object.assign(new Error("PLANCON não localizado."),{statusCode:404,code:"NOT_FOUND"});
+ const activation=await db.query(`SELECT id::text AS id,from_level AS "fromLevel",to_level AS "toLevel",reason,
+   actor_matricula AS "actorMatricula",occurred_at AS "occurredAt"
+   FROM contingency_plan_activations WHERE plan_id=$1 AND organization_id=$2
+   ORDER BY occurred_at DESC,id DESC LIMIT 1`,[planId,organizationId]);
+ if(requireActive&&(!activation.rows[0]||row.currentLevel==="NORMAL")){
+  throw Object.assign(new Error("O PLANCON precisa estar ativado acima do nível Normal."),{statusCode:409,code:"PLAN_NOT_ACTIVATED"});
+ }
+ return {plan:row,activation:activation.rows[0]??null};
+}
+
+async function seedPlanOperationalDefinitions(planId:string,organizationId:string,userId:string,callPlan:string[],procedures:string[]){
+ if(callPlan.length){
+  await db.query(`INSERT INTO plancon_call_targets(organization_id,plan_id,sequence_no,target_name,created_by)
+    SELECT $1,$2,x.ord::int,x.value,$3
+    FROM jsonb_array_elements_text($4::jsonb) WITH ORDINALITY AS x(value,ord)
+    ON CONFLICT(plan_id,sequence_no) DO NOTHING`,[organizationId,planId,userId,JSON.stringify(callPlan)]);
+ }
+ if(procedures.length){
+  await db.query(`INSERT INTO plancon_checklist_items(organization_id,plan_id,level,sequence_no,title,created_by)
+    SELECT $1,$2,'EMERGENCY',x.ord::int,x.value,$3
+    FROM jsonb_array_elements_text($4::jsonb) WITH ORDINALITY AS x(value,ord)
+    ON CONFLICT(plan_id,level,sequence_no) DO NOTHING`,[organizationId,planId,userId,JSON.stringify(procedures)]);
+ }
 }
 
 export async function contingencyRoutes(app:FastifyInstance){
@@ -127,6 +198,7 @@ export async function contingencyRoutes(app:FastifyInstance){
     org,v.code,version,v.title,v.cobradeCode||null,v.scope||null,v.objective||null,JSON.stringify(v.triggerCriteria),
     JSON.stringify(v.callPlan),JSON.stringify(v.resources),JSON.stringify(v.sheltersRoutes),JSON.stringify(v.procedures),v.notes||null,auth.userId
    ]);
+  await seedPlanOperationalDefinitions(result.rows[0].id,org,auth.userId,v.callPlan,v.procedures);
   return reply.code(201).send(result.rows[0]);
  });
 
@@ -143,6 +215,12 @@ export async function contingencyRoutes(app:FastifyInstance){
    RETURNING id,code,version,status,current_level AS "currentLevel",created_at AS "createdAt"`,[
     org,p.code,version,p.title,p.cobrade_code,p.scope,p.objective,p.trigger_criteria,p.call_plan,p.resources,p.shelters_routes,p.procedures,p.notes,auth.userId
    ]);
+  await db.query(`INSERT INTO plancon_call_targets(organization_id,plan_id,sequence_no,target_name,organization_name,role_name,contact,channel,required,created_by)
+    SELECT organization_id,$1,sequence_no,target_name,organization_name,role_name,contact,channel,required,$2
+    FROM plancon_call_targets WHERE plan_id=$3 ORDER BY sequence_no`,[result.rows[0].id,auth.userId,id]);
+  await db.query(`INSERT INTO plancon_checklist_items(organization_id,plan_id,level,sequence_no,title,required,created_by)
+    SELECT organization_id,$1,level,sequence_no,title,required,$2
+    FROM plancon_checklist_items WHERE plan_id=$3 ORDER BY level,sequence_no`,[result.rows[0].id,auth.userId,id]);
   return reply.code(201).send(result.rows[0]);
  });
 
@@ -191,6 +269,177 @@ export async function contingencyRoutes(app:FastifyInstance){
     FROM contingency_plan_activations x JOIN users u ON u.id=x.actor_user_id
     WHERE x.organization_id=$1 AND x.plan_id=$2 ORDER BY x.occurred_at DESC,x.id DESC LIMIT 200`,[org,id]);
   return {items:result.rows};
+ });
+
+ app.get("/api/v1/plancon/:id/operational",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const org=organization(request),{id}=request.params as {id:string};
+  if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const context=await operationalContext(org,id,false),activationId=context.activation?.id??null;
+
+  const [calls,checklist,resourceEvents,linkedIncidents,activations,teams,vehicles,inventory,communications,shelters]=await Promise.all([
+   db.query(`SELECT t.id,t.sequence_no AS "sequenceNo",t.target_name AS "targetName",t.organization_name AS "organizationName",
+     t.role_name AS "roleName",t.contact,t.channel,t.required,
+     e.status AS "latestStatus",e.notes AS "latestNotes",e.occurred_at AS "latestAt",e.actor_matricula AS "latestActorMatricula"
+     FROM plancon_call_targets t
+     LEFT JOIN LATERAL (
+       SELECT status,notes,occurred_at,actor_matricula FROM plancon_call_events
+       WHERE target_id=t.id AND activation_id=$3 ORDER BY occurred_at DESC,id DESC LIMIT 1
+     ) e ON true
+     WHERE t.organization_id=$1 AND t.plan_id=$2 ORDER BY t.sequence_no`,[org,id,activationId]),
+   db.query(`SELECT i.id,i.level,i.sequence_no AS "sequenceNo",i.title,i.required,
+     e.status AS "latestStatus",e.notes AS "latestNotes",e.occurred_at AS "latestAt",e.actor_matricula AS "latestActorMatricula"
+     FROM plancon_checklist_items i
+     LEFT JOIN LATERAL (
+       SELECT status,notes,occurred_at,actor_matricula FROM plancon_checklist_events
+       WHERE item_id=i.id AND activation_id=$3 ORDER BY occurred_at DESC,id DESC LIMIT 1
+     ) e ON true
+     WHERE i.organization_id=$1 AND i.plan_id=$2 AND i.level=$4 ORDER BY i.sequence_no`,[org,id,activationId,context.plan.currentLevel]),
+   db.query(`SELECT DISTINCT ON (resource_type,COALESCE(resource_id::text,resource_label))
+     id::text AS id,resource_type AS "resourceType",resource_id AS "resourceId",resource_label AS "resourceLabel",
+     event_type AS "eventType",quantity,unit,notes,actor_matricula AS "actorMatricula",occurred_at AS "occurredAt"
+     FROM plancon_resource_events
+     WHERE organization_id=$1 AND plan_id=$2 AND activation_id=$3
+     ORDER BY resource_type,COALESCE(resource_id::text,resource_label),occurred_at DESC,id DESC`,[org,id,activationId]),
+   db.query(`SELECT l.id,i.id AS "incidentId",i.protocol,i.summary,i.status,i.priority,
+     l.linked_by_matricula AS "linkedByMatricula",l.linked_at AS "linkedAt"
+     FROM plancon_incident_links l JOIN incidents i ON i.id=l.incident_id
+     WHERE l.organization_id=$1 AND l.plan_id=$2 AND l.activation_id=$3
+     ORDER BY l.linked_at DESC`,[org,id,activationId]),
+   db.query(`SELECT x.id::text AS id,x.from_level AS "fromLevel",x.to_level AS "toLevel",x.reason,
+     x.actor_matricula AS "actorMatricula",u.display_name AS "actorName",x.occurred_at AS "occurredAt"
+     FROM contingency_plan_activations x JOIN users u ON u.id=x.actor_user_id
+     WHERE x.organization_id=$1 AND x.plan_id=$2 ORDER BY x.occurred_at DESC,x.id DESC LIMIT 100`,[org,id]),
+   db.query("SELECT id,code,name,status FROM teams WHERE organization_id=$1 AND active=true ORDER BY code",[org]),
+   db.query('SELECT id,code,plate,description,status FROM vehicles WHERE organization_id=$1 AND active=true ORDER BY code',[org]),
+   db.query(`SELECT i.id,i.code,i.name,i.unit,
+     COALESCE(sum(CASE WHEN m.movement_type IN ('IN','ADJUST_IN') THEN m.quantity ELSE -m.quantity END),0)::float8 AS balance
+     FROM humanitarian_items i LEFT JOIN humanitarian_stock_movements m ON m.item_id=i.id AND m.organization_id=i.organization_id
+     WHERE i.organization_id=$1 AND i.active=true GROUP BY i.id ORDER BY i.name`,[org]),
+   db.query("SELECT id,code,description,status,channel FROM communication_assets WHERE organization_id=$1 AND status<>'INACTIVE' ORDER BY code",[org]),
+   db.query("SELECT id,name,status,capacity_people AS \"capacityPeople\" FROM shelters WHERE organization_id=$1 ORDER BY name",[org])
+  ]);
+
+  const requiredCalls=calls.rows.filter((x:any)=>x.required),ackedCalls=requiredCalls.filter((x:any)=>x.latestStatus==="ACKNOWLEDGED");
+  const requiredChecklist=checklist.rows.filter((x:any)=>x.required),doneChecklist=requiredChecklist.filter((x:any)=>x.latestStatus==="DONE"||x.latestStatus==="NOT_APPLICABLE");
+  const availableTeams=teams.rows.filter((x:any)=>x.status==="AVAILABLE").length;
+  const availableVehicles=vehicles.rows.filter((x:any)=>x.status==="AVAILABLE").length;
+  const availableComms=communications.rows.filter((x:any)=>x.status==="AVAILABLE").length;
+  const readyShelters=shelters.rows.filter((x:any)=>x.status==="STANDBY"||x.status==="OPEN").length;
+  const positiveStock=inventory.rows.filter((x:any)=>Number(x.balance)>0).length;
+  const dimension=(ready:number,total:number)=>total===0?"PENDING":ready>0?"READY":"UNAVAILABLE";
+  const callState=requiredCalls.length===0?"PENDING":ackedCalls.length===requiredCalls.length?"READY":"PENDING";
+  const checklistState=requiredChecklist.length===0?"PENDING":doneChecklist.length===requiredChecklist.length?"READY":"PENDING";
+  const states=[dimension(availableTeams,teams.rows.length),dimension(availableVehicles,vehicles.rows.length),dimension(availableComms,communications.rows.length),dimension(readyShelters,shelters.rows.length),dimension(positiveStock,inventory.rows.length),callState,checklistState];
+  const overall=states.includes("UNAVAILABLE")?"UNAVAILABLE":states.every(x=>x==="READY")?"READY":"PENDING";
+
+  return {
+   plan:context.plan,activation:context.activation,active:Boolean(context.activation&&context.plan.currentLevel!=="NORMAL"),
+   readiness:{overall,calls:{state:callState,acknowledged:ackedCalls.length,required:requiredCalls.length},
+    checklist:{state:checklistState,done:doneChecklist.length,required:requiredChecklist.length},
+    teams:{state:dimension(availableTeams,teams.rows.length),available:availableTeams,total:teams.rows.length},
+    vehicles:{state:dimension(availableVehicles,vehicles.rows.length),available:availableVehicles,total:vehicles.rows.length},
+    communications:{state:dimension(availableComms,communications.rows.length),available:availableComms,total:communications.rows.length},
+    shelters:{state:dimension(readyShelters,shelters.rows.length),ready:readyShelters,total:shelters.rows.length},
+    inventory:{state:dimension(positiveStock,inventory.rows.length),positive:positiveStock,total:inventory.rows.length}},
+   callTargets:calls.rows,checklist:checklist.rows,resources:resourceEvents.rows,linkedIncidents:linkedIncidents.rows,
+   activations:activations.rows,availableResources:{teams:teams.rows,vehicles:vehicles.rows,inventory:inventory.rows,communications:communications.rows,shelters:shelters.rows}
+  };
+ });
+
+ app.post("/api/v1/plancon/:id/call-targets",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=callTargetInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
+  await operationalContext(org,id,false);const v=parsed.data;
+  const result=await db.query(`INSERT INTO plancon_call_targets(
+    organization_id,plan_id,sequence_no,target_name,organization_name,role_name,contact,channel,required,created_by)
+    SELECT $1,$2,COALESCE(max(sequence_no),0)+1,$3,$4,$5,$6,$7,$8,$9 FROM plancon_call_targets WHERE plan_id=$2
+    RETURNING id,sequence_no AS "sequenceNo"`,[org,id,v.targetName,v.organizationName||null,v.roleName||null,v.contact||null,v.channel,v.required,auth.userId]);
+  return reply.code(201).send(result.rows[0]);
+ });
+
+ app.post("/api/v1/plancon/:id/call-targets/:targetId/events",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id,targetId}=request.params as {id:string;targetId:string},parsed=callEventInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!uuid.safeParse(targetId).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
+  const context=await operationalContext(org,id,true),matricula=await actorMatricula(request);
+  const target=await db.query("SELECT id FROM plancon_call_targets WHERE id=$1 AND plan_id=$2 AND organization_id=$3",[targetId,id,org]);
+  if(!target.rows[0])return reply.code(404).send({error:"TARGET_NOT_FOUND"});
+  const result=await db.query(`INSERT INTO plancon_call_events(
+    organization_id,plan_id,activation_id,target_id,status,notes,actor_user_id,actor_matricula)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+    RETURNING id::text AS id,status,occurred_at AS "occurredAt"`,[org,id,context.activation.id,targetId,parsed.data.status,parsed.data.notes||null,auth.userId,matricula]);
+  return reply.code(201).send(result.rows[0]);
+ });
+
+ app.post("/api/v1/plancon/:id/checklist-items",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=checklistItemInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
+  await operationalContext(org,id,false);const v=parsed.data;
+  const result=await db.query(`INSERT INTO plancon_checklist_items(organization_id,plan_id,level,sequence_no,title,required,created_by)
+    SELECT $1,$2,$3,COALESCE(max(sequence_no),0)+1,$4,$5,$6 FROM plancon_checklist_items WHERE plan_id=$2 AND level=$3
+    RETURNING id,level,sequence_no AS "sequenceNo"`,[org,id,v.level,v.title,v.required,auth.userId]);
+  return reply.code(201).send(result.rows[0]);
+ });
+
+ app.post("/api/v1/plancon/:id/checklist/:itemId/events",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id,itemId}=request.params as {id:string;itemId:string},parsed=checklistEventInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!uuid.safeParse(itemId).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
+  const context=await operationalContext(org,id,true),matricula=await actorMatricula(request);
+  const item=await db.query("SELECT id,level FROM plancon_checklist_items WHERE id=$1 AND plan_id=$2 AND organization_id=$3",[itemId,id,org]);
+  if(!item.rows[0])return reply.code(404).send({error:"ITEM_NOT_FOUND"});
+  if(item.rows[0].level!==context.plan.currentLevel)return reply.code(409).send({error:"CHECKLIST_LEVEL_MISMATCH"});
+  const result=await db.query(`INSERT INTO plancon_checklist_events(
+    organization_id,plan_id,activation_id,item_id,status,notes,actor_user_id,actor_matricula)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+    RETURNING id::text AS id,status,occurred_at AS "occurredAt"`,[org,id,context.activation.id,itemId,parsed.data.status,parsed.data.notes||null,auth.userId,matricula]);
+  return reply.code(201).send(result.rows[0]);
+ });
+
+ app.post("/api/v1/plancon/:id/resources/events",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=resourceEventInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
+  const context=await operationalContext(org,id,true),matricula=await actorMatricula(request),v=parsed.data;
+  let resourceLabel=v.resourceLabel,unit=v.unit||null;
+  if(v.resourceType!=="MANUAL"&&!v.resourceId)return reply.code(400).send({error:"RESOURCE_ID_REQUIRED"});
+  if(v.resourceType==="MANUAL"&&!resourceLabel)return reply.code(400).send({error:"RESOURCE_LABEL_REQUIRED"});
+  if(v.resourceType==="TEAM"){
+   const x=await db.query("SELECT code,name FROM teams WHERE id=$1 AND organization_id=$2 AND active=true",[v.resourceId,org]);
+   if(!x.rows[0])return reply.code(404).send({error:"RESOURCE_NOT_FOUND"});resourceLabel=x.rows[0].code+" · "+x.rows[0].name;
+  }else if(v.resourceType==="VEHICLE"){
+   const x=await db.query("SELECT code,description FROM vehicles WHERE id=$1 AND organization_id=$2 AND active=true",[v.resourceId,org]);
+   if(!x.rows[0])return reply.code(404).send({error:"RESOURCE_NOT_FOUND"});resourceLabel=x.rows[0].code+" · "+x.rows[0].description;
+  }else if(v.resourceType==="INVENTORY"){
+   const x=await db.query("SELECT code,name,unit FROM humanitarian_items WHERE id=$1 AND organization_id=$2 AND active=true",[v.resourceId,org]);
+   if(!x.rows[0])return reply.code(404).send({error:"RESOURCE_NOT_FOUND"});resourceLabel=x.rows[0].code+" · "+x.rows[0].name;unit=unit||x.rows[0].unit;
+  }else if(v.resourceType==="COMMUNICATION"){
+   const x=await db.query("SELECT code,description FROM communication_assets WHERE id=$1 AND organization_id=$2 AND status<>'INACTIVE'",[v.resourceId,org]);
+   if(!x.rows[0])return reply.code(404).send({error:"RESOURCE_NOT_FOUND"});resourceLabel=x.rows[0].code+" · "+x.rows[0].description;
+  }
+  const result=await db.query(`INSERT INTO plancon_resource_events(
+    organization_id,plan_id,activation_id,resource_type,resource_id,resource_label,event_type,quantity,unit,notes,actor_user_id,actor_matricula)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    RETURNING id::text AS id,event_type AS "eventType",occurred_at AS "occurredAt"`,[
+    org,id,context.activation.id,v.resourceType,v.resourceId??null,resourceLabel,v.eventType,v.quantity??null,unit,v.notes||null,auth.userId,matricula
+   ]);
+  return reply.code(201).send(result.rows[0]);
+ });
+
+ app.post("/api/v1/plancon/:id/incidents",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
+  const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=incidentLinkInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const context=await operationalContext(org,id,true),matricula=await actorMatricula(request);
+  const incident=await db.query("SELECT id FROM incidents WHERE organization_id=$1 AND protocol=$2",[org,parsed.data.protocol]);
+  if(!incident.rows[0])return reply.code(404).send({error:"INCIDENT_NOT_FOUND",message:"Protocolo de ocorrência não localizado."});
+  try{
+   const result=await db.query(`INSERT INTO plancon_incident_links(
+     organization_id,plan_id,activation_id,incident_id,linked_by,linked_by_matricula)
+     VALUES($1,$2,$3,$4,$5,$6) RETURNING id,linked_at AS "linkedAt"`,[
+     org,id,context.activation.id,incident.rows[0].id,auth.userId,matricula
+    ]);
+   return reply.code(201).send(result.rows[0]);
+  }catch(error:any){
+   if(error?.code==="23505")return reply.code(409).send({error:"INCIDENT_ALREADY_LINKED"});
+   throw error;
+  }
  });
 
  app.get("/api/v1/anomaly-cases",{preHandler:requirePermission("anomaly.manage")},async request=>{
