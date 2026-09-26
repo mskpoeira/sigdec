@@ -325,7 +325,7 @@ export async function adminDataRoutes(app:FastifyInstance){
  });
 
  app.get("/api/v1/admin/audit/checkpoints/:id/receipt",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
-  const organizationId=org(request),{id}=request.params as {id:string};
+  const auth=authFrom(request),organizationId=org(request),{id}=request.params as {id:string};
   if(!/^\d+$/.test(id))return reply.code(400).send({error:"INVALID_CHECKPOINT_ID"});
   const result=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
     u.display_name AS "createdByName",o.id::text AS "organizationId",o.name AS "organizationName",
