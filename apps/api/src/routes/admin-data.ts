@@ -1,6 +1,7 @@
 import type {FastifyInstance,FastifyRequest} from "fastify";
 import {createHash} from "node:crypto";
 import {z} from "zod";
+import QRCode from "qrcode";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
 import {signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
@@ -435,6 +436,18 @@ export async function adminDataRoutes(app:FastifyInstance){
    verification:{checkpointValid,rootValid,previousExists,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed},
    checkedAt:new Date().toISOString()
   };
+ });
+
+ app.get("/api/v1/public/audit-checkpoint/:hash/qr.svg",async(request,reply)=>{
+  const {hash}=request.params as {hash:string};
+  if(!/^[a-f0-9]{64}$/i.test(hash))return reply.code(400).send({error:"INVALID_CHECKPOINT_HASH"});
+  const found=await db.query("SELECT 1 FROM audit_integrity_checkpoints WHERE checkpoint_hash=$1 LIMIT 1",[hash.toLowerCase()]);
+  if(!found.rows[0])return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+  const url=auditCheckpointPublicUrl(hash.toLowerCase());
+  const svg=await QRCode.toString(url,{type:"svg",errorCorrectionLevel:"M",margin:2,width:220});
+  reply.header("content-type","image/svg+xml; charset=utf-8")
+   .header("cache-control","public, max-age=300");
+  return svg;
  });
 
  app.post("/api/v1/public/verify-audit-checkpoint-proof",async(request,reply)=>{
