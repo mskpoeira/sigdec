@@ -146,3 +146,590 @@
  .opsUser{display:flex;align-items:center;gap:9px;padding:12px 4px 9px;white-space:nowrap}
  .opsLogout{padding:10px 4px!important;white-space:nowrap}
 }
+
+
+/* ==========================================================================
+   v1.59 — Harmonização visual global
+   Linguagem institucional derivada da tela inicial aprovada:
+   azul Defesa Civil + azul-marinho + laranja de destaque, superfícies claras,
+   hierarquia forte, alta legibilidade e responsividade.
+   ========================================================================== */
+:root{
+  --sigdec-navy:#0b2f55;
+  --sigdec-navy-deep:#082441;
+  --sigdec-blue:#075ca8;
+  --sigdec-blue-bright:#1269c7;
+  --sigdec-orange:#e7612d;
+  --sigdec-orange-soft:#fff0e8;
+  --sigdec-green:#148a49;
+  --sigdec-red:#c92d36;
+  --sigdec-amber:#b57a08;
+  --sigdec-surface:#ffffff;
+  --sigdec-bg:#f3f7fb;
+  --sigdec-bg-strong:#eaf1f8;
+  --sigdec-border:#d8e3ed;
+  --sigdec-border-strong:#bfd0df;
+  --sigdec-text:#102b49;
+  --sigdec-muted:#5d7187;
+  --sigdec-shadow-sm:0 5px 18px rgba(8,47,85,.055);
+  --sigdec-shadow-md:0 12px 36px rgba(8,47,85,.09);
+  --sigdec-shadow-lg:0 22px 58px rgba(8,47,85,.13);
+  --sigdec-radius-sm:10px;
+  --sigdec-radius-md:16px;
+  --sigdec-radius-lg:22px;
+}
+
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(circle at 0 0,rgba(18,105,199,.045),transparent 30rem),
+    linear-gradient(180deg,#f7fafd 0,#f3f7fb 28rem,#f5f8fb 100%);
+  color:var(--sigdec-text);
+}
+::selection{background:rgba(7,92,168,.2);color:var(--sigdec-navy-deep)}
+a,button,input,select,textarea{transition:border-color .16s ease,box-shadow .16s ease,background .16s ease,color .16s ease,transform .16s ease}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:3px solid rgba(18,105,199,.22);
+  outline-offset:2px;
+}
+
+/* Estrutura de todos os módulos internos */
+.moduleShell{
+  width:min(1280px,calc(100% - 40px));
+  padding:34px 0 84px;
+  position:relative;
+}
+.moduleShell:before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:88px;
+  height:4px;
+  border-radius:0 0 999px 999px;
+  background:linear-gradient(90deg,var(--sigdec-orange),#f5a06f);
+}
+.moduleShell>.listHeader:first-child,
+.moduleShell>.panelHeader:first-child{
+  position:relative;
+  overflow:hidden;
+  min-height:148px;
+  align-items:center;
+  padding:30px 32px;
+  border:1px solid rgba(191,208,223,.9);
+  border-top:4px solid var(--sigdec-orange);
+  border-radius:var(--sigdec-radius-lg);
+  background:
+    radial-gradient(circle at 90% -30%,rgba(18,105,199,.15),transparent 20rem),
+    linear-gradient(120deg,#fff 0%,#f8fbfe 55%,#eef6fc 100%);
+  box-shadow:var(--sigdec-shadow-md);
+}
+.moduleShell>.listHeader:first-child:after,
+.moduleShell>.panelHeader:first-child:after{
+  content:"";
+  position:absolute;
+  width:190px;
+  height:190px;
+  right:-68px;
+  bottom:-108px;
+  border:30px solid rgba(7,92,168,.055);
+  border-radius:50%;
+  pointer-events:none;
+}
+.moduleShell .listHeader>div:first-child,
+.moduleShell .panelHeader>div:first-child{position:relative;z-index:1}
+.moduleShell .listHeader h1,
+.moduleShell .panelHeader h1{
+  color:var(--sigdec-navy);
+  font-size:clamp(1.85rem,3.2vw,2.65rem);
+  letter-spacing:-.035em;
+  line-height:1.08;
+  margin:8px 0 8px;
+}
+.moduleShell .listHeader p,
+.moduleShell .panelHeader p{
+  max-width:780px;
+  color:var(--sigdec-muted);
+  font-size:.98rem;
+  line-height:1.58;
+}
+.moduleShell .eyebrow{
+  color:var(--sigdec-blue);
+  letter-spacing:.13em;
+  font-size:.72rem;
+}
+.moduleShell>.listHeader:first-child .eyebrow:before,
+.moduleShell>.panelHeader:first-child .eyebrow:before{
+  content:"";
+  display:inline-block;
+  width:8px;
+  height:8px;
+  margin-right:8px;
+  border-radius:2px;
+  background:var(--sigdec-orange);
+  box-shadow:0 0 0 4px rgba(231,97,45,.1);
+  vertical-align:1px;
+}
+
+/* Cabeçalhos de seção */
+.moduleShell section>h2,
+.moduleShell>h2,
+.moduleShell section>.listHeader h2{
+  color:var(--sigdec-navy);
+  letter-spacing:-.02em;
+}
+.moduleShell>section:not(.dataGrid):not(.operationsGrid):not(.infoCard):not(.warningCard){
+  scroll-margin-top:18px;
+}
+.moduleShell>section>h2:not(.card h2),
+.moduleShell>h2{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  margin:28px 0 14px;
+  font-size:1.22rem;
+}
+.moduleShell>section>h2:not(.card h2):before,
+.moduleShell>h2:before{
+  content:"";
+  width:5px;
+  height:22px;
+  border-radius:999px;
+  background:linear-gradient(180deg,var(--sigdec-orange),#f49a68);
+  box-shadow:0 0 0 4px rgba(231,97,45,.07);
+}
+
+/* Cards e hubs funcionais */
+.moduleShell .card,
+.moduleShell .infoCard,
+.moduleShell .warningCard,
+.moduleShell .detailCard,
+.moduleShell .opsCard{
+  border-radius:var(--sigdec-radius-md);
+}
+.moduleShell .card{
+  position:relative;
+  overflow:hidden;
+  padding:21px 22px;
+  background:linear-gradient(180deg,#fff,#fbfdff);
+  border:1px solid var(--sigdec-border);
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell article.card:before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:3px;
+  background:linear-gradient(90deg,var(--sigdec-blue),rgba(18,105,199,.12) 72%,transparent);
+}
+.moduleShell .card:hover{
+  border-color:var(--sigdec-border-strong);
+  box-shadow:0 11px 30px rgba(8,47,85,.095);
+  transform:translateY(-1px);
+}
+.moduleShell .card h2,
+.moduleShell .card h3{
+  color:var(--sigdec-navy);
+  letter-spacing:-.015em;
+}
+.moduleShell .card h2{font-size:1.06rem}
+.moduleShell .card h3{margin-top:0}
+.moduleShell .card p{color:var(--sigdec-muted)}
+.moduleShell .card .adminNumber{
+  margin:7px 0 4px;
+  color:var(--sigdec-blue);
+  font-size:2rem;
+  font-weight:900;
+  letter-spacing:-.045em;
+  line-height:1;
+}
+.moduleShell .dataGrid{
+  gap:16px;
+  margin:16px 0;
+}
+.moduleShell .dataGrid>.card,
+.moduleShell .dataGrid>.warningCard{min-height:116px}
+.moduleShell .warningCard{
+  position:relative;
+  overflow:hidden;
+  padding:19px 21px;
+  background:linear-gradient(135deg,#fffaf0,#fff5df);
+  border:1px solid #ecd399;
+  color:#65490e;
+  box-shadow:0 5px 18px rgba(181,122,8,.055);
+}
+.moduleShell article.warningCard:before{
+  content:"";
+  position:absolute;
+  top:0;left:0;width:4px;height:100%;
+  background:#d79a17;
+}
+.moduleShell .warningCard h2,
+.moduleShell .warningCard h3{color:#6f510d}
+.moduleShell .infoCard{
+  padding:19px 21px;
+  background:linear-gradient(135deg,#fff,#f4f9fd);
+  border:1px solid var(--sigdec-border);
+  color:var(--sigdec-text);
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .infoCard strong{color:var(--sigdec-navy)}
+.moduleShell .infoCard p{color:var(--sigdec-muted);line-height:1.55}
+
+/* Formulários */
+.moduleShell .incidentForm{
+  position:relative;
+  overflow:hidden;
+  gap:17px;
+  padding:24px;
+  border:1px solid var(--sigdec-border);
+  border-radius:var(--sigdec-radius-lg);
+  background:linear-gradient(180deg,#fff,#fbfdff);
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .incidentForm:before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  height:3px;
+  width:100%;
+  background:linear-gradient(90deg,var(--sigdec-orange),rgba(231,97,45,.1) 65%,transparent);
+}
+.moduleShell .incidentForm h2,
+.moduleShell .incidentForm h3{
+  color:var(--sigdec-navy);
+  letter-spacing:-.02em;
+}
+.moduleShell .incidentForm label{
+  color:#294762;
+  font-size:.88rem;
+  font-weight:800;
+}
+.moduleShell .incidentForm label small{font-weight:600;color:#77899b}
+.moduleShell .incidentForm input,
+.moduleShell .incidentForm select,
+.moduleShell .incidentForm textarea,
+.moduleShell select:not(.opsSide select){
+  min-height:44px;
+  border:1px solid #c9d7e4;
+  border-radius:11px;
+  background:#fff;
+  color:var(--sigdec-text);
+  box-shadow:0 1px 2px rgba(8,47,85,.025) inset;
+}
+.moduleShell .incidentForm textarea{min-height:92px;resize:vertical}
+.moduleShell .incidentForm input:hover,
+.moduleShell .incidentForm select:hover,
+.moduleShell .incidentForm textarea:hover{border-color:#9fb8ce}
+.moduleShell .incidentForm input:focus,
+.moduleShell .incidentForm select:focus,
+.moduleShell .incidentForm textarea:focus{
+  outline:none;
+  border-color:var(--sigdec-blue-bright);
+  box-shadow:0 0 0 4px rgba(18,105,199,.11);
+}
+.moduleShell .incidentForm fieldset{
+  padding:17px;
+  border:1px solid var(--sigdec-border);
+  border-radius:13px;
+  background:#f8fbfe;
+}
+.moduleShell .incidentForm legend{
+  padding:0 7px;
+  color:var(--sigdec-navy);
+  font-weight:900;
+}
+.moduleShell .checkLabel{padding:9px 0}
+.moduleShell input[type=checkbox],
+.moduleShell input[type=radio]{accent-color:var(--sigdec-blue)}
+
+/* Botões e links de ação */
+.moduleShell .primaryButton,
+.moduleShell .primaryLink{
+  min-height:42px;
+  border:0;
+  border-radius:11px;
+  padding:10px 16px;
+  background:linear-gradient(135deg,var(--sigdec-blue),var(--sigdec-navy));
+  color:#fff;
+  box-shadow:0 6px 18px rgba(7,92,168,.16);
+  font-weight:850;
+  text-decoration:none;
+}
+.moduleShell .primaryButton:hover:not(:disabled),
+.moduleShell .primaryLink:hover{
+  background:linear-gradient(135deg,var(--sigdec-blue-bright),var(--sigdec-navy));
+  box-shadow:0 8px 22px rgba(7,92,168,.22);
+  transform:translateY(-1px);
+}
+.moduleShell .secondaryLink,
+.moduleShell .secondaryButton{
+  min-height:40px;
+  border:1px solid #d5e1eb;
+  border-radius:10px;
+  padding:9px 13px;
+  background:#eef4f9;
+  color:var(--sigdec-navy);
+  box-shadow:none;
+  font-weight:800;
+}
+.moduleShell .secondaryLink:hover,
+.moduleShell .secondaryButton:hover{
+  border-color:#b7cadd;
+  background:#e5eff7;
+  color:var(--sigdec-blue);
+  transform:translateY(-1px);
+}
+.moduleShell button:disabled,
+.moduleShell .primaryButton:disabled,
+.moduleShell .secondaryLink:disabled{opacity:.55;filter:saturate(.65);cursor:not-allowed;transform:none}
+
+/* Tabelas */
+.moduleShell .adminTableWrap{
+  overflow:auto;
+  margin:13px 0 20px;
+  border:1px solid var(--sigdec-border);
+  border-radius:var(--sigdec-radius-md);
+  background:#fff;
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .adminTableWrap table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  font-size:.88rem;
+}
+.moduleShell .adminTableWrap thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  padding:12px 14px;
+  background:linear-gradient(180deg,#f6f9fc,#edf4f9);
+  color:#31516d;
+  border-bottom:1px solid var(--sigdec-border-strong);
+  text-align:left;
+  font-size:.72rem;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+  white-space:nowrap;
+}
+.moduleShell .adminTableWrap tbody td{
+  padding:12px 14px;
+  border-bottom:1px solid #edf2f6;
+  color:#314b64;
+  vertical-align:top;
+}
+.moduleShell .adminTableWrap tbody tr:last-child td{border-bottom:0}
+.moduleShell .adminTableWrap tbody tr:nth-child(even){background:#fbfdff}
+.moduleShell .adminTableWrap tbody tr:hover{background:#f1f7fc}
+.moduleShell .adminTableWrap code{
+  color:#164c80;
+  background:#eef5fb;
+  border-radius:6px;
+  padding:2px 5px;
+}
+
+/* Abas administrativas */
+.moduleShell .adminTabs{
+  display:flex;
+  gap:7px;
+  overflow:auto;
+  margin:4px 0 18px;
+  padding:6px;
+  border:1px solid var(--sigdec-border);
+  border-radius:13px;
+  background:#fff;
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .adminTabs button{
+  flex:0 0 auto;
+  border:0;
+  border-radius:9px;
+  padding:10px 13px;
+  background:transparent;
+  color:#49657e;
+  font-weight:800;
+  cursor:pointer;
+}
+.moduleShell .adminTabs button:hover{background:#eef5fb;color:var(--sigdec-blue)}
+.moduleShell .adminTabs button.active{
+  background:linear-gradient(135deg,var(--sigdec-blue),var(--sigdec-navy));
+  color:#fff;
+  box-shadow:0 5px 14px rgba(7,92,168,.17);
+}
+
+/* Ocorrências */
+.moduleShell .incidentList{gap:11px;margin-top:16px}
+.moduleShell .incidentRow{
+  position:relative;
+  overflow:hidden;
+  border:1px solid var(--sigdec-border);
+  border-radius:15px;
+  background:#fff;
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .incidentRow:after{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:3px;
+  background:var(--sigdec-blue);
+}
+.moduleShell .incidentRow:hover{
+  border-color:#b8ccdf;
+  box-shadow:0 9px 25px rgba(8,47,85,.095);
+  transform:translateY(-1px);
+}
+.moduleShell .statusTag{
+  border:1px solid #d8e2eb;
+  background:#f0f5f9;
+  color:#3b5872;
+}
+.moduleShell .priorityBadge{
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.55);
+}
+
+/* Timeline, listas operacionais e documentos */
+.moduleShell .timelineItem:before{background:#cfdce7}
+.moduleShell .timelineDot{
+  background:var(--sigdec-blue);
+  box-shadow:0 0 0 4px rgba(18,105,199,.11);
+}
+.moduleShell .dispatchCard,
+.moduleShell .documentCard,
+.moduleShell .inspectionCard,
+.moduleShell .fieldPointCard{
+  border:1px solid var(--sigdec-border);
+  border-radius:var(--sigdec-radius-md);
+  background:#fff;
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .documentCard{border-left:4px solid var(--sigdec-blue)}
+.moduleShell .documentHash{
+  background:#eef5fb;
+  border:1px solid #dbe7f1;
+}
+
+/* Código, hashes e conteúdo técnico */
+.moduleShell code{
+  font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  font-size:.82em;
+}
+.moduleShell pre{
+  overflow:auto;
+  padding:14px;
+  border:1px solid var(--sigdec-border);
+  border-radius:12px;
+  background:#0d2946;
+  color:#e8f3fc;
+}
+
+/* Mapas e layouts especializados */
+.moduleShell .fieldMap,
+.moduleShell .mapFrame,
+.moduleShell .situationMap{
+  border-radius:var(--sigdec-radius-md);
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .fieldSidebar{
+  padding:18px;
+  border:1px solid var(--sigdec-border);
+  border-radius:var(--sigdec-radius-lg);
+  background:#fff;
+  box-shadow:var(--sigdec-shadow-sm);
+}
+.moduleShell .fieldIncident{
+  border-color:var(--sigdec-border);
+  box-shadow:0 2px 8px rgba(8,47,85,.035);
+}
+.moduleShell .fieldIncident:hover,
+.moduleShell .fieldIncidentSelected{
+  border-color:var(--sigdec-blue);
+  box-shadow:0 0 0 3px rgba(18,105,199,.1);
+}
+
+/* Login/recuperação: preserva identidade original, mas harmoniza detalhes */
+.loginShell .loginCard,
+.friendlyLogin .loginCard{
+  border-radius:var(--sigdec-radius-lg);
+}
+.loginShell .loginCard input,
+.friendlyLogin .loginCard input{
+  border-radius:11px;
+  border-color:#c9d7e4;
+}
+.loginShell .loginCard button,
+.friendlyLogin .loginCard button{
+  border-radius:11px;
+}
+
+/* Páginas públicas de integridade */
+body:has(main.shell:not(.moduleShell)) main.shell{
+  color:var(--sigdec-text);
+}
+body:has(main.shell:not(.moduleShell)) main.shell>.card{
+  border-radius:var(--sigdec-radius-md);
+  border-color:var(--sigdec-border);
+  box-shadow:var(--sigdec-shadow-sm);
+}
+
+/* Mensagens e estados */
+.formMessage,.errorMessage{
+  border-radius:11px;
+  line-height:1.5;
+}
+.moduleShell .formMessage{
+  border:1px solid #cfe0ef;
+  background:#edf6fd;
+  color:#174e7d;
+}
+.moduleShell .errorMessage{
+  border:1px solid #efc4c7;
+  background:#fff4f4;
+  color:#912b35;
+}
+
+/* Rodapé visual implícito das páginas internas */
+.moduleShell:after{
+  content:"SIGDEC · Sistema Integrado de Gestão de Defesa Civil";
+  display:block;
+  margin-top:42px;
+  padding-top:16px;
+  border-top:1px solid #dde7ef;
+  color:#8393a4;
+  font-size:.72rem;
+  font-weight:700;
+  letter-spacing:.035em;
+}
+
+/* Responsividade */
+@media(max-width:900px){
+  .moduleShell{width:min(100% - 28px,1280px);padding-top:24px}
+  .moduleShell>.listHeader:first-child,
+  .moduleShell>.panelHeader:first-child{padding:24px;min-height:auto}
+  .moduleShell .dataGrid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+}
+@media(max-width:700px){
+  .moduleShell{width:min(100% - 20px,1280px);padding-bottom:58px}
+  .moduleShell>.listHeader:first-child,
+  .moduleShell>.panelHeader:first-child{padding:20px;border-radius:18px}
+  .moduleShell .listHeader h1,
+  .moduleShell .panelHeader h1{font-size:1.75rem}
+  .moduleShell .headerActions{width:100%}
+  .moduleShell .headerActions>a,
+  .moduleShell .headerActions>button{flex:1 1 auto}
+  .moduleShell .card{padding:18px}
+  .moduleShell .incidentForm{padding:19px}
+  .moduleShell .dataGrid{grid-template-columns:1fr}
+  .moduleShell .adminTableWrap{border-radius:13px}
+  .moduleShell .adminTableWrap table{min-width:680px}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*:before,*:after{transition:none!important;animation:none!important}
+}
