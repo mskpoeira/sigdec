@@ -1,6 +1,7 @@
 "use client";
 import { formatDateTimeBR, ubatubaLocalDateTimeToIso } from "../lib/datetime";
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import { FormEvent,useCallback,useEffect,useState } from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type Station={id:string;code:string;name:string;stationType:string;provider?:string|null;externalId?:string|null};
@@ -19,6 +20,7 @@ export default function Page(){
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(`${API}${path}`,{credentials:"include",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";return null}if(!r.ok)throw new Error("Não foi possível concluir a operação.");return r.json()},[]);
  const load=useCallback(async()=>{try{const [s,r,t,e,p,pt,cx,cc]=await Promise.all([request("/api/v1/monitoring/stations"),request("/api/v1/monitoring/readings/latest"),request("/api/v1/monitoring/thresholds"),request("/api/v1/monitoring/events"),request("/api/v1/monitoring/protocols"),request("/api/v1/monitoring/protocol-templates"),request("/api/v1/monitoring/connectors"),request("/api/v1/cobrade/catalog")]);if(s)setStations(s.items??[]);if(r)setReadings(r.items??[]);if(t)setThresholds(t.items??[]);if(e)setEvents(e.items??[]);if(p)setProtocols(p.items??[]);if(pt)setProtocolTemplates(pt.items??[]);if(cx)setConnectors(cx.items??[]);if(cc)setCobradeCatalog(cc.items??[]);setStatus("")}catch{setStatus("Não foi possível carregar os dados de monitoramento.")}},[request]);
  useEffect(()=>{load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true);
  async function loadKeys(stationId:string){if(!stationId){setKeys([]);return}const b=await request(`/api/v1/monitoring/stations/${stationId}/ingest-keys`);setKeys(b?.items??[])}
  async function loadVersions(protocolId:string){if(!protocolId){setVersions([]);return}const b=await request(`/api/v1/monitoring/protocols/${protocolId}/versions`);setVersions(b?.items??[])}
  useEffect(()=>{void loadKeys(selectedKeyStation).catch(()=>setKeys([]))},[selectedKeyStation]);
