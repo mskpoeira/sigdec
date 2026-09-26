@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 
@@ -43,6 +44,7 @@ export default function CadastrosOperacionaisPage(){
   setTeams(t.items??[]);setVehicles(v.items??[]);setTypes(ty.items??[]);setItems(i.items??[]);setUsers(u.items??[]);setJobTitles(j.items??[]);
  },[request]);
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar cadastros."))},[load]);
+ useRealtimeRefresh(async()=>{if(busy)return;await load();if(selectedTeam)await openMembers(selectedTeam)},true,10000);
 
  async function perform(fn:()=>Promise<void>){
   setBusy(true);setMessage("");
