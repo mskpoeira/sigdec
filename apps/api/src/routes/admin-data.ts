@@ -248,6 +248,87 @@ export async function adminDataRoutes(app:FastifyInstance){
   };
  });
 
+ app.get("/api/v1/admin/audit/checkpoints/:id/receipt",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const organizationId=org(request),{id}=request.params as {id:string};
+  if(!/^\d+$/.test(id))return reply.code(400).send({error:"INVALID_CHECKPOINT_ID"});
+  const result=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
+    u.display_name AS "createdByName",o.id::text AS "organizationId",o.name AS "organizationName",
+    c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+    c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+    c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c JOIN users u ON u.id=c.created_by JOIN organizations o ON o.id=c.organization_id
+    WHERE c.id=$1 AND c.organization_id=$2`,[id,organizationId]);
+  const row=result.rows[0];
+  if(!row)return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+  const checkpointValid=sha256(checkpointCanonical({
+   organizationId:row.organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+   auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+   auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+  }))===row.checkpointHash;
+  const audit=await computeAuditRoot(organizationId,row.lastAuditId);
+  const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
+   audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
+  const receipt={
+   proofVersion:"sigdec-audit-checkpoint/1.0",
+   generatedAt:new Date().toISOString(),
+   checkpoint:{
+    id:row.id,organizationId:row.organizationId,organizationName:row.organizationName,
+    createdAt:new Date(row.createdAt).toISOString(),createdByMatricula:row.createdByMatricula,createdByName:row.createdByName,
+    auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,
+    checkpointHash:row.checkpointHash,integrityVersion:Number(row.integrityVersion),algorithm:row.algorithm
+   },
+   verification:{checkpointValid,rootValid,invalid:audit.invalid,unsealed:audit.unsealed,valid:checkpointValid&&rootValid&&audit.invalid===0&&audit.unsealed===0},
+   publicVerificationPath:`/integridade/auditoria/${row.checkpointHash}`
+  };
+  reply.header("content-type","application/json; charset=utf-8")
+   .header("content-disposition",`attachment; filename="sigdec-audit-checkpoint-${row.id}.json"`)
+   .header("cache-control","no-store");
+  return receipt;
+ });
+
+ app.get("/api/v1/public/audit-checkpoint/:hash",async(request,reply)=>{
+  const {hash}=request.params as {hash:string};
+  if(!/^[a-f0-9]{64}$/i.test(hash))return reply.code(400).send({error:"INVALID_CHECKPOINT_HASH"});
+  const result=await db.query(`SELECT c.id::text AS id,c.organization_id::text AS "organizationId",o.name AS "organizationName",
+    c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
+    c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+    c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+    c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c JOIN organizations o ON o.id=c.organization_id
+    WHERE c.checkpoint_hash=$1 LIMIT 1`,[hash.toLowerCase()]);
+  const row=result.rows[0];
+  if(!row)return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+  const expected=sha256(checkpointCanonical({
+   organizationId:row.organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+   auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+   auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+  }));
+  const audit=await computeAuditRoot(row.organizationId,row.lastAuditId);
+  const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
+   audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
+  const checkpointValid=expected===row.checkpointHash;
+  const previousExists=row.previousCheckpointHash?Boolean((await db.query(
+   "SELECT 1 FROM audit_integrity_checkpoints WHERE organization_id=$1 AND checkpoint_hash=$2",[row.organizationId,row.previousCheckpointHash]
+  )).rows[0]):true;
+  return {
+   valid:checkpointValid&&rootValid&&previousExists&&audit.invalid===0&&audit.unsealed===0,
+   proofVersion:"sigdec-audit-checkpoint-public/1.0",
+   organizationName:row.organizationName,
+   createdAt:row.createdAt,
+   auditCount:Number(row.auditCount),
+   firstAuditId:row.firstAuditId,
+   lastAuditId:row.lastAuditId,
+   auditRootHash:row.auditRootHash,
+   previousCheckpointHash:row.previousCheckpointHash,
+   checkpointHash:row.checkpointHash,
+   integrityVersion:Number(row.integrityVersion),
+   algorithm:row.algorithm,
+   verification:{checkpointValid,rootValid,previousExists,invalid:audit.invalid,unsealed:audit.unsealed},
+   checkedAt:new Date().toISOString()
+  };
+ });
+
  app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("system.master")},async request=>{
   const o=org(request);
   const [overview,roles]=await Promise.all([
