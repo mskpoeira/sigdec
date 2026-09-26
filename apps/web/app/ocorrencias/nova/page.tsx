@@ -5,12 +5,27 @@ import { FormEvent, useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 
+type PhoneType = "LANDLINE" | "MOBILE";
+
 type IncidentType = {
   id: string;
   name: string;
   groupName: string;
   defaultPriority: string;
 };
+
+function formatBrazilPhone(value:string,type:PhoneType){
+  const max=type==="MOBILE"?11:10;
+  const digits=value.replace(/\D/g,"").slice(0,max);
+  if(digits.length<=2)return digits.length?"("+digits:"";
+  const ddd=digits.slice(0,2),number=digits.slice(2);
+  if(type==="MOBILE"){
+    if(number.length<=5)return `(${ddd}) ${number}`;
+    return `(${ddd}) ${number.slice(0,5)}-${number.slice(5)}`;
+  }
+  if(number.length<=4)return `(${ddd}) ${number}`;
+  return `(${ddd}) ${number.slice(0,4)}-${number.slice(4)}`;
+}
 
 export default function NovaOcorrenciaPage() {
   const [types, setTypes] = useState<IncidentType[]>([]);
@@ -22,6 +37,8 @@ export default function NovaOcorrenciaPage() {
   const [riskToLife, setRiskToLife] = useState(false);
   const [callerName, setCallerName] = useState("");
   const [callerPhone, setCallerPhone] = useState("");
+  const [callerPhoneType, setCallerPhoneType] = useState<PhoneType>("MOBILE");
+  const [callerPhoneWhatsapp, setCallerPhoneWhatsapp] = useState(false);
   const [addressLine, setAddressLine] = useState("");
   const [neighborhood, setNeighborhood] = useState("");
   const [referencePoint, setReferencePoint] = useState("");
@@ -66,6 +83,8 @@ export default function NovaOcorrenciaPage() {
           riskToLife,
           callerName: callerName || undefined,
           callerPhone: callerPhone || undefined,
+          callerPhoneType: callerPhone ? callerPhoneType : undefined,
+          callerPhoneWhatsapp: callerPhone ? (source==="whatsapp" || callerPhoneWhatsapp) : false,
           addressLine: addressLine || undefined,
           neighborhood: neighborhood || undefined,
           referencePoint: referencePoint || undefined
@@ -83,6 +102,8 @@ export default function NovaOcorrenciaPage() {
       setDescription("");
       setCallerName("");
       setCallerPhone("");
+      setCallerPhoneType("MOBILE");
+      setCallerPhoneWhatsapp(false);
       setAddressLine("");
       setNeighborhood("");
       setReferencePoint("");
@@ -121,7 +142,11 @@ export default function NovaOcorrenciaPage() {
 
           <label>
             Origem
-            <select value={source} onChange={(e) => setSource(e.target.value)}>
+            <select value={source} onChange={(e) => {
+              const next=e.target.value;
+              setSource(next);
+              if(next==="whatsapp"&&callerPhone)setCallerPhoneWhatsapp(true);
+            }}>
               <option value="phone_199">199</option>
               <option value="phone_admin">Telefone administrativo</option>
               <option value="radio">Rádio</option>
@@ -165,16 +190,51 @@ export default function NovaOcorrenciaPage() {
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
         </label>
 
-        <div className="formGrid">
-          <label>
-            Solicitante
-            <input value={callerName} onChange={(e) => setCallerName(e.target.value)} />
-          </label>
-          <label>
-            Telefone
-            <input value={callerPhone} onChange={(e) => setCallerPhone(e.target.value)} />
-          </label>
-        </div>
+        <fieldset>
+          <legend>Contato do solicitante</legend>
+          <div className="formGrid">
+            <label>
+              Solicitante
+              <input value={callerName} onChange={(e) => setCallerName(e.target.value)} />
+            </label>
+            <label>
+              Tipo do telefone
+              <select value={callerPhoneType} onChange={(e) => {
+                const next=e.target.value as PhoneType;
+                setCallerPhoneType(next);
+                setCallerPhone(formatBrazilPhone(callerPhone,next));
+              }}>
+                <option value="MOBILE">Celular</option>
+                <option value="LANDLINE">Telefone fixo</option>
+              </select>
+            </label>
+            <label>
+              Telefone
+              <input
+                value={callerPhone}
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder={callerPhoneType==="MOBILE"?"(12) 99999-9999":"(12) 3333-4444"}
+                onChange={(e) => {
+                  const next=formatBrazilPhone(e.target.value,callerPhoneType);
+                  setCallerPhone(next);
+                  if(!next)setCallerPhoneWhatsapp(false);
+                  else if(source==="whatsapp")setCallerPhoneWhatsapp(true);
+                }}
+              />
+              <small>{callerPhoneType==="MOBILE"?"Informe DDD + 9 dígitos.":"Informe DDD + 8 dígitos."}</small>
+            </label>
+            <label className="checkLabel">
+              <input
+                type="checkbox"
+                checked={source==="whatsapp"&&callerPhone ? true : callerPhoneWhatsapp}
+                disabled={!callerPhone || source==="whatsapp"}
+                onChange={(e) => setCallerPhoneWhatsapp(e.target.checked)}
+              />
+              Este número possui WhatsApp
+            </label>
+          </div>
+        </fieldset>
 
         <label>
           Endereço
