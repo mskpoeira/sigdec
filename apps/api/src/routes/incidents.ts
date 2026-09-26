@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { authFrom, requirePermission } from "../auth.js";
 import { db } from "../db.js";
@@ -368,12 +369,117 @@ export async function incidentRoutes(app: FastifyInstance) {
       [id]
     );
 
+    const attachments = await db.query(
+      `SELECT a.id,a.file_name AS "fileName",a.media_type AS "mediaType",
+              a.media_kind AS "mediaKind",a.file_size AS "fileSize",a.sha256,
+              a.created_at AS "createdAt",u.display_name AS "uploadedByName",u.matricula AS "uploadedByMatricula"
+         FROM incident_attachments a
+         JOIN users u ON u.id=a.uploaded_by
+        WHERE a.incident_id=$1 AND a.organization_id=$2
+        ORDER BY a.created_at DESC`,
+      [id,organizationId]
+    );
+
     return {
       incident: incidentRow,
       timeline: timeline.rows,
       dispatches: dispatches.rows,
+      attachments: attachments.rows,
       allowedTransitions: incidentStatusValues.filter(status=>status!==incidentRow.status)
     };
+  });
+
+  app.post("/api/v1/incidents/:id/attachments", {
+    preHandler: requirePermission("incidents.update")
+  }, async (request, reply) => {
+    const auth=authFrom(request);
+    const organizationId=requireOrganization(auth.organizationId);
+    const {id}=request.params as {id:string};
+    const incident=await db.query("SELECT id,protocol FROM incidents WHERE id=$1 AND organization_id=$2",[id,organizationId]);
+    if(!incident.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+
+    const mediaType=String(request.headers["content-type"]??"").split(";")[0].trim().toLowerCase();
+    const mediaKind=mediaType.startsWith("image/")?"IMAGE":mediaType.startsWith("video/")?"VIDEO":null;
+    if(!mediaKind)return reply.code(415).send({error:"UNSUPPORTED_MEDIA",message:"Envie somente fotos ou vídeos."});
+
+    const body=request.body;
+    if(!Buffer.isBuffer(body)||body.length===0)return reply.code(400).send({error:"EMPTY_FILE",message:"Arquivo vazio."});
+    const maxBytes=mediaKind==="VIDEO"?120*1024*1024:20*1024*1024;
+    if(body.length>maxBytes)return reply.code(413).send({error:"FILE_TOO_LARGE",message:mediaKind==="VIDEO"?"Vídeos podem ter até 120 MB.":"Fotos podem ter até 20 MB."});
+
+    const rawName=String(request.headers["x-file-name"]??`${mediaKind.toLowerCase()}-${Date.now()}`);
+    let fileName=rawName;
+    try{fileName=decodeURIComponent(rawName)}catch{}
+    fileName=fileName.replace(/[\\/\0]/g,"_").slice(0,220)||`${mediaKind.toLowerCase()}-${Date.now()}`;
+    const sha256=createHash("sha256").update(body).digest("hex");
+
+    const created=await db.query(
+      `INSERT INTO incident_attachments(organization_id,incident_id,uploaded_by,file_name,media_type,media_kind,file_size,sha256,content)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING id,file_name AS "fileName",media_type AS "mediaType",media_kind AS "mediaKind",
+                 file_size AS "fileSize",sha256,created_at AS "createdAt"`,
+      [organizationId,id,auth.userId,fileName,mediaType,mediaKind,body.length,sha256,body]
+    );
+    const attachment=created.rows[0];
+
+    await db.query(
+      `INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+       VALUES($1,'incident.attachment_added',$2,$3,$4::jsonb)`,
+      [id,auth.userId,`${mediaKind==="IMAGE"?"Foto":"Vídeo"} anexado: ${fileName}`,JSON.stringify({attachmentId:attachment.id,mediaKind,fileName,fileSize:body.length,sha256})]
+    );
+    await db.query(
+      `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data)
+       VALUES($1,'incident.attachment.create','incident_attachment',$2,$3,$4,$5::jsonb)`,
+      [auth.userId,attachment.id,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,fileName,mediaType,mediaKind,fileSize:body.length,sha256})]
+    );
+    return reply.code(201).send({attachment});
+  });
+
+  app.get("/api/v1/incidents/:id/attachments/:attachmentId/content", {
+    preHandler: requirePermission("incidents.read")
+  }, async (request, reply) => {
+    const organizationId=requireOrganization(authFrom(request).organizationId);
+    const {id,attachmentId}=request.params as {id:string;attachmentId:string};
+    const result=await db.query(
+      `SELECT file_name,media_type,file_size,sha256,content
+         FROM incident_attachments
+        WHERE id=$1 AND incident_id=$2 AND organization_id=$3`,
+      [attachmentId,id,organizationId]
+    );
+    const item=result.rows[0] as {file_name:string;media_type:string;file_size:number;sha256:string;content:Buffer}|undefined;
+    if(!item)return reply.code(404).send({error:"NOT_FOUND"});
+    const safeName=item.file_name.replace(/["\\\r\n]/g,"_");
+    return reply.type(item.media_type)
+      .header("Content-Disposition",`inline; filename="${safeName}"`)
+      .header("Content-Length",String(item.file_size))
+      .header("ETag",`"${item.sha256}"`)
+      .header("Cache-Control","private, max-age=60")
+      .send(item.content);
+  });
+
+  app.delete("/api/v1/incidents/:id/attachments/:attachmentId", {
+    preHandler: requirePermission("incidents.update")
+  }, async (request, reply) => {
+    const auth=authFrom(request),organizationId=requireOrganization(auth.organizationId);
+    const {id,attachmentId}=request.params as {id:string;attachmentId:string};
+    const current=await db.query(
+      `SELECT id,file_name AS "fileName",media_kind AS "mediaKind",file_size AS "fileSize",sha256
+         FROM incident_attachments WHERE id=$1 AND incident_id=$2 AND organization_id=$3`,
+      [attachmentId,id,organizationId]
+    );
+    if(!current.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+    await db.query("DELETE FROM incident_attachments WHERE id=$1 AND incident_id=$2 AND organization_id=$3",[attachmentId,id,organizationId]);
+    await db.query(
+      `INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata)
+       VALUES($1,'incident.attachment_removed',$2,$3,$4::jsonb)`,
+      [id,auth.userId,`Anexo removido: ${current.rows[0].fileName}`,JSON.stringify({attachmentId,...current.rows[0]})]
+    );
+    await db.query(
+      `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data)
+       VALUES($1,'incident.attachment.delete','incident_attachment',$2,$3,$4,$5::jsonb)`,
+      [auth.userId,attachmentId,request.ip,request.headers["user-agent"]??null,JSON.stringify({incidentId:id,...current.rows[0]})]
+    );
+    return {ok:true};
   });
 
   app.get("/api/v1/incidents/:id/extract", {
