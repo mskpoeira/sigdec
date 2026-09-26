@@ -37,6 +37,8 @@ export default function GlobalExperience(){
  const pathname=usePathname(),router=useRouter();
  const[open,setOpen]=useState(false),[query,setQuery]=useState(""),[results,setResults]=useState<Result[]>([]);
  const[loading,setLoading]=useState(false),[selected,setSelected]=useState(0),[header,setHeader]=useState<Element|null>(null);
+ const[realtimeTransport,setRealtimeTransport]=useState<"connecting"|"sse"|"polling"|"offline">("connecting");
+ const[lastRealtimeAt,setLastRealtimeAt]=useState<Date|null>(null);
  const inputRef=useRef<HTMLInputElement|null>(null);
  const hidden=pathname==="/"||publicPrefixes.some(x=>pathname.startsWith(x));
 
@@ -48,15 +50,39 @@ export default function GlobalExperience(){
 
  useEffect(()=>{
   if(hidden)return;
-  const tick=()=>{
-   if(document.visibilityState!=="visible"||!navigator.onLine)return;
-   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at:Date.now()}}));
+  const emit=()=>{
+   const at=Date.now();
+   setLastRealtimeAt(new Date(at));
+   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at}}));
    router.refresh();
   };
+  const tick=()=>{
+   if(document.visibilityState!=="visible")return;
+   if(!navigator.onLine){setRealtimeTransport("offline");return}
+   if(realtimeTransport!=="sse")setRealtimeTransport("polling");
+   emit();
+  };
   const timer=window.setInterval(tick,5000);
-  const onOnline=()=>tick();
+  const onOnline=()=>{setRealtimeTransport("connecting");tick()};
+  const onOffline=()=>setRealtimeTransport("offline");
   window.addEventListener("online",onOnline);
-  return()=>{window.clearInterval(timer);window.removeEventListener("online",onOnline)};
+  window.addEventListener("offline",onOffline);
+  return()=>{window.clearInterval(timer);window.removeEventListener("online",onOnline);window.removeEventListener("offline",onOffline)};
+ },[hidden,router,realtimeTransport]);
+
+ useEffect(()=>{
+  if(hidden||!navigator.onLine)return;
+  setRealtimeTransport("connecting");
+  const source=new EventSource(API+"/api/v1/realtime",{withCredentials:true});
+  source.addEventListener("ready",()=>setRealtimeTransport("sse"));
+  source.addEventListener("change",()=>{
+   const at=Date.now();
+   setRealtimeTransport("sse");setLastRealtimeAt(new Date(at));
+   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at,transport:"sse"}}));
+   router.refresh();
+  });
+  source.onerror=()=>{if(navigator.onLine)setRealtimeTransport("polling")};
+  return()=>source.close();
  },[hidden,router]);
 
  useEffect(()=>{
@@ -114,6 +140,9 @@ export default function GlobalExperience(){
 
  return <>
   {breadcrumb}
+  <div className={`realtimeStatus ${realtimeTransport}`} title={lastRealtimeAt?`Última sincronização: ${lastRealtimeAt.toLocaleTimeString("pt-BR")}`:"Conectando..."}>
+   <span aria-hidden="true">●</span><strong>{realtimeTransport==="sse"?"Tempo real":realtimeTransport==="polling"?"Atualização 5 s":realtimeTransport==="offline"?"Offline":"Conectando"}</strong>
+  </div>
   <button type="button" className="globalSearchLauncher" onClick={()=>setOpen(true)} aria-label="Abrir busca global">
    <span aria-hidden="true">⌕</span><strong>Buscar no SIGDEC</strong><kbd>Ctrl K</kbd>
   </button>
