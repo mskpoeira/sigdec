@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 import {formatDateTimeBR,ubatubaLocalDateTimeToIso} from "../lib/datetime";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
@@ -39,6 +40,7 @@ export default function SimuladosPage(){
   setItems(e.items??[]);setPlans(p.items??[]);setSeasonals(s.items??[]);
  },[request]);
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar."))},[load]);
+ useRealtimeRefresh(async()=>{if(busy)return;await load();if(selected)await open(selected)},true);
 
  async function open(item:Exercise){
   setSelected(item);const b=await request("/api/v1/exercises/"+item.id+"/review");setEvaluations(b.evaluations??[]);setActions(b.actions??[]);
