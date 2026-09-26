@@ -349,7 +349,9 @@ export async function contingencyRoutes(app:FastifyInstance){
  app.post("/api/v1/plancon/:id/call-targets",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=callTargetInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
-  await operationalContext(org,id,false);const v=parsed.data;
+  const context=await operationalContext(org,id,false);
+  if(context.plan.status!=="DRAFT")return reply.code(409).send({error:"PLAN_VERSION_LOCKED",message:"Crie uma nova revisão para alterar o plano de chamada de um PLANCON aprovado ou ativo."});
+  const v=parsed.data;
   const result=await db.query(`INSERT INTO plancon_call_targets(
     organization_id,plan_id,sequence_no,target_name,organization_name,role_name,contact,channel,required,created_by)
     SELECT $1,$2,COALESCE(max(sequence_no),0)+1,$3,$4,$5,$6,$7,$8,$9 FROM plancon_call_targets WHERE plan_id=$2
@@ -373,7 +375,9 @@ export async function contingencyRoutes(app:FastifyInstance){
  app.post("/api/v1/plancon/:id/checklist-items",{preHandler:requirePermission("plancon.manage")},async(request,reply)=>{
   const auth=authFrom(request),org=organization(request),{id}=request.params as {id:string},parsed=checklistItemInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.success?undefined:parsed.error.flatten()});
-  await operationalContext(org,id,false);const v=parsed.data;
+  const context=await operationalContext(org,id,false);
+  if(context.plan.status!=="DRAFT")return reply.code(409).send({error:"PLAN_VERSION_LOCKED",message:"Crie uma nova revisão para alterar o checklist de um PLANCON aprovado ou ativo."});
+  const v=parsed.data;
   const result=await db.query(`INSERT INTO plancon_checklist_items(organization_id,plan_id,level,sequence_no,title,required,created_by)
     SELECT $1,$2,$3,COALESCE(max(sequence_no),0)+1,$4,$5,$6 FROM plancon_checklist_items WHERE plan_id=$2 AND level=$3
     RETURNING id,level,sequence_no AS "sequenceNo"`,[org,id,v.level,v.title,v.required,auth.userId]);
