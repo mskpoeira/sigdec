@@ -532,3 +532,33 @@ body:has(.situationRoomMonitor) .realtimeStatus{display:none!important}
   .civilDefenseMarkOfficial{width:170px;min-height:112px}
   .civilDefenseLoginLogo{min-height:112px}
 }
+
+
+/* v1.67 — identidade PMU e nome de guerra no menu lateral */
+.opsSideBrand .opsMunicipalCrest{
+  width:46px;
+  height:54px;
+  object-fit:contain;
+  flex:0 0 auto;
+  filter:drop-shadow(0 3px 7px rgba(0,0,0,.22));
+}
+.opsUserText{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.opsUserText .opsWarName{
+  color:#fff;
+  font-size:.82rem;
+  font-weight:900;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.opsUserText .opsUserRole{
+  color:rgba(255,255,255,.65);
+  font-size:.68rem;
+}
+@media(max-width:800px){
+  .opsSideBrand .opsMunicipalCrest{width:42px;height:48px}
+}
