@@ -159,6 +159,7 @@ export default function CampoPage() {
     seenP1Ref.current=current;
     if(!fresh.length)return;
     const incident=fresh[0];
+    if(!incident)return;
     setCriticalNotice("NOVA P1 · "+incident.protocol+" · "+incident.summary);
     if(soundEnabled)playCriticalTone();
     const timer=window.setTimeout(()=>setCriticalNotice(""),12000);
