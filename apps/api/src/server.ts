@@ -23,7 +23,7 @@ import { dispatchWebhooks } from "./lib/webhooks.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 const app=Fastify({logger:true,trustProxy:true});
-app.addContentTypeParser(/^image\\/|^video\\//,{parseAs:"buffer",bodyLimit:125829120},(_request,body,done)=>done(null,body));
+app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829120},(_request,body,done)=>done(null,body));
 const release=apiPackage.version;
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
