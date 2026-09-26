@@ -59,7 +59,9 @@ export default function CampoPage() {
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
   const [online,setOnline]=useState(true);
+  const [clock,setClock]=useState(new Date());
   useEffect(()=>{setMonitorMode(new URLSearchParams(window.location.search).get("monitor")==="1")},[]);
+  useEffect(()=>{const timer=window.setInterval(()=>setClock(new Date()),1000);return()=>window.clearInterval(timer)},[]);
 
   async function load() {
     const response = await fetch(`${API_URL}/api/v1/field/map`, { credentials: "include" });
@@ -142,12 +144,13 @@ export default function CampoPage() {
 
   const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
   const locatedIncidents=useMemo(()=>incidents.filter(item=>item.latitude!==null&&item.longitude!==null&&Number.isFinite(Number(item.latitude))&&Number.isFinite(Number(item.longitude))),[incidents]);
-  const pinPosition=(item:FieldIncident)=>{
-    const lat=Number(item.latitude),lon=Number(item.longitude);
+  const mapPosition=(latitude:number|string|null,longitude:number|string|null)=>{
+    const lat=Number(latitude),lon=Number(longitude);
     const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));
     const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));
-    return {left:`${left}%`,top:`${top}%`};
+    return {left:left+"%",top:top+"%"};
   };
+  const pinPosition=(item:FieldIncident)=>mapPosition(item.latitude,item.longitude);
   const mapUrl = useMemo(() => {
     if(monitorMode)return "https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
     const target=selectedPoint??selected;
@@ -185,6 +188,13 @@ export default function CampoPage() {
       const url=URL.createObjectURL(await response.blob());const anchor=document.createElement("a");
       anchor.href=url;anchor.download=`sigdec-pontos.${format}`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }catch(error){setMessage(error instanceof Error?error.message:"Falha na exportação.");}
+  }
+
+  async function toggleFullscreen(){
+    try{
+      if(!document.fullscreenElement)await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
+    }catch{setMessage("Não foi possível alterar o modo de tela cheia neste dispositivo.")}
   }
 
   function shareLocation() {
