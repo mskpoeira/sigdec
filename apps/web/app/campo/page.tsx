@@ -4,7 +4,6 @@ import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 const PENDING_LOCATION_KEY="sigdec.field.pending-location.v1";
@@ -42,8 +41,7 @@ type FieldPosition = {
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 
 export default function CampoPage() {
-  const searchParams=useSearchParams();
-  const monitorMode=searchParams.get("monitor")==="1";
+  const [monitorMode,setMonitorMode]=useState(false);
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
   const [positions, setPositions] = useState<FieldPosition[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
@@ -61,6 +59,7 @@ export default function CampoPage() {
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
   const [online,setOnline]=useState(true);
+  useEffect(()=>{setMonitorMode(new URLSearchParams(window.location.search).get("monitor")==="1")},[]);
 
   async function load() {
     const response = await fetch(`${API_URL}/api/v1/field/map`, { credentials: "include" });
