@@ -1,0 +1,438 @@
+/* SIGDEC v1.68 — linguagem visual moderna, clean e institucional
+   Defesa Civil + identidade Ubatuba: azul oceano, laranja de emergência e verdes discretos. */
+
+:root{
+  --ui-navy:#082f55;
+  --ui-blue:#075fae;
+  --ui-blue-2:#0e73c8;
+  --ui-orange:#f36b2b;
+  --ui-green:#2d8c66;
+  --ui-red:#d92f3b;
+  --ui-ink:#16334f;
+  --ui-muted:#6f8397;
+  --ui-soft:#f4f8fb;
+  --ui-soft-blue:#edf5fb;
+  --ui-line:#dce6ee;
+  --ui-card:rgba(255,255,255,.96);
+  --ui-shadow:0 12px 34px rgba(8,47,85,.08);
+  --ui-shadow-hover:0 18px 42px rgba(8,47,85,.13);
+  --ui-radius:18px;
+  --ui-radius-sm:12px;
+}
+
+html{background:#eef4f8}
+body{
+  background:
+    radial-gradient(circle at 8% 0%,rgba(14,115,200,.08),transparent 28rem),
+    radial-gradient(circle at 100% 12%,rgba(45,140,102,.055),transparent 30rem),
+    linear-gradient(180deg,#f8fbfd 0,#f2f7fa 48%,#edf4f7 100%);
+  color:var(--ui-ink);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+::selection{background:rgba(243,107,43,.22);color:var(--ui-navy)}
+a,button,input,select,textarea{transition:border-color .16s ease,box-shadow .16s ease,background .16s ease,transform .16s ease,color .16s ease}
+
+/* Estrutura comum */
+.shell{
+  width:min(1380px,calc(100% - 36px));
+  padding:30px 0 64px;
+}
+.moduleShell{
+  position:relative;
+}
+.moduleShell>.listHeader:first-child,
+.moduleShell>.panelHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  min-height:148px;
+  padding:28px 30px 34px;
+  border:0;
+  border-radius:22px;
+  color:#fff;
+  background:
+    linear-gradient(112deg,rgba(8,47,85,.98) 0%,rgba(7,95,174,.96) 63%,rgba(14,115,200,.9) 100%);
+  box-shadow:0 16px 38px rgba(8,47,85,.15);
+}
+.moduleShell>.listHeader:first-child::before,
+.moduleShell>.panelHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::before{
+  content:"";
+  position:absolute;
+  right:22px;
+  top:16px;
+  width:88px;
+  height:100px;
+  z-index:-1;
+  opacity:.14;
+  background:url("https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png") center/contain no-repeat;
+}
+.moduleShell>.listHeader:first-child::after,
+.moduleShell>.panelHeader:first-child::after,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::after,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::after{
+  content:"UBATUBA · SP  •  DEFESA CIVIL";
+  position:absolute;
+  right:28px;
+  bottom:16px;
+  color:rgba(255,255,255,.8);
+  font-size:.64rem;
+  font-weight:900;
+  letter-spacing:.13em;
+}
+.moduleShell>.listHeader:first-child h1,
+.moduleShell>.panelHeader:first-child h1,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child h1,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child h1{
+  margin:7px 0 5px;
+  color:#fff;
+  font-size:clamp(1.8rem,3vw,2.55rem);
+  line-height:1.05;
+  letter-spacing:-.025em;
+}
+.moduleShell>.listHeader:first-child p,
+.moduleShell>.panelHeader:first-child p,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child p,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child p{color:#dbeafa;max-width:780px}
+.moduleShell>.listHeader:first-child .eyebrow,
+.moduleShell>.panelHeader:first-child .eyebrow,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child .eyebrow,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child .eyebrow{color:#ffcfb6}
+
+/* Superfícies */
+.card,.infoCard,.warningCard,.incidentForm,.detailSection,.dispatchCard,.inspectionCard,.documentCard,
+.moduleShell fieldset,.adminTableWrap,.fieldMap,.fieldSidebar,.opsCard{
+  border:1px solid var(--ui-line)!important;
+  border-radius:var(--ui-radius)!important;
+  background:var(--ui-card);
+  box-shadow:var(--ui-shadow);
+}
+.card,.incidentForm,.detailSection,.dispatchCard,.inspectionCard,.documentCard{padding:22px}
+.card:hover,.cardLink:hover,.incidentRow:hover,.fieldIncident:hover,.dispatchCard:hover,.inspectionCard:hover{
+  box-shadow:var(--ui-shadow-hover);
+  border-color:#bdd1e0!important;
+}
+.card h2,.card h3,.detailSection h2,.incidentForm h2{color:var(--ui-navy)}
+.card p,.infoCard p,.detailSection p{color:#587086}
+.infoCard{border-left:4px solid var(--ui-blue)!important}
+.warningCard{border-left:4px solid var(--ui-orange)!important;background:#fffaf6}
+.errorMessage{border:1px solid #efc5c9;border-left:4px solid var(--ui-red);background:#fff7f8}
+
+/* Formulários */
+label{color:#294761}
+input,select,textarea{
+  border:1px solid #cddbe6!important;
+  border-radius:12px!important;
+  background:#fff!important;
+  color:#183650!important;
+  min-height:44px;
+}
+textarea{min-height:104px}
+input:hover,select:hover,textarea:hover{border-color:#acc4d7!important}
+input:focus,select:focus,textarea:focus{
+  border-color:var(--ui-blue)!important;
+  outline:0!important;
+  box-shadow:0 0 0 4px rgba(7,95,174,.1)!important;
+}
+input::placeholder,textarea::placeholder{color:#9aabba}
+fieldset{padding:18px!important}
+legend{font-weight:900;color:var(--ui-navy)!important}
+
+/* Botões */
+.primaryButton,.primaryLink,.sigdecButton.blue,
+.moduleShell button[type="submit"],.shell:not(.loginShell) button[type="submit"]{
+  border-radius:12px!important;
+  background:linear-gradient(135deg,var(--ui-blue),var(--ui-blue-2))!important;
+  box-shadow:0 8px 20px rgba(7,95,174,.18)!important;
+}
+.primaryButton:hover,.primaryLink:hover,.sigdecButton.blue:hover,
+.moduleShell button[type="submit"]:hover,.shell:not(.loginShell) button[type="submit"]:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 26px rgba(7,95,174,.24)!important;
+}
+.secondaryButton,.secondaryLink{
+  border:1px solid #cedbe5!important;
+  border-radius:12px!important;
+  background:#f7fafc!important;
+  color:#244e72!important;
+  box-shadow:none!important;
+}
+.secondaryButton:hover,.secondaryLink:hover{background:#edf5fb!important;border-color:#b6cada!important}
+.sigdecButton.orange{background:linear-gradient(135deg,#f36b2b,#e8561e)!important}
+.sigdecButton.green{background:linear-gradient(135deg,#2d8c66,#237553)!important}
+.sigdecButton.red{background:linear-gradient(135deg,#d92f3b,#bf202c)!important}
+.sigdecButton.navy{background:linear-gradient(135deg,#143f68,#082f55)!important}
+
+/* Tabelas e abas */
+.adminTableWrap{overflow:auto}
+.adminTableWrap table{width:100%;border-collapse:separate;border-spacing:0}
+.adminTableWrap th{
+  position:sticky;top:0;
+  background:#edf5fb!important;color:#214d73!important;
+  font-size:.71rem;text-transform:uppercase;letter-spacing:.06em
+}
+.adminTableWrap td{background:#fff;border-bottom:1px solid #edf2f6!important}
+.adminTableWrap tbody tr:hover td{background:#f8fbfd!important}
+.adminTabs{
+  gap:7px!important;
+  padding:6px!important;
+  border:1px solid var(--ui-line)!important;
+  border-radius:14px!important;
+  background:#eef5fa!important;
+  box-shadow:none!important;
+}
+.adminTabs button{
+  min-height:40px!important;
+  border-radius:10px!important;
+  color:#496982!important;
+}
+.adminTabs button.active{
+  background:#fff!important;color:var(--ui-blue)!important;
+  box-shadow:0 5px 15px rgba(8,47,85,.09)!important;
+}
+
+/* Ocorrências, listas e status */
+.incidentList,.inspectionList,.dispatchList{gap:12px}
+.incidentRow,.fieldIncident{
+  border:1px solid var(--ui-line)!important;
+  border-radius:15px!important;
+  background:#fff!important;
+  box-shadow:0 5px 16px rgba(8,47,85,.045);
+}
+.statusTag{
+  border:1px solid #d8e5ee;
+  background:#f2f7fa!important;
+  color:#3b5f7a!important;
+}
+.priorityBadge{border-radius:13px!important}
+
+/* Dashboard */
+.opsDashboard{
+  grid-template-columns:272px minmax(0,1fr);
+  background:#f3f7fa;
+}
+.opsSide{
+  padding:18px 14px;
+  background:
+    radial-gradient(circle at 20% 0%,rgba(14,115,200,.24),transparent 260px),
+    linear-gradient(180deg,#082f55 0%,#092a49 70%,#071f37 100%);
+  border-right:1px solid rgba(255,255,255,.07);
+}
+.opsSideBrand{
+  display:flex!important;
+  align-items:center;
+  gap:12px;
+  min-height:72px;
+  padding:8px 9px 18px!important;
+  border-bottom:1px solid rgba(255,255,255,.1)!important;
+}
+.opsSideBrandText b{font-size:1.55rem!important;letter-spacing:-.03em}
+.opsSideBrandText small{color:#b9cde0}
+.opsSide nav{gap:6px!important;padding:14px 0!important}
+.opsSide nav a{
+  min-height:43px;
+  padding:10px 11px!important;
+  border-radius:11px!important;
+  color:#dceafa!important;
+}
+.opsSide nav a:hover{background:rgba(255,255,255,.08)!important}
+.opsSide nav a.active{
+  background:linear-gradient(135deg,#0e73c8,#075fae)!important;
+  color:#fff!important;
+  box-shadow:0 7px 18px rgba(0,0,0,.16);
+}
+.opsMenuIcon{opacity:.95}
+.opsUser{
+  margin-top:auto!important;
+  padding:15px 10px 11px!important;
+  border-top:1px solid rgba(255,255,255,.1)!important;
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
+}
+.opsLogout{border-radius:10px!important}
+.opsLogout:hover{background:rgba(255,255,255,.07)!important}
+
+.opsHero{
+  min-height:188px!important;
+  grid-template-columns:minmax(230px,270px) minmax(255px,330px) 1fr 180px!important;
+  gap:20px!important;
+  padding:22px 28px!important;
+  background:
+    linear-gradient(90deg,rgba(245,251,255,.98) 0%,rgba(234,246,254,.94) 39%,rgba(7,95,174,.24) 66%,rgba(8,47,85,.66) 100%),
+    url("https://turismo.ubatuba.sp.gov.br/wp-content/uploads/sites/29/2014/11/DSC05810.jpg") center 45%/cover no-repeat!important;
+  border-bottom:4px solid var(--ui-orange);
+}
+.opsMunicipal{border-right:1px solid rgba(8,47,85,.18)!important}
+.officialCrest{filter:drop-shadow(0 6px 10px rgba(8,47,85,.16))}
+.opsTitle>b{color:var(--ui-navy);font-size:3.25rem!important;letter-spacing:-.06em}
+.opsTitle strong,.opsTitle span{color:#1b4f78}
+.opsScenery span{font-family:inherit!important;font-weight:850;letter-spacing:-.04em}
+.dcBadge{filter:drop-shadow(0 10px 18px rgba(8,47,85,.18))}
+.opsContent{padding:26px 28px 30px!important}
+.opsWelcome{
+  padding:2px 2px 4px;
+  align-items:center!important
+}
+.opsWelcome h1{font-size:1.72rem!important;color:var(--ui-navy)}
+.opsWelcome p{color:#607a91!important}
+.opsStats{gap:12px!important}
+.stat{
+  border:1px solid var(--ui-line)!important;
+  border-radius:15px!important;
+  padding:17px!important;
+  box-shadow:0 7px 22px rgba(8,47,85,.055)!important
+}
+.stat b{font-size:1.8rem!important}
+.opsQuick{gap:11px!important}
+.opsQuick .quick{
+  min-height:108px!important;
+  border-radius:15px!important;
+  box-shadow:0 8px 20px rgba(8,47,85,.09)!important
+}
+.opsQuick .quick:hover{transform:translateY(-3px)!important;box-shadow:0 14px 26px rgba(8,47,85,.14)!important}
+.opsCard{padding:16px 18px!important}
+.opsCard>header{border-bottom:1px solid #edf2f6!important}
+.situationMap{border-radius:14px!important}
+.opsFooter{background:#eef5fa!important;color:#58738a!important;border-top:1px solid #dae6ee}
+
+/* Login */
+.friendlyLogin{
+  grid-template-columns:minmax(0,1.06fr) minmax(400px,.94fr)!important;
+  background:#f4f8fb!important;
+}
+.loginIdentity{
+  position:relative;
+  gap:26px!important;
+  padding:clamp(42px,6vw,86px)!important;
+  background:
+    radial-gradient(circle at 76% 20%,rgba(243,107,43,.22),transparent 19rem),
+    linear-gradient(145deg,#082f55 0%,#075fae 67%,#0e73c8 100%)!important;
+}
+.loginIdentity::before{
+  content:"UBATUBA · LITORAL NORTE · SP";
+  position:absolute;
+  left:clamp(42px,6vw,86px);
+  bottom:25px;
+  color:rgba(255,255,255,.52);
+  font-size:.66rem;
+  font-weight:900;
+  letter-spacing:.15em;
+}
+.loginIdentity h1{font-size:clamp(4rem,7vw,6.8rem)!important;letter-spacing:-.07em}
+.loginIdentity h2{font-weight:800}
+.loginIdentity p{color:#dceafa!important}
+.municipalBrand{
+  width:max-content;
+  padding:8px 12px 8px 8px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:15px;
+  background:rgba(255,255,255,.06);
+  backdrop-filter:blur(8px)
+}
+.brandSeal{border:0!important;border-radius:10px!important;object-fit:contain;background:rgba(255,255,255,.94);padding:5px}
+.loginAccess{
+  gap:20px!important;
+  padding:clamp(28px,6vw,78px)!important;
+  background:linear-gradient(180deg,#fff,#f7fafc)!important
+}
+.loginWelcome h2{font-size:2rem!important;letter-spacing:-.03em;color:var(--ui-navy)}
+.loginWelcome .eyebrow{color:var(--ui-orange)}
+.friendlyLogin .loginCard{
+  max-width:500px!important;
+  padding:26px!important;
+  border:1px solid var(--ui-line)!important;
+  border-radius:20px!important;
+  background:#fff!important;
+  box-shadow:0 18px 48px rgba(8,47,85,.09)!important
+}
+.friendlyLogin .loginCard input{min-height:48px}
+.friendlyLogin .loginCard>button[type="submit"]{min-height:48px;border-radius:12px!important}
+.civilDefenseMarkOfficial{
+  width:208px!important;
+  min-height:136px!important;
+  filter:drop-shadow(0 12px 24px rgba(0,0,0,.2))
+}
+
+/* Busca, breadcrumbs e tempo real */
+.globalSearchLauncher{
+  border-radius:14px!important;
+  box-shadow:0 10px 28px rgba(8,47,85,.16)!important
+}
+.realtimeStatus{
+  border-radius:999px!important;
+  box-shadow:0 8px 22px rgba(8,47,85,.1)!important
+}
+.contextBreadcrumb{opacity:.9}
+
+/* Mapa, mídia e módulos densos */
+.mapFrame,.fieldMap,.monitorMapWrap,.incidentMediaCard,.incidentMediaPreview{border-radius:16px!important}
+.incidentMediaCard{box-shadow:0 8px 24px rgba(8,47,85,.08)!important}
+.timelineDot{box-shadow:0 0 0 4px rgba(7,95,174,.1)!important}
+.timelineItem:before{background:#d7e4ed!important}
+
+/* Assinatura visual de Ubatuba sem poluir telas */
+.moduleShell::after,
+.shell:not(.moduleShell):not(.loginShell)::after{
+  content:"SIGDEC · DEFESA CIVIL · UBATUBA";
+  display:block;
+  margin-top:34px;
+  padding-top:14px;
+  border-top:1px solid #dce6ee;
+  color:#8194a4;
+  font-size:.65rem;
+  font-weight:850;
+  letter-spacing:.11em;
+  text-align:center;
+}
+
+/* Monitor de Sala de Situação permanece mais escuro e operacional */
+.situationRoomMonitor{font-feature-settings:"tnum" 1}
+.situationRoomMonitor::after{display:none!important}
+
+/* Responsividade */
+@media(max-width:1100px){
+  .opsHero{grid-template-columns:220px 280px 1fr!important}
+  .dcBadge{display:none!important}
+  .opsStats{grid-template-columns:repeat(3,1fr)!important}
+  .opsQuick{grid-template-columns:repeat(4,1fr)!important}
+}
+@media(max-width:900px){
+  .shell{width:100%;padding:0 16px 34px}
+  .moduleShell>.listHeader:first-child,
+  .moduleShell>.panelHeader:first-child,
+  .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+  .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+    margin:0 -16px 20px!important;
+    border-radius:0 0 20px 20px!important;
+    padding:24px 20px 32px!important
+  }
+  .opsDashboard{display:block}
+  .opsHero{grid-template-columns:1fr 1fr!important;padding:18px!important}
+  .opsScenery{display:none}
+  .opsContent{padding:20px 18px!important}
+  .friendlyLogin{grid-template-columns:1fr!important}
+}
+@media(max-width:640px){
+  .shell{padding-inline:10px}
+  .moduleShell>.listHeader:first-child::after,
+  .moduleShell>.panelHeader:first-child::after,
+  .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::after,
+  .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::after{
+    left:20px;right:auto;bottom:12px
+  }
+  .moduleShell>.listHeader:first-child::before,
+  .moduleShell>.panelHeader:first-child::before{width:66px;height:78px;right:14px}
+  .card,.incidentForm,.detailSection{padding:17px!important}
+  .opsStats{grid-template-columns:1fr 1fr!important}
+  .opsQuick{grid-template-columns:1fr 1fr!important}
+  .opsHero{grid-template-columns:1fr!important}
+  .opsMunicipal{border-right:0!important}
+  .opsTitle,.opsMunicipal{justify-self:center;text-align:center}
+  .opsTitle>b{font-size:2.7rem!important}
+  .friendlyLogin .loginCard{padding:20px!important}
+  .loginAccess{padding:28px 18px!important}
+}
