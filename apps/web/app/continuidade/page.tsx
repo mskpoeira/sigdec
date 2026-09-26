@@ -2,6 +2,7 @@
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR, ubatubaLocalDateTimeToIso } from "../lib/datetime";
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import { useCallback,useEffect,useState } from "react";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -122,6 +123,7 @@ export default function ContinuidadePage(){
  },[request]);
 
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,10000);
 
  async function act(action:()=>Promise<void>){
   setBusy(true);setMessage("");
