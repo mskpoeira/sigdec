@@ -370,8 +370,8 @@ export async function incidentRoutes(app: FastifyInstance) {
     );
 
     const attachments = await db.query(
-      `SELECT a.id,a.file_name AS "fileName",a.media_type AS "mediaType",
-              a.media_kind AS "mediaKind",a.file_size AS "fileSize",a.sha256,
+      `SELECT a.id,a.original_name AS "fileName",a.mime_type AS "mediaType",
+              a.media_kind AS "mediaKind",a.size_bytes AS "fileSize",a.sha256,
               a.created_at AS "createdAt",u.display_name AS "uploadedByName",u.matricula AS "uploadedByMatricula"
          FROM incident_attachments a
          JOIN users u ON u.id=a.uploaded_by
@@ -414,11 +414,11 @@ export async function incidentRoutes(app: FastifyInstance) {
     const sha256=createHash("sha256").update(body).digest("hex");
 
     const created=await db.query(
-      `INSERT INTO incident_attachments(organization_id,incident_id,uploaded_by,file_name,media_type,media_kind,file_size,sha256,content)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id,file_name AS "fileName",media_type AS "mediaType",media_kind AS "mediaKind",
-                 file_size AS "fileSize",sha256,created_at AS "createdAt"`,
-      [organizationId,id,auth.userId,fileName,mediaType,mediaKind,body.length,sha256,body]
+      `INSERT INTO incident_attachments(organization_id,incident_id,uploaded_by,storage_key,original_name,mime_type,media_kind,size_bytes,sha256,content)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id,original_name AS "fileName",mime_type AS "mediaType",media_kind AS "mediaKind",
+                 size_bytes AS "fileSize",sha256,created_at AS "createdAt"`,
+      [organizationId,id,auth.userId,`db:${id}:${Date.now()}`,fileName,mediaType,mediaKind,body.length,sha256,body]
     );
     const attachment=created.rows[0];
 
@@ -441,7 +441,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     const organizationId=requireOrganization(authFrom(request).organizationId);
     const {id,attachmentId}=request.params as {id:string;attachmentId:string};
     const result=await db.query(
-      `SELECT file_name,media_type,file_size,sha256,content
+      `SELECT original_name AS file_name,mime_type AS media_type,size_bytes AS file_size,sha256,content
          FROM incident_attachments
         WHERE id=$1 AND incident_id=$2 AND organization_id=$3`,
       [attachmentId,id,organizationId]
@@ -463,7 +463,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     const auth=authFrom(request),organizationId=requireOrganization(auth.organizationId);
     const {id,attachmentId}=request.params as {id:string;attachmentId:string};
     const current=await db.query(
-      `SELECT id,file_name AS "fileName",media_kind AS "mediaKind",file_size AS "fileSize",sha256
+      `SELECT id,original_name AS "fileName",media_kind AS "mediaKind",size_bytes AS "fileSize",sha256
          FROM incident_attachments WHERE id=$1 AND incident_id=$2 AND organization_id=$3`,
       [attachmentId,id,organizationId]
     );
