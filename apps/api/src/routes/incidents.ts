@@ -8,6 +8,7 @@ const prioritySchema = z.enum(["P1","P2","P3","P4","P5"]);
 const sourceSchema = z.enum([
   "phone_199","phone_admin","radio","whatsapp","portal","walk_in","internal","other"
 ]);
+const phoneTypeSchema = z.enum(["LANDLINE","MOBILE"]);
 
 const createIncidentSchema = z.object({
   typeId: z.string().uuid(),
@@ -18,15 +19,33 @@ const createIncidentSchema = z.object({
   riskToLife: z.boolean().default(false),
   callerName: z.string().trim().max(160).optional(),
   callerPhone: z.string().trim().max(40).optional(),
+  callerPhoneType: phoneTypeSchema.optional(),
+  callerPhoneWhatsapp: z.boolean().default(false),
   addressLine: z.string().trim().max(300).optional(),
   neighborhood: z.string().trim().max(140).optional(),
   referencePoint: z.string().trim().max(300).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional()
-}).refine(
-  (data) => (data.latitude === undefined) === (data.longitude === undefined),
-  { message: "Latitude e longitude devem ser informadas em conjunto." }
-);
+}).superRefine((data,ctx)=>{
+  if ((data.latitude === undefined) !== (data.longitude === undefined)) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,message:"Latitude e longitude devem ser informadas em conjunto."});
+  }
+  const digits=(data.callerPhone??"").replace(/\D/g,"");
+  if (!digits) {
+    if (data.callerPhoneWhatsapp) ctx.addIssue({code:z.ZodIssueCode.custom,path:["callerPhoneWhatsapp"],message:"Informe um telefone antes de marcar WhatsApp."});
+    return;
+  }
+  if (!data.callerPhoneType) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,path:["callerPhoneType"],message:"Informe se o telefone é fixo ou celular."});
+    return;
+  }
+  if (data.callerPhoneType==="LANDLINE" && digits.length!==10) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,path:["callerPhone"],message:"Telefone fixo deve conter DDD + 8 dígitos."});
+  }
+  if (data.callerPhoneType==="MOBILE" && digits.length!==11) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,path:["callerPhone"],message:"Celular deve conter DDD + 9 dígitos."});
+  }
+});
 
 const listSchema = z.object({
   status: z.string().trim().max(40).optional(),
@@ -235,22 +254,24 @@ export async function incidentRoutes(app: FastifyInstance) {
         `INSERT INTO incidents (
           organization_id, incident_type_id, year, sequence_no, protocol,
           source, priority, risk_to_life, summary, description,
-          caller_name, caller_phone, address_line, neighborhood, reference_point,
+          caller_name, caller_phone, caller_phone_type, caller_phone_whatsapp,
+          address_line, neighborhood, reference_point,
           latitude, longitude, location, created_by
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
           CASE
-            WHEN $16::double precision IS NULL OR $17::double precision IS NULL THEN NULL
-            ELSE ST_SetSRID(ST_MakePoint($17::double precision,$16::double precision),4326)::geography
+            WHEN $18::double precision IS NULL OR $19::double precision IS NULL THEN NULL
+            ELSE ST_SetSRID(ST_MakePoint($19::double precision,$18::double precision),4326)::geography
           END,
-          $18
+          $20
         )
         RETURNING id`,
         [
           organizationId, input.typeId, year, sequenceNo, protocol,
           input.source, priority, input.riskToLife, input.summary, input.description ?? null,
-          input.callerName ?? null, input.callerPhone ?? null, input.addressLine ?? null,
-          input.neighborhood ?? null, input.referencePoint ?? null,
+          input.callerName ?? null, input.callerPhone ?? null, input.callerPhone ? input.callerPhoneType ?? null : null,
+          input.callerPhone ? input.callerPhoneWhatsapp : false,
+          input.addressLine ?? null, input.neighborhood ?? null, input.referencePoint ?? null,
           input.latitude ?? null, input.longitude ?? null, auth.userId
         ]
       );
@@ -361,6 +382,8 @@ export async function incidentRoutes(app: FastifyInstance) {
     const organizationId=requireOrganization(auth.organizationId);
     const {id}=request.params as {id:string};
     const incident=await db.query(`SELECT i.id,i.protocol,i.status,i.priority,i.risk_to_life AS "riskToLife",i.summary,i.description,i.source,
+      i.caller_name AS "callerName",i.caller_phone AS "callerPhone",i.caller_phone_type AS "callerPhoneType",
+      i.caller_phone_whatsapp AS "callerPhoneWhatsapp",
       i.address_line AS "addressLine",i.neighborhood,i.reference_point AS "referencePoint",i.latitude,i.longitude,
       i.created_at AS "createdAt",i.updated_at AS "updatedAt",t.name AS "typeName",t.group_name AS "typeGroup"
       FROM incidents i JOIN incident_types t ON t.id=i.incident_type_id
