@@ -6,6 +6,8 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import {db} from "./db.js";
+import {authFrom,requireAuth} from "./auth.js";
+import {addRealtimeClient,publishRealtimeEvent,realtimeClientCount} from "./lib/realtime.js";
 import { authRoutes } from "./routes/auth.js";
 import { incidentRoutes } from "./routes/incidents.js";
 import { responseRoutes } from "./routes/response.js";
@@ -27,10 +29,15 @@ app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829
 const release=apiPackage.version;
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
+app.get("/api/v1/realtime",{preHandler:requireAuth},async(request,reply)=>{
+ const auth=authFrom(request);
+ addRealtimeClient(auth.organizationId,reply);
+});
+app.get("/api/v1/realtime/status",{preHandler:requireAuth},async()=>({status:"ok",connections:realtimeClientCount(),transport:"sse"}));
 app.addHook("onSend",async(request,reply,payload)=>{
  const method=request.method.toUpperCase();
  if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return payload;
- const auth=(request as typeof request & {auth?:{userId:string}}).auth;
+ const auth=(request as typeof request & {auth?:{userId:string;organizationId:string|null}}).auth;
  if(!auth?.userId)return payload;
  const requestPath=request.url.split("?")[0]??request.url;
  const routePath=request.routeOptions?.url??requestPath;
@@ -51,6 +58,7 @@ app.addHook("onSend",async(request,reply,payload)=>{
  }catch(error){
   request.log.error({err:error,method,path:routePath},"Falha ao registrar auditoria universal da atividade.");
  }
+ publishRealtimeEvent({organizationId:auth.organizationId,method,path:routePath,entityId:responseEntityId??requestPath});
  return payload;
 });
 app.get("/health",async()=>({status:"ok",service:"sigdec-api",version:release,timestamp:new Date().toISOString()}));
