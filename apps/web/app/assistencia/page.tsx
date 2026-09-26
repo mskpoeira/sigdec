@@ -26,6 +26,13 @@ export default function Page(){
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">SIGDEC · ASSISTÊNCIA HUMANITÁRIA · {SIGDEC_VERSION_LABEL}</span><h1>Assistência Humanitária</h1><p>Famílias, desalojados/desabrigados, estoque, entregas e prevenção de duplicidade.</p></div><Link className="secondaryLink" href="/painel">Painel</Link></header>
   {msg&&<section className="infoCard">{msg}</section>}
+  <section className="dataGrid">
+   <article className="card"><h2>Famílias e pessoas assistidas</h2><p>Desalojados, desabrigados, composição familiar e vínculo com abrigo.</p><a className="secondaryLink" href="#familias">Abrir famílias</a></article>
+   <article className="card"><h2>Abrigos</h2><p>Capacidade, situação operacional, endereço e acolhimento.</p><a className="secondaryLink" href="#abrigos">Abrir abrigos</a></article>
+   <article className="card"><h2>Entregas</h2><p>Kits, cestas, higiene e outros itens com baixa automática de estoque.</p><a className="secondaryLink" href="#entregas">Registrar entrega</a></article>
+   <article className="card"><h2>Estoque humanitário</h2><p>Saldo, entradas, movimentações e cadastro estruturado de itens.</p><a className="secondaryLink" href="#estoque">Abrir estoque</a></article>
+   <article className="card"><h2>Cadastros de itens</h2><p>Códigos, unidades e categorias usados nas entregas e relatórios.</p><Link className="secondaryLink" href="/administracao/cadastros">Gerenciar itens</Link></article>
+  </section>
   <section className="operationsGrid">
    <form id="familias" className="incidentForm compactForm" onSubmit={submitHousehold}><h2>Registrar família</h2><label>Responsável<input name="responsibleName" required/></label><label>Telefone<input name="phone"/></label><label>Condição<select name="condition"><option value="DISPLACED">Desalojada</option><option value="HOMELESS">Desabrigada</option></select></label><label>Abrigo<select name="shelterId"><option value="">Sem abrigo vinculado</option>{shelters.filter(x=>x.status==="OPEN"||x.status==="STANDBY").map(x=><option key={x.id} value={x.id}>{x.name} · {x.status}</option>)}</select></label><div className="formGrid"><label>Adultos<input name="adults" type="number" min="0" defaultValue="0"/></label><label>Crianças<input name="children" type="number" min="0" defaultValue="0"/></label><label>Idosos<input name="elderly" type="number" min="0" defaultValue="0"/></label><label>PCD<input name="pcd" type="number" min="0" defaultValue="0"/></label></div><label>Endereço de origem<input name="addressOrigin"/></label><label>Observações<textarea name="notes"/></label><button className="primaryButton" disabled={busy}>{busy?"Salvando...":"Registrar família"}</button></form>
    <div>
