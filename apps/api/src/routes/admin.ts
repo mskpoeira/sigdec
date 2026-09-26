@@ -1,4 +1,5 @@
 import type {FastifyInstance} from "fastify";
+import apiPackage from "../../package.json" with { type: "json" };
 import {z} from "zod";
 import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
@@ -52,6 +53,41 @@ export async function adminRoutes(app:FastifyInstance){
   const byCode=new Map(stored.rows.map(x=>[x.code,x.enabled]));
   return {items:FEATURES.map(([code,label])=>({code,label,enabled:byCode.get(code)??true}))};
  });
+ app.get("/api/v1/admin/system-health",{preHandler:requirePermission("system.master")},async request=>{
+  const org=organizationId(authFrom(request).organizationId);
+  const started=Date.now();
+  const [dbInfo,migrations,integrations,audit24h]=await Promise.all([
+   db.query(`SELECT now() AS "databaseTime",current_setting('server_version') AS "postgresVersion",PostGIS_Version() AS "postgisVersion"`),
+   db.query(`SELECT count(*)::int AS count,max(filename) AS "lastFilename",max(applied_at) AS "lastAppliedAt" FROM schema_migrations`),
+   db.query(`SELECT count(*) FILTER(WHERE e.active)::int AS active,
+     COALESCE(sum((SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status IN ('PENDING','PROCESSING'))),0)::int AS pending,
+     COALESCE(sum((SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id=e.id AND d.status='FAILED')),0)::int AS failed
+     FROM integration_endpoints e WHERE e.organization_id=$1`,[org]),
+   db.query(`SELECT count(*)::int AS total,count(*) FILTER(WHERE a.action LIKE 'REQUEST_%')::int AS mutations
+     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+     WHERE u.organization_id=$1 AND a.occurred_at>=now()-interval '24 hours'`,[org])
+  ]);
+  const latencyMs=Date.now()-started;
+  return {
+   status:"ok",
+   version:apiPackage.version,
+   environment:process.env.NODE_ENV??"development",
+   serverTime:new Date().toISOString(),
+   uptimeSeconds:Math.floor(process.uptime()),
+   nodeVersion:process.version,
+   database:{
+    status:"ok",
+    latencyMs,
+    time:dbInfo.rows[0]?.databaseTime??null,
+    postgresVersion:dbInfo.rows[0]?.postgresVersion??null,
+    postgisVersion:dbInfo.rows[0]?.postgisVersion??null
+   },
+   migrations:migrations.rows[0],
+   integrations:integrations.rows[0],
+   audit24h:audit24h.rows[0]
+  };
+ });
+
  app.get("/api/v1/admin/features",{preHandler:requirePermission("admin.features")},async request=>{
   const org=organizationId(authFrom(request).organizationId);
   const stored=await db.query<{code:string;enabled:boolean;updated_at:Date}>(
