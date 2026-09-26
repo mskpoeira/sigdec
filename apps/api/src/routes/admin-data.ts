@@ -393,6 +393,9 @@ export async function adminDataRoutes(app:FastifyInstance){
     WHERE c.checkpoint_hash=$1 LIMIT 1`,[hash.toLowerCase()]);
   const row=result.rows[0];
   if(!row)return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+  const attestation=(await db.query(`SELECT key_id AS "keyId",signature,public_key AS "publicKey",
+    public_key_fingerprint AS "publicKeyFingerprint",attested_at AS "attestedAt"
+    FROM audit_checkpoint_attestations WHERE checkpoint_id=$1`,[row.id])).rows[0]??null;
   const expected=sha256(checkpointCanonical({
    organizationId:row.organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
    auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
