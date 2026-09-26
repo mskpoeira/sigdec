@@ -2,7 +2,8 @@
 import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 
@@ -41,23 +42,17 @@ export default function OcorrenciasPage() {
   const [items, setItems] = useState<Incident[]>([]);
   const [message, setMessage] = useState("Carregando ocorrências...");
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/v1/incidents?limit=100`, { credentials: "include" })
-      .then(async (response) => {
-        if (response.status === 401) {
-          window.location.href = "/login";
-          return null;
-        }
-        if (!response.ok) throw new Error();
-        return response.json();
-      })
-      .then((body) => {
-        if (!body) return;
-        setItems(body.items ?? []);
-        setMessage("");
-      })
-      .catch(() => setMessage("Não foi possível carregar as ocorrências."));
-  }, []);
+  const load=useCallback(async()=>{
+    try{
+      const response=await fetch(`${API_URL}/api/v1/incidents?limit=100`,{credentials:"include",cache:"no-store"});
+      if(response.status===401){window.location.href="/login";return}
+      if(!response.ok)throw new Error();
+      const body=await response.json();
+      setItems(body.items??[]);setMessage("");
+    }catch{setMessage("Não foi possível carregar as ocorrências.")}
+  },[]);
+  useEffect(()=>{void load()},[load]);
+  useRealtimeRefresh(load);
 
   return (
     <main className="shell moduleShell">
