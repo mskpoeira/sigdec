@@ -39,6 +39,7 @@ export default function ResilienciaPage(){
    <article className="card"><h2>Ajuda mútua</h2><p className="adminNumber">{data.activeAgreements}</p><p>acordo(s) ativo(s)</p><Link className="secondaryLink" href="/ajuda-mutua">Abrir rede de apoio</Link></article>
    <article className="card"><h2>Operações sazonais</h2><p className="adminNumber">{data.activeSeasonalOperations}</p><p>operação(ões) ativa(s)</p><Link className="secondaryLink" href="/operacoes-sazonais">Abrir operações</Link></article>
    <article className={(data.openExercises>0||data.openImprovements>0)?"warningCard":"card"}><h2>Simulados e AAR/IP</h2><p className="adminNumber">{data.openExercises}</p><p>{data.openImprovements} ação(ões) de melhoria aberta(s)</p><Link className="secondaryLink" href="/simulados">Abrir exercícios</Link></article>
+   <article className="card"><h2>Voluntariado</h2><p>Cadastro, disponibilidade, habilidades, vestimentas e apoio operacional.</p><Link className="secondaryLink" href="/voluntarios">Abrir voluntariado</Link></article>
   </section>}
 
   <section className="infoCard" style={{marginTop:18}}>
