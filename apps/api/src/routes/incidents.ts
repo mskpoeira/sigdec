@@ -398,7 +398,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     const incident=await db.query("SELECT id,protocol FROM incidents WHERE id=$1 AND organization_id=$2",[id,organizationId]);
     if(!incident.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
 
-    const mediaType=String(request.headers["content-type"]??"").split(";")[0].trim().toLowerCase();
+    const mediaType=(String(request.headers["content-type"]??"").split(";")[0]??"").trim().toLowerCase();
     const mediaKind=mediaType.startsWith("image/")?"IMAGE":mediaType.startsWith("video/")?"VIDEO":null;
     if(!mediaKind)return reply.code(415).send({error:"UNSUPPORTED_MEDIA",message:"Envie somente fotos ou vídeos."});
 
