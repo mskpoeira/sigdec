@@ -100,6 +100,21 @@ export default function AuditPage(){
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao criar ponto de verificação.");}
   finally{setCheckpointBusy(false);}
  },[loadCheckpoints]);
+ const downloadCheckpointReceipt=useCallback(async(item:Checkpoint)=>{
+  try{
+   const response=await fetch(`${API}/api/v1/admin/audit/checkpoints/${encodeURIComponent(item.id)}/receipt`,{credentials:"include",cache:"no-store"});
+   if(response.status===401){location.href="/login";return}
+   if(!response.ok){
+    const body=await response.json().catch(()=>({}));
+    throw new Error(body.message??body.error??"Não foi possível gerar o comprovante.");
+   }
+   const blob=await response.blob();
+   const href=URL.createObjectURL(blob);
+   const link=document.createElement("a");
+   link.href=href;link.download=`sigdec-audit-checkpoint-${item.id}.json`;
+   document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href);
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao baixar comprovante.");}
+ },[]);
  useEffect(()=>{void load();void verify();void loadCheckpoints()},[verify,loadCheckpoints]);
 
  function filter(event:FormEvent){event.preventDefault();void load(params)}
@@ -142,8 +157,8 @@ export default function AuditPage(){
 
   {checkpoints.length>0&&<section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Checkpoints criptográficos</h2><p>Âncoras append-only da trilha de auditoria, encadeadas entre si.</p></div></div>
-   <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th></tr></thead>
-    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td></tr>)}</tbody>
+   <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th><th>Comprovante</th></tr></thead>
+    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td><td><div className="headerActions"><button className="secondaryLink" type="button" onClick={()=>void downloadCheckpointReceipt(item)}>JSON</button><Link className="secondaryLink" href={`/integridade/auditoria/${item.checkpointHash}`} target="_blank">Ver público</Link></div></td></tr>)}</tbody>
    </table></div>
   </section>}
 
