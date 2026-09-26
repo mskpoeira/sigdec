@@ -408,8 +408,12 @@ export async function adminDataRoutes(app:FastifyInstance){
   const previousExists=row.previousCheckpointHash?Boolean((await db.query(
    "SELECT 1 FROM audit_integrity_checkpoints WHERE organization_id=$1 AND checkpoint_hash=$2",[row.organizationId,row.previousCheckpointHash]
   )).rows[0]):true;
+  const asymmetricValid=Boolean(attestation&&verifyAuditCheckpoint({
+   ...auditCheckpointSignatureInput(row),signature:attestation.signature,publicKey:attestation.publicKey,
+   publicKeyFingerprint:attestation.publicKeyFingerprint
+  }));
   return {
-   valid:checkpointValid&&rootValid&&previousExists&&audit.invalid===0&&audit.unsealed===0,
+   valid:checkpointValid&&rootValid&&previousExists&&asymmetricValid&&audit.invalid===0&&audit.unsealed===0,
    proofVersion:"sigdec-audit-checkpoint-public/1.0",
    organizationName:row.organizationName,
    createdAt:row.createdAt,
