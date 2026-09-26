@@ -3,6 +3,7 @@ import {createHash} from "node:crypto";
 import {z} from "zod";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
+import {signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
 
 const uuid=z.string().uuid();
 const itemInput=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),
