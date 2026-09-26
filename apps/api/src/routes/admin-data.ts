@@ -32,6 +32,50 @@ const sha256=(value:string)=>createHash("sha256").update(value,"utf8").digest("h
 const checkpointCanonical=(value:{organizationId:string;createdAt:string;matricula:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;integrityVersion:number})=>
  [value.integrityVersion,value.organizationId,value.createdAt,value.matricula,value.auditCount,value.firstAuditId??"",value.lastAuditId??"",value.auditRootHash,value.previousCheckpointHash??""].join("\n");
 
+const auditCheckpointProofSchema=z.object({
+ proofVersion:z.literal("sigdec-audit-checkpoint-proof/1.0"),
+ checkpoint:z.object({
+  organizationId:z.string().uuid(),
+  organizationName:z.string().min(1).max(300),
+  createdAt:z.string().min(1),
+  auditCount:z.number().int().nonnegative(),
+  firstAuditId:z.string().nullable(),
+  lastAuditId:z.string().nullable(),
+  auditRootHash:z.string().regex(/^[a-f0-9]{64}$/i),
+  previousCheckpointHash:z.string().regex(/^[a-f0-9]{64}$/i).nullable(),
+  checkpointHash:z.string().regex(/^[a-f0-9]{64}$/i),
+  integrityVersion:z.number().int().positive()
+ }),
+ ed25519:z.object({
+  algorithm:z.literal("Ed25519"),
+  keyId:z.string().min(1).max(80),
+  signature:z.string().min(40).max(300),
+  publicKey:z.string().min(40).max(4000),
+  publicKeyFingerprint:z.string().regex(/^[a-f0-9]{64}$/i),
+  attestedAt:z.string().min(1)
+ }),
+ publicVerificationUrl:z.string().url().max(2000)
+});
+
+function auditCheckpointSignatureInput(row:any){
+ return {
+  checkpointHash:String(row.checkpointHash),
+  auditRootHash:String(row.auditRootHash),
+  previousCheckpointHash:row.previousCheckpointHash?String(row.previousCheckpointHash):null,
+  organizationId:String(row.organizationId),
+  createdAt:new Date(row.createdAt).toISOString(),
+  auditCount:Number(row.auditCount),
+  firstAuditId:row.firstAuditId?String(row.firstAuditId):null,
+  lastAuditId:row.lastAuditId?String(row.lastAuditId):null,
+  integrityVersion:Number(row.integrityVersion)
+ };
+}
+
+function auditCheckpointPublicUrl(checkpointHash:string){
+ const base=(process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000").replace(/\/$/,"");
+ return `${base}/integridade/auditoria/${checkpointHash}`;
+}
+
 async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
  const hash=createHash("sha256");
  let cursor="0",count=0,firstAuditId:string|null=null,lastAuditId:string|null=null,invalid=0,unsealed=0;
