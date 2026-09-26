@@ -2,6 +2,7 @@
 import { formatDateTimeBR, ubatubaLocalDateTimeToIso } from "../lib/datetime";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
@@ -114,6 +115,7 @@ export default function VistoriasPage() {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar.");
     });
   }, [load]);
+  useRealtimeRefresh(()=>{if(!busy)return load()},true);
 
   function selectIncident(value: string) {
     setIncidentId(value);
