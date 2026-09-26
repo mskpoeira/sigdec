@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
@@ -221,7 +222,7 @@ export default function CampoPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">OPERAÇÃO DE CAMPO · v1.48</span>
+          <span className="eyebrow">OPERAÇÃO DE CAMPO · {SIGDEC_VERSION_LABEL}</span>
           <h1>Mapa operacional</h1>
           <p>Ocorrências, pontos registrados e últimas posições informadas pelas equipes.</p>
         </div>
