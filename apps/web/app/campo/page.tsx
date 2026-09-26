@@ -413,6 +413,8 @@ export default function CampoPage() {
     const criticalSignals=monitoringEvents.filter(item=>item.severity==="EMERGENCY"||item.severity==="WARNING");
     const recentPositions=positions.filter(item=>Date.now()-new Date(item.recordedAt).getTime()<=30*60*1000);
     const activeVehiclePositions=recentPositions.filter(item=>item.vehicleCode);
+    const stalePositions=recentPositions.filter(item=>positionAgeMinutes(item)>=5);
+    const liveTrackingPositions=recentPositions.filter(item=>item.trackingSessionId&&positionAgeMinutes(item)<=2);
     const rainfallReadings=latestReadings.filter(item=>item.stationType==="RAIN_GAUGE"||/rain|chuva|precip|pluv/i.test(item.metric));
     const weatherReadings=latestReadings.filter(item=>item.stationType==="WEATHER"||/temp|humid|umid|wind|vento|press/i.test(item.metric));
     const environmentReadings=[...rainfallReadings,...weatherReadings.filter(item=>!rainfallReadings.some(r=>r.id===item.id))].slice(0,10);
@@ -436,7 +438,7 @@ export default function CampoPage() {
       <section className="situationRoomKpis">
         <article className="monitorKpi danger"><strong>{sitrep?.activeIncidents??incidents.length}</strong><span>Ocorrências ativas</span><small>P1 {priorityCount("P1")} · P2 {priorityCount("P2")}</small></article>
         <article className="monitorKpi warning"><strong>{sitrep?.openMonitoringEvents??monitoringEvents.length}</strong><span>Eventos ambientais</span><small>{criticalSignals.length} crítico(s)/alerta</small></article>
-        <article className="monitorKpi blue"><strong>{activeVehiclePositions.length}/{recentPositions.length}</strong><span>Viaturas / agentes</span><small>posição nos últimos 30 min</small></article>
+        <article className="monitorKpi blue"><strong>{activeVehiclePositions.length}/{recentPositions.length}</strong><span>Viaturas / agentes</span><small>{liveTrackingPositions.length} rastreando · {stalePositions.length} sem atualização &gt; 5 min</small></article>
         <article className="monitorKpi green"><strong>{sitrep?.openShelters??0}</strong><span>Abrigos abertos</span><small>{sitrep?.displacedHouseholds??0} desaloj. · {sitrep?.homelessHouseholds??0} desabrig.</small></article>
         <article className="monitorKpi navy"><strong>{sitrep?.activeOperations??0}</strong><span>Operações SCO</span><small>{sitrep?.activeOperationalPeriods??0} período(s) ativo(s)</small></article>
       </section>
@@ -444,6 +446,10 @@ export default function CampoPage() {
       <section className="situationRoomBody">
         <div className="situationRoomMap">
           <iframe className="mapFrame" src={mapUrl} title="Mapa operacional de Ubatuba em tempo real"/>
+          <svg className="monitorTrailLayer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {trailGroups.map(group=><polyline key={group.key} points={group.points.map(point=>{const p=mapPercent(point.latitude,point.longitude);return p.x+","+p.y}).join(" ")} />)}
+          </svg>
+          {stalePositions.length>0&&<div className="stalePositionWarning">⚠ {stalePositions.length} posição(ões) sem atualização há mais de 5 min</div>}
           {locatedIncidents.map(item=><Link
             href={"/ocorrencias/"+item.id} target="_blank" rel="noreferrer"
             className={"monitorIncidentPin priorityMap-"+item.priority+(item.priority==="P1"?" criticalPulse":"")}
@@ -453,8 +459,8 @@ export default function CampoPage() {
           </Link>)}
           {recentPositions.map(position=><a
             href={"https://www.openstreetmap.org/?mlat="+position.latitude+"&mlon="+position.longitude+"#map=17/"+position.latitude+"/"+position.longitude}
-            target="_blank" rel="noreferrer" className={position.vehicleCode?"monitorTeamPin vehicle":"monitorTeamPin"} style={mapPosition(position.latitude,position.longitude)}
-            key={"monitor-team-"+position.userId} title={(position.vehicleCode?position.vehicleCode+" · ":"")+(position.teamCode??position.displayName)+" · "+position.displayName}>
+            target="_blank" rel="noreferrer" className={(position.vehicleCode?"monitorTeamPin vehicle":"monitorTeamPin")+(positionAgeMinutes(position)>=5?" stale":"")} style={mapPosition(position.latitude,position.longitude)}
+            key={"monitor-team-"+position.userId} title={(position.vehicleCode?position.vehicleCode+" · ":"")+(position.teamCode??position.displayName)+" · "+position.displayName+" · atualização há "+positionAgeMinutes(position)+" min"}>
             <span>{position.vehicleCode?"🚙":"◆"}</span>
           </a>)}
           {monitoringEvents.filter(signal=>Number.isFinite(Number(signal.latitude))&&Number.isFinite(Number(signal.longitude))).map(signal=><a
@@ -475,10 +481,16 @@ export default function CampoPage() {
           <section className="monitorFeedSection">
             <header><div><span className="eyebrow">OCORRÊNCIAS</span><h2>Atendimentos ativos</h2></div><strong>{incidents.length}</strong></header>
             <div className="monitorFeedList">
-              {incidents.slice().sort((a,b)=>a.priority.localeCompare(b.priority)).slice(0,12).map(item=><Link href={"/ocorrencias/"+item.id} target="_blank" className={"monitorFeedItem priority-"+item.priority} key={item.id}>
-                <span className={"priorityBadge priority-"+item.priority}>{item.priority}</span>
-                <span><strong>{item.protocol}</strong><small>{item.summary}</small><small>{[item.neighborhood,item.teamCode?"Equipe "+item.teamCode:null,item.vehicleCode?"Viatura "+item.vehicleCode:null].filter(Boolean).join(" · ")||item.typeName}</small><small>Aberta há {elapsedLabel(item.createdAt)}</small></span>
-              </Link>)}
+              {incidents.slice().sort((a,b)=>a.priority.localeCompare(b.priority)).slice(0,12).map(item=>{
+                const eta=etaForIncident(item);
+                return <Link href={"/ocorrencias/"+item.id} target="_blank" className={"monitorFeedItem priority-"+item.priority} key={item.id}>
+                  <span className={"priorityBadge priority-"+item.priority}>{item.priority}</span>
+                  <span><strong>{item.protocol}</strong><small>{item.summary}</small>
+                    <small>{[item.neighborhood,item.teamCode?"Equipe "+item.teamCode:null,item.vehicleCode?"Viatura "+item.vehicleCode:null].filter(Boolean).join(" · ")||item.typeName}</small>
+                    <small><b className={"monitorStatus status-"+item.status.toLowerCase()}>{statusLabel(item.status)}</b> · aberta há {elapsedLabel(item.createdAt)}{eta?" · "+eta.label+(eta.distanceKm>0?" · "+eta.distanceKm.toFixed(1)+" km":""):""}</small>
+                  </span>
+                </Link>
+              })}
               {incidents.length===0&&<div className="monitorEmpty">Nenhuma ocorrência ativa.</div>}
             </div>
           </section>
@@ -524,7 +536,10 @@ export default function CampoPage() {
           <span className={online?"secondaryLink":"warningCard"}>{online?"Online":"Offline"}</span>
           <label className="secondaryLink">Histórico <select value={historyHours} onChange={(event)=>setHistoryHours(Number(event.target.value))}><option value={6}>6h</option><option value={24}>24h</option><option value={72}>72h</option></select></label>
           <Link className="secondaryLink" href="/painel">Painel</Link>
-          <button className="primaryButton" disabled={sharing} onClick={shareLocation}>
+          {tracking
+            ?<button type="button" className="sigdecButton red" onClick={stopTracking}>⏹ Parar rastreamento</button>
+            :<button type="button" className="sigdecButton green" onClick={()=>void startTracking()}>📡 Iniciar rastreamento</button>}
+          <button className="primaryButton" disabled={sharing||tracking} onClick={shareLocation}>
             {sharing ? "Localizando..." : "Registrar minha posição"}
           </button>
         </div>
@@ -644,7 +659,9 @@ export default function CampoPage() {
               <h2>{position.teamCode ? `Equipe ${position.teamCode}` : position.displayName}</h2>
               <p>{position.teamCode ? position.displayName : "Agente em campo"} · matrícula {position.matricula}</p>
               {position.vehicleCode&&<p><strong>Viatura:</strong> {position.vehicleCode}{position.vehiclePlate?` · ${position.vehiclePlate}`:""}{position.vehicleDescription?` · ${position.vehicleDescription}`:""}</p>}
-              <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)}</p>
+              <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)} · há {positionAgeMinutes(position)} min</p>
+              {position.speedMps!==null&&position.speedMps!==undefined&&<p><strong>Velocidade:</strong> {(position.speedMps*3.6).toLocaleString("pt-BR",{maximumFractionDigits:1})} km/h{position.headingDegrees!==null&&position.headingDegrees!==undefined?` · rumo ${Math.round(position.headingDegrees)}°`:""}</p>}
+              {position.trackingSessionId&&<p><small>📡 Sessão de rastreamento contínuo</small></p>}
               {position.capturedAt&&<p><small>Coletada pelo dispositivo em {formatDateTimeBR(position.capturedAt)}</small></p>}
               <a
                 className="secondaryLink"
