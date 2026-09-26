@@ -270,3 +270,48 @@
     flex:1 1 150px;
   }
 }
+
+
+/* v1.63 — mídia operacional + monitor de ocorrências em tempo real */
+.mediaHiddenInput{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
+.incidentMediaFieldset{display:grid;gap:12px;border:1px solid #d8e3ed;border-radius:14px;padding:18px;background:#fbfdff}
+.incidentMediaFieldset legend{padding:0 8px;font-weight:900;color:var(--sigdec-navy)}
+.mediaHelp{margin:0;color:#5c7289;line-height:1.45}
+.incidentMediaActions{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.mediaQueue{display:grid;gap:8px}
+.mediaQueueItem{display:grid;grid-template-columns:34px 1fr 34px;gap:10px;align-items:center;padding:10px 11px;border:1px solid #dce6f0;border-radius:10px;background:#fff}
+.mediaQueueItem>span{font-size:1.3rem}
+.mediaQueueItem>div{display:grid;gap:2px;min-width:0}
+.mediaQueueItem strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#173f69}
+.mediaQueueItem small{color:#718095}
+.mediaQueueItem>button{width:32px;height:32px;border:0;border-radius:8px;background:#f4e7e7;color:#9b2020;font-size:1.25rem;font-weight:900;cursor:pointer}
+.mediaSectionHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.mediaSectionHeader h2{margin:4px 0 6px}.mediaSectionHeader p{margin:0;color:#607388}
+.incidentMediaGallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.incidentMediaCard{overflow:hidden;border:1px solid #dce6f0;border-radius:14px;background:#fff;box-shadow:0 5px 16px rgba(9,40,74,.07)}
+.incidentMediaPreview{display:block;position:relative;aspect-ratio:16/10;background:#12263a;overflow:hidden}
+.incidentMediaPreview img,.incidentMediaPreview video{width:100%;height:100%;display:block;object-fit:cover;background:#12263a}
+.incidentMediaMeta{display:grid;gap:5px;padding:12px}
+.incidentMediaMeta strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#173f69}
+.incidentMediaMeta small{color:#667f96;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.incidentMediaCardActions{display:flex;gap:8px;margin-top:5px}
+.incidentMediaCardActions>*{flex:1}
+
+.liveBadge{display:inline-flex;align-items:center;margin-left:7px;padding:4px 7px;border-radius:999px;background:#e8f7ed;color:#137b39;font-size:.62rem;font-weight:900;letter-spacing:.04em;vertical-align:2px}
+.mapOpenRealtime{position:absolute;z-index:2;inset:0;border-radius:inherit}
+.monitorMapWrap{position:relative;height:100%;min-height:470px;overflow:hidden;border-radius:12px;background:#dbe5ee}
+.monitorMapWrap .mapFrame{position:absolute;inset:0;width:100%;height:100%;min-height:0}
+.realtimeMonitorMode{width:min(100% - 20px,1700px)}
+.realtimeMonitorMode>.listHeader:first-child{position:sticky;top:0;z-index:40}
+.realtimeMonitorMode .fieldLayout{grid-template-columns:minmax(0,1.9fr) minmax(330px,.6fr)}
+.realtimeMonitorMode .fieldMap{min-height:70vh}
+.realtimeMonitorMode .monitorMapWrap{min-height:66vh}
+.realtimeMonitorMode .fieldMap>.monitorMapWrap+.small{display:block}
+.mapIncidentPin{pointer-events:auto}
+
+@media(max-width:800px){
+ .incidentMediaActions>*{flex:1 1 145px}
+ .incidentMediaGallery{grid-template-columns:1fr}
+ .realtimeMonitorMode .fieldLayout{grid-template-columns:1fr}
+ .realtimeMonitorMode .fieldMap,.realtimeMonitorMode .monitorMapWrap{min-height:62vh}
+}
