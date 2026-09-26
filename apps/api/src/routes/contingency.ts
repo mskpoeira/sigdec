@@ -1,6 +1,6 @@
 import type {FastifyInstance,FastifyRequest} from "fastify";
 import {z} from "zod";
-import {authFrom,requirePermission} from "../auth.js";
+import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
 
 const uuid=z.string().uuid();
@@ -74,6 +74,18 @@ function dateOrNull(value:string|null|undefined){
 }
 
 export async function contingencyRoutes(app:FastifyInstance){
+ app.get("/api/v1/planning/cobrade",{preHandler:requireAuth},async(request,reply)=>{
+  const parsed=z.object({search:z.string().trim().max(120).default("")}).safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY"});
+  const org=organization(request),term=parsed.data.search;
+  const values:unknown[]=[org];let filter="";
+  if(term){values.push("%"+term+"%");filter=" AND (code ILIKE $2 OR name ILIKE $2)";}
+  const result=await db.query(`SELECT code,name,group_name AS "groupName",subgroup_name AS "subgroupName"
+    FROM cobrade_catalog WHERE organization_id=$1 AND active=true${filter}
+    ORDER BY code LIMIT 100`,values);
+  return {items:result.rows};
+ });
+
  app.get("/api/v1/planning/summary",{preHandler:requirePermission("plancon.manage")},async request=>{
   const org=organization(request);
   const result=await db.query(`SELECT
