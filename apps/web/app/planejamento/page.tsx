@@ -58,7 +58,7 @@ export default function PlanejamentoPage(){
  async function draft(item:Case,type:string){await perform(async()=>{await request("/api/v1/anomaly-cases/"+item.id+"/s2id/"+type,{method:"POST",body:"{}"});setMessage("Rascunho "+type+" criado no SIGDEC.");})}
 
  return <main className="shell moduleShell">
-  <header className="listHeader"><div><span className="eyebrow">SIGDEC · PLANEJAMENTO E CONTINGÊNCIA · {SIGDEC_VERSION_LABEL}</span><h1>PLANCON e Situação de Anormalidade</h1><p>Preparação municipal, ativação operacional, SE/ECP, FVD e rascunhos FIDE/DMATE.</p></div><div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
+  <header className="listHeader"><div><span className="eyebrow">SIGDEC · PLANEJAMENTO E CONTINGÊNCIA · {SIGDEC_VERSION_LABEL}</span><h1>PLANCON e Situação de Anormalidade</h1><p>Preparação municipal, ativação operacional, SE/ECP, FVD e rascunhos FIDE/DMATE.</p></div><div className="headerActions"><Link className="primaryButton" href="/planejamento/operacao">Operação PLANCON</Link><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   {message&&<section className="infoCard">{message}</section>}
   <datalist id="cobradeCodes">{cobrade.map(x=><option key={x.code} value={x.code}>{x.name}</option>)}</datalist>
   <section className="dataGrid">
