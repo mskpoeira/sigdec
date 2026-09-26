@@ -336,3 +336,96 @@
  .realtimeStatus{left:10px;bottom:10px;min-height:30px;padding:6px 8px}
  .realtimeStatus strong{font-size:.63rem}
 }
+
+
+/* v1.64 — Sala de Situação / monitor dedicado */
+body:has(.situationRoomMonitor){margin:0;background:#071727;overflow:hidden}
+body:has(.situationRoomMonitor) .globalSearchLauncher,
+body:has(.situationRoomMonitor) .realtimeStatus{display:none!important}
+
+.situationRoomMonitor{
+ width:100vw;height:100vh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;
+ background:#071727;color:#eef7ff;overflow:hidden
+}
+.situationRoomHeader{
+ display:flex;justify-content:space-between;align-items:center;gap:20px;padding:14px 18px;
+ background:linear-gradient(90deg,#0b2944,#0d3a60);border-bottom:1px solid rgba(255,255,255,.13)
+}
+.situationRoomBrand{min-width:0}
+.situationRoomBrand .eyebrow{color:#8fc8f4}
+.situationRoomBrand h1{margin:3px 0 2px;font-size:clamp(1.2rem,2vw,2rem);line-height:1.05}
+.situationRoomBrand p{margin:0;color:#b9cfe1;font-size:.82rem}
+.situationRoomHeaderStatus{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.monitorConnection,.monitorFullscreenButton,.monitorExitButton{
+ min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:9px;
+ padding:8px 11px;border:1px solid rgba(255,255,255,.18);font-weight:900;text-decoration:none
+}
+.monitorConnection.online{background:#103f2a;color:#8df0b3}.monitorConnection.offline{background:#541d24;color:#ffc2c8}
+.monitorConnection.online span{animation:sigdecLivePulse 1.3s ease-in-out infinite}
+.monitorClock{display:grid;line-height:1;text-align:right;padding:0 4px}
+.monitorClock strong{font-size:1.18rem;letter-spacing:.04em}.monitorClock small{margin-top:4px;color:#a9bed0}
+.monitorFullscreenButton{background:#1265c1;color:#fff;cursor:pointer}.monitorExitButton{background:#173f70;color:#fff}
+
+.situationRoomKpis{
+ display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:8px 10px;background:#0b2034;
+ border-bottom:1px solid rgba(255,255,255,.1)
+}
+.monitorKpi{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;padding:8px 11px;border-radius:10px;background:#102d49;border:1px solid rgba(255,255,255,.08)}
+.monitorKpi>strong{grid-row:1/3;font-size:1.85rem;line-height:1;font-weight:950}
+.monitorKpi>span{font-weight:900}.monitorKpi>small{color:#b8ccdd}
+.monitorKpi.danger>strong{color:#ff5661}.monitorKpi.warning>strong{color:#ffae48}.monitorKpi.blue>strong{color:#6bb7ff}.monitorKpi.green>strong{color:#55d88b}.monitorKpi.navy>strong{color:#b3ccff}
+
+.situationRoomBody{min-height:0;display:grid;grid-template-columns:minmax(0,1.8fr) minmax(330px,.62fr);gap:8px;padding:8px}
+.situationRoomMap{position:relative;min-height:0;overflow:hidden;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#d9e3eb}
+.situationRoomMap .mapFrame{position:absolute;inset:0;width:100%;height:100%;border:0}
+.monitorIncidentPin,.monitorTeamPin,.monitorSignalPin{
+ position:absolute;z-index:7;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;
+ text-decoration:none;box-shadow:0 5px 15px rgba(0,0,0,.32)
+}
+.monitorIncidentPin{width:34px;height:34px;border-radius:50%;border:3px solid #fff;font-weight:950;color:#fff}
+.monitorIncidentPin.priorityMap-P1{background:#df2029}.monitorIncidentPin.priorityMap-P2{background:#f26b21}
+.monitorIncidentPin.priorityMap-P3{background:#e7a400}.monitorIncidentPin.priorityMap-P4{background:#169642}
+.monitorIncidentPin.priorityMap-P5{background:#1265c1}
+.monitorTeamPin{width:28px;height:28px;border-radius:8px;background:#1265c1;border:2px solid #fff;color:#fff}
+.monitorSignalPin{width:28px;height:28px;border-radius:50%;background:#7c3fc9;border:2px solid #fff;color:#fff}
+.monitorSignalPin.warning{background:#f26b21}.monitorSignalPin.emergency{background:#df2029}
+.criticalPulse{animation:criticalMapPulse 1.15s ease-in-out infinite}
+@keyframes criticalMapPulse{0%,100%{box-shadow:0 0 0 0 rgba(223,32,41,.55),0 5px 15px rgba(0,0,0,.32)}50%{box-shadow:0 0 0 12px rgba(223,32,41,0),0 5px 15px rgba(0,0,0,.32)}}
+.situationRoomLegend{
+ position:absolute;left:12px;bottom:12px;z-index:9;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+ padding:8px 10px;border-radius:10px;background:rgba(7,23,39,.9);color:#e8f4ff;font-size:.72rem;border:1px solid rgba(255,255,255,.15)
+}
+.situationRoomLegend span{display:inline-flex;gap:5px;align-items:center}
+.situationRoomLegend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.legendIncident{background:#df2029}.legendTeam{background:#1265c1}.legendSignal{background:#7c3fc9}
+.situationRoomLegend strong{color:#7ee5aa}
+
+.situationRoomFeed{min-height:0;display:grid;grid-template-rows:minmax(0,1.12fr) minmax(0,.88fr);gap:8px}
+.monitorFeedSection{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);background:#0d263e;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden}
+.monitorFeedSection>header{display:flex;justify-content:space-between;align-items:center;padding:10px 11px;border-bottom:1px solid rgba(255,255,255,.08)}
+.monitorFeedSection>header h2{margin:2px 0 0;font-size:1rem}.monitorFeedSection>header>strong{font-size:1.6rem}
+.monitorFeedList{overflow:auto;padding:7px;display:grid;gap:6px;align-content:start}
+.monitorFeedItem{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px;padding:8px;border-radius:9px;background:#12304d;border:1px solid rgba(255,255,255,.07);color:#eef7ff;text-decoration:none}
+.monitorFeedItem>span:last-child{display:grid;gap:2px;min-width:0}
+.monitorFeedItem strong{font-size:.78rem}.monitorFeedItem small{font-size:.69rem;color:#bed0df;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.monitorFeedItem.priority-P1{border-left:4px solid #df2029}.monitorFeedItem.priority-P2{border-left:4px solid #f26b21}
+.monitorFeedItem.priority-P3{border-left:4px solid #e7a400}.monitorFeedItem.priority-P4{border-left:4px solid #169642}.monitorFeedItem.priority-P5{border-left:4px solid #1265c1}
+.monitorFeedItem.signal-emergency{border-left:4px solid #df2029}.monitorFeedItem.signal-warning{border-left:4px solid #f26b21}
+.signalIcon{display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#d6b1ff}
+.monitorEmpty{padding:18px;text-align:center;color:#9eb5c8}
+
+.situationRoomFooter{display:flex;justify-content:space-between;gap:20px;padding:7px 12px;background:#081b2d;color:#9fb7c9;font-size:.68rem;border-top:1px solid rgba(255,255,255,.08)}
+
+@media(max-width:1050px){
+ .situationRoomKpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .situationRoomBody{grid-template-columns:minmax(0,1.4fr) minmax(300px,.7fr)}
+}
+@media(max-width:760px){
+ body:has(.situationRoomMonitor){overflow:auto}
+ .situationRoomMonitor{height:auto;min-height:100vh;overflow:visible}
+ .situationRoomHeader{align-items:flex-start;flex-direction:column}.situationRoomHeaderStatus{justify-content:flex-start}
+ .situationRoomKpis{grid-template-columns:1fr 1fr}
+ .situationRoomBody{grid-template-columns:1fr;min-height:auto}
+ .situationRoomMap{min-height:62vh}.situationRoomFeed{grid-template-rows:auto auto}
+ .situationRoomFooter{flex-direction:column;gap:4px}
+}
