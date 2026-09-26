@@ -319,3 +319,22 @@ body::selection{background:#cfe5f8;color:#09284a}
  .moduleShell .headerActions>a,.moduleShell .headerActions>button{flex:1 1 auto}
  .moduleShell .adminTableWrap th,.moduleShell .adminTableWrap td{padding:10px 11px}
 }
+
+
+/* v1.59 — fallback visual para telas legadas que ainda usam apenas .shell */
+.shell:not(.moduleShell):not(.loginShell)> .listHeader,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader{
+ position:relative;overflow:hidden;background:linear-gradient(105deg,var(--sigdec-navy),#075a9e);
+ color:#fff;border:0;border-bottom:4px solid var(--sigdec-orange);box-shadow:0 10px 26px rgba(7,42,77,.14)
+}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader h1,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader h1{color:#fff}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader p,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader p,
+.shell:not(.moduleShell):not(.loginShell)> .listHeader .eyebrow,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader .eyebrow{color:#dcefff}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader .secondaryLink,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader .secondaryLink{background:#fff;color:#0b4e94}
+.shell:not(.moduleShell):not(.loginShell) .card,
+.shell:not(.moduleShell):not(.loginShell) .incidentForm,
+.shell:not(.moduleShell):not(.loginShell) .infoCard{box-shadow:var(--sigdec-shadow);border-color:var(--sigdec-line)}
