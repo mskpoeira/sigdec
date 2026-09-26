@@ -2,6 +2,7 @@
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR } from "../lib/datetime";
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import{FormEvent,useCallback,useEffect,useState}from"react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type Feature={code:string;label:string;enabled:boolean;updatedAt?:string|null};
@@ -11,6 +12,7 @@ export default function AdministrationPage(){
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(`${API}${path}`,{credentials:"include",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";return null}const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??b.error??"Falha na operação.");return b},[]);
  const load=useCallback(async()=>{try{const[f,i]=await Promise.all([request("/api/v1/admin/features"),request("/api/v1/admin/integrations")]);if(f)setFeatures(f.items??[]);if(i)setIntegrations(i.items??[])}catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar administração.")}},[request]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,15000);
  async function toggleFeature(item:Feature){setBusy(true);setMessage("");try{await request(`/api/v1/admin/features/${item.code}`,{method:"PUT",body:JSON.stringify({enabled:!item.enabled})});setMessage(`${item.label}: ${!item.enabled?"ativado":"desativado"}.`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha.")}finally{setBusy(false)}}
  async function addIntegration(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMessage("");setSecretNotice("");const f=new FormData(e.currentTarget);try{const result=await request("/api/v1/admin/integrations",{method:"POST",body:JSON.stringify({name:String(f.get("name")),integrationType:String(f.get("type")),endpointUrl:String(f.get("url")||"")||undefined,active:true,config:{description:String(f.get("description")||""),eventPrefix:String(f.get("eventPrefix")||""),includeData:f.get("includeData")==="on"}})});e.currentTarget.reset();setMessage("Integração cadastrada.");if(result?.webhookSecret)setSecretNotice(`Segredo do webhook (salve agora): ${result.webhookSecret}`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha.")}finally{setBusy(false)}}
  async function toggleIntegration(item:Integration){setBusy(true);try{await request(`/api/v1/admin/integrations/${item.id}/status`,{method:"PATCH",body:JSON.stringify({active:!item.active})});await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha.")}finally{setBusy(false)}}
