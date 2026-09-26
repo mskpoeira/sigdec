@@ -70,9 +70,12 @@ export async function adminRoutes(app:FastifyInstance){
      count(*) FILTER(WHERE a.integrity_hash IS NULL)::int AS unsealed,
      count(*) FILTER(WHERE a.integrity_hash IS NOT NULL AND a.integrity_hash<>sigdec_calculate_audit_hash(a))::int AS invalid
      FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1`,[org]),
-   db.query(`SELECT count(*)::int AS total,max(created_at) AS "latestAt",
-     (array_agg(checkpoint_hash ORDER BY created_at DESC,id DESC))[1] AS "latestHash"
-     FROM audit_integrity_checkpoints WHERE organization_id=$1`,[org])
+   db.query(`SELECT count(*)::int AS total,max(c.created_at) AS "latestAt",
+     (array_agg(c.checkpoint_hash ORDER BY c.created_at DESC,c.id DESC))[1] AS "latestHash",
+     count(a.checkpoint_id)::int AS "ed25519Attested",
+     (array_agg(a.public_key_fingerprint ORDER BY c.created_at DESC,c.id DESC) FILTER(WHERE a.public_key_fingerprint IS NOT NULL))[1] AS "latestFingerprint"
+     FROM audit_integrity_checkpoints c LEFT JOIN audit_checkpoint_attestations a ON a.checkpoint_id=c.id
+     WHERE c.organization_id=$1`,[org])
   ]);
   const latencyMs=Date.now()-started;
   return {
