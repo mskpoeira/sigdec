@@ -435,6 +435,41 @@ export async function adminDataRoutes(app:FastifyInstance){
   };
  });
 
+ app.post("/api/v1/public/verify-audit-checkpoint-proof",async(request,reply)=>{
+  const parsed=auditCheckpointProofSchema.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_PROOF",details:parsed.error.flatten()});
+  const proof=parsed.data;
+  const asymmetricValid=verifyAuditCheckpoint({
+   checkpointHash:proof.checkpoint.checkpointHash,
+   auditRootHash:proof.checkpoint.auditRootHash,
+   previousCheckpointHash:proof.checkpoint.previousCheckpointHash,
+   organizationId:proof.checkpoint.organizationId,
+   createdAt:proof.checkpoint.createdAt,
+   auditCount:proof.checkpoint.auditCount,
+   firstAuditId:proof.checkpoint.firstAuditId,
+   lastAuditId:proof.checkpoint.lastAuditId,
+   integrityVersion:proof.checkpoint.integrityVersion,
+   signature:proof.ed25519.signature,
+   publicKey:proof.ed25519.publicKey,
+   publicKeyFingerprint:proof.ed25519.publicKeyFingerprint
+  });
+  const registered=await db.query(`SELECT c.id::text AS id,
+    EXISTS(SELECT 1 FROM audit_checkpoint_attestations a WHERE a.checkpoint_id=c.id AND a.signature=$2 AND a.public_key_fingerprint=$3) AS "attestationRegistered"
+    FROM audit_integrity_checkpoints c WHERE c.checkpoint_hash=$1 LIMIT 1`,[
+   proof.checkpoint.checkpointHash,proof.ed25519.signature,proof.ed25519.publicKeyFingerprint
+  ]);
+  return {
+   valid:asymmetricValid,
+   asymmetricValid,
+   registeredCheckpoint:Boolean(registered.rows[0]),
+   registeredAttestation:Boolean(registered.rows[0]?.attestationRegistered),
+   proofVersion:proof.proofVersion,
+   publicKeyFingerprint:proof.ed25519.publicKeyFingerprint,
+   checkpointHash:proof.checkpoint.checkpointHash,
+   checkedAt:new Date().toISOString()
+  };
+ });
+
  app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("system.master")},async request=>{
   const o=org(request);
   const [overview,roles]=await Promise.all([
