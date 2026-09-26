@@ -400,6 +400,75 @@ export async function adminDataRoutes(app:FastifyInstance){
   return receipt;
  });
 
+ app.get("/api/v1/admin/audit/checkpoints/:id/dossier",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const auth=authFrom(request),organizationId=org(request),{id}=request.params as {id:string};
+  if(!/^\d+$/.test(id))return reply.code(400).send({error:"INVALID_CHECKPOINT_ID"});
+  const result=await db.query(`SELECT c.id::text AS id,c.organization_id::text AS "organizationId",o.name AS "organizationName",
+    c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",u.display_name AS "createdByName",
+    c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+    c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+    c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c
+    JOIN organizations o ON o.id=c.organization_id
+    JOIN users u ON u.id=c.created_by
+    WHERE c.id=$1 AND c.organization_id=$2`,[id,organizationId]);
+  const row=result.rows[0];
+  if(!row)return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+
+  const [attestation,audit,summary]=await Promise.all([
+   ensureAuditCheckpointAttestation(organizationId,id,auth.userId),
+   computeAuditRoot(organizationId,row.lastAuditId),
+   db.query(`SELECT action,entity_type AS "entityType",count(*)::int AS total,
+     min(occurred_at) AS "firstAt",max(occurred_at) AS "lastAt"
+     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+     WHERE u.organization_id=$1 AND a.id BETWEEN $2 AND $3
+     GROUP BY action,entity_type ORDER BY total DESC,action,entity_type`,
+    [organizationId,row.firstAuditId??"0",row.lastAuditId??"0"])
+  ]);
+
+  const checkpointValid=sha256(checkpointCanonical({
+   organizationId:row.organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+   auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+   auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+  }))===row.checkpointHash;
+  const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
+   audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
+  const asymmetricValid=verifyAuditCheckpoint({
+   ...auditCheckpointSignatureInput(row),signature:attestation.signature,publicKey:attestation.publicKey,
+   publicKeyFingerprint:attestation.publicKeyFingerprint
+  });
+  const publicVerificationUrl=auditCheckpointPublicUrl(row.checkpointHash);
+
+  const dossier={
+   dossierVersion:"sigdec-audit-integrity-dossier/1.0",
+   generatedAt:new Date().toISOString(),
+   generatedBy:{userId:auth.userId},
+   organization:{id:row.organizationId,name:row.organizationName},
+   checkpoint:{
+    id:row.id,createdAt:new Date(row.createdAt).toISOString(),createdByMatricula:row.createdByMatricula,
+    createdByName:row.createdByName,auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,checkpointHash:row.checkpointHash,
+    integrityVersion:Number(row.integrityVersion),algorithm:row.algorithm
+   },
+   ed25519:{
+    algorithm:"Ed25519",keyId:attestation.keyId,signature:attestation.signature,publicKey:attestation.publicKey,
+    publicKeyFingerprint:attestation.publicKeyFingerprint,attestedAt:new Date(attestation.attestedAt).toISOString(),
+    attestedByMatricula:attestation.attestedByMatricula
+   },
+   verification:{
+    checkpointValid,rootValid,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed,
+    valid:checkpointValid&&rootValid&&asymmetricValid&&audit.invalid===0&&audit.unsealed===0
+   },
+   activitySummary:summary.rows,
+   publicVerificationUrl,
+   qrCodeUrl:`${(process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000").replace(/\/$/,"")}/api/v1/public/audit-checkpoint/${row.checkpointHash}/qr.svg`
+  };
+  reply.header("content-type","application/json; charset=utf-8")
+   .header("content-disposition",`attachment; filename="sigdec-audit-dossier-${row.id}.json"`)
+   .header("cache-control","no-store");
+  return dossier;
+ });
+
  app.get("/api/v1/public/audit-checkpoint/:hash",async(request,reply)=>{
   const {hash}=request.params as {hash:string};
   if(!/^[a-f0-9]{64}$/i.test(hash))return reply.code(400).send({error:"INVALID_CHECKPOINT_HASH"});
