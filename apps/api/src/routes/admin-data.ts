@@ -73,29 +73,29 @@ export async function adminDataRoutes(app:FastifyInstance){
   const parsed=auditQuery.safeParse(request.query??{});
   if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY",details:parsed.error.flatten()});
   const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
-  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
-  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE ${values.length}`);}
-  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE ${values.length}`);}
-  if(q.from){values.push(q.from);where.push(`a.occurred_at >= ${values.length}`);}
-  if(q.to){values.push(q.to);where.push(`a.occurred_at <= ${values.length}`);}
+  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE $${values.length}`);}
+  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE $${values.length}`);}
+  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE $${values.length}`);}
+  if(q.from){values.push(q.from);where.push(`a.occurred_at >= $${values.length}`);}
+  if(q.to){values.push(q.to);where.push(`a.occurred_at <= $${values.length}`);}
   values.push(q.limit);
   const result=await db.query(`SELECT a.id,a.occurred_at AS "occurredAt",a.actor_matricula AS "actorMatricula",
     u.display_name AS "actorName",a.action,a.entity_type AS "entityType",a.entity_id AS "entityId",
     a.ip::text AS ip,a.metadata
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
     WHERE ${where.join(" AND ")}
-    ORDER BY a.occurred_at DESC,a.id DESC LIMIT ${values.length}`,values);
+    ORDER BY a.occurred_at DESC,a.id DESC LIMIT $${values.length}`,values);
   return {items:result.rows,filters:q};
  });
  app.get("/api/v1/admin/audit.csv",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
   const parsed=auditQuery.safeParse(request.query??{});
   if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY"});
   const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
-  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
-  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE ${values.length}`);}
-  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE ${values.length}`);}
-  if(q.from){values.push(q.from);where.push(`a.occurred_at >= ${values.length}`);}
-  if(q.to){values.push(q.to);where.push(`a.occurred_at <= ${values.length}`);}
+  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE $${values.length}`);}
+  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE $${values.length}`);}
+  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE $${values.length}`);}
+  if(q.from){values.push(q.from);where.push(`a.occurred_at >= $${values.length}`);}
+  if(q.to){values.push(q.to);where.push(`a.occurred_at <= $${values.length}`);}
   const result=await db.query(`SELECT to_char(a.occurred_at AT TIME ZONE 'America/Sao_Paulo','DD/MM/YYYY HH24:MI:SS') AS horario,
     a.actor_matricula AS matricula,u.display_name AS servidor,a.action,a.entity_type,a.entity_id,a.ip::text AS ip,a.metadata::text AS metadata
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
