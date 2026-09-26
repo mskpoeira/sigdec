@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateBR } from "../lib/datetime";
 
 import Link from "next/link";
@@ -51,7 +52,7 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
    <div className="opsSideBrand"><span className="opsCompactMark" aria-hidden="true">DC</span><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios" title="Usuários"><span className="opsMenuIcon">♙</span><span className="opsMenuLabel">Usuários</span></Link>}{(user.permissions.includes("audit.read")||user.permissions.includes("system.master"))&&<Link href="/administracao/auditoria" title="Registro de Atividades"><span className="opsMenuIcon">☷</span><span className="opsMenuLabel">Auditoria</span></Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios" title="Usuários"><span className="opsMenuIcon">♙</span><span className="opsMenuLabel">Usuários</span></Link>}{(user.permissions.includes("audit.read")||user.permissions.includes("system.master"))&&<Link href="/administracao/auditoria" title="Registro de Atividades"><span className="opsMenuIcon">☷</span><span className="opsMenuLabel">Auditoria</span></Link>}{user.permissions.includes("system.master")&&<Link href="/administracao/saude" title="Saúde do Sistema"><span className="opsMenuIcon">◉</span><span className="opsMenuLabel">Saúde do Sistema</span></Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
    <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div></div>
    <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
   </aside>
@@ -71,7 +72,7 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Mapa de Situação</h2><Link href="/campo">Ver mapa completo</Link></header><div className="situationMap googleSituationMap"><iframe src={googleSatelliteUrl} title="Mapa de Situação — imagem de satélite do Google Maps" loading="lazy" referrerPolicy="no-referrer-when-downgrade"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">Google Maps · Satélite</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
-   <footer className="opsFooter"><span>SIGDEC v1.49.0 · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
+   <footer className="opsFooter"><span>SIGDEC {SIGDEC_VERSION_LABEL} · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
 }

@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -27,7 +28,7 @@ export default function Page(){
   e.currentTarget.reset();setMessage("Voluntário cadastrado.");await load();
  }
  return <main className="shell moduleShell">
-  <header className="listHeader"><div><span className="eyebrow">SIGDEC · VOLUNTARIADO · v1.41</span><h1>Voluntariado</h1><p>Cadastro operacional, competências, disponibilidade, vestuário e EPI para mobilização.</p></div><div className="headerActions"><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
+  <header className="listHeader"><div><span className="eyebrow">SIGDEC · VOLUNTARIADO · {SIGDEC_VERSION_LABEL}</span><h1>Voluntariado</h1><p>Cadastro operacional, competências, disponibilidade, vestuário e EPI para mobilização.</p></div><div className="headerActions"><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   <section className="operationsGrid">
    <form className="incidentForm compactForm" onSubmit={submit}>
     <h2>Cadastrar voluntário</h2>

@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 
 import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
@@ -71,7 +72,7 @@ export default function AuditPage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">SIGDEC · AUDITORIA · v1.49</span><h1>Registro de Atividades</h1>
+   <div><span className="eyebrow">SIGDEC · AUDITORIA · {SIGDEC_VERSION_LABEL}</span><h1>Registro de Atividades</h1>
     <p>Trilha cronológica das inclusões, alterações e exclusões, com horário oficial e matrícula do servidor.</p></div>
    <div className="headerActions"><Link className="secondaryLink" href="/administracao">Administração</Link><Link className="secondaryLink" href="/painel">Painel</Link></div>
   </header>

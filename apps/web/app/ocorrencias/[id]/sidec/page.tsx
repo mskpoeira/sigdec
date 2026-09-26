@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../../../lib/release";
 import { formatDateTimeBR } from "../../../lib/datetime";
 
 import Link from "next/link";
@@ -343,7 +344,7 @@ export default function SidecExportsPage(){
 
  return <main className="shell moduleShell">
   <header className="listHeader">
-   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP · v1.28</span><h1>Pacotes da ocorrência</h1><p>Checklist por COBRADE, manifesto íntegro, ZIP documental, mapeamento e revisões para lançamento controlado no sistema estadual.</p></div>
+   <div><span className="eyebrow">INTEROPERABILIDADE · SIDEC/SP · {SIGDEC_VERSION_LABEL}</span><h1>Pacotes da ocorrência</h1><p>Checklist por COBRADE, manifesto íntegro, ZIP documental, mapeamento e revisões para lançamento controlado no sistema estadual.</p></div>
    <div className="headerActions"><button className="primaryButton" disabled={busy||!readiness?.ready} type="button" onClick={()=>void generate()}>Gerar nova revisão</button><Link className="secondaryLink" href={`/ocorrencias/${incidentId}`}>Voltar à ocorrência</Link></div>
   </header>
 
