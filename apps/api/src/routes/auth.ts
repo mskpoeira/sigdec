@@ -89,7 +89,7 @@ async function issueMfaChallenge(input:{userId:string;purpose:"SETUP"|"LOGIN";ip
 
 async function loadMfaChallenge(token:string,purpose:"SETUP"|"LOGIN"){
  const result=await db.query(`SELECT c.id,c.user_id AS "userId",c.purpose,c.attempts,c.expires_at AS "expiresAt",
-   u.organization_id AS "organizationId",u.matricula,u.display_name AS "displayName",u.email,
+   u.organization_id AS "organizationId",u.matricula,u.display_name AS "displayName",u.war_name AS "warName",u.email,
    u.job_title AS "jobTitle",u.department,u.must_change_password AS "mustChangePassword",
    u.mfa_required AS "mfaRequired",u.mfa_enabled AS "mfaEnabled",
    m.secret_ciphertext AS "secretCiphertext",m.verified_at AS "mfaVerifiedAt"
@@ -122,7 +122,7 @@ async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recov
  });
  return {
   user:{
-   id:input.challenge.userId,matricula:input.challenge.matricula,displayName:input.challenge.displayName,
+   id:input.challenge.userId,matricula:input.challenge.matricula,displayName:input.challenge.displayName,warName:input.challenge.warName??null,
    email:input.challenge.email,jobTitle:input.challenge.jobTitle,department:input.challenge.department,
    roles:access.roles,permissions:access.permissions,mustChangePassword:Boolean(input.challenge.mustChangePassword),
    mfaRequired:true,mfaEnabled:true
@@ -362,6 +362,7 @@ export async function authRoutes(app: FastifyInstance) {
       organization_id: string | null;
       matricula: string;
       display_name: string;
+      war_name: string | null;
       email: string | null;
       job_title: string | null;
       department: string | null;
@@ -500,6 +501,7 @@ export async function authRoutes(app: FastifyInstance) {
         id: user.id,
         matricula: user.matricula,
         displayName: user.display_name,
+        warName: user.war_name,
         email: user.email,
         jobTitle: user.job_title,
         department: user.department,
@@ -673,7 +675,7 @@ export async function authRoutes(app: FastifyInstance) {
       mfa_required: boolean;
       mfa_enabled: boolean;
     }>(
-      `SELECT id, matricula, display_name, email, job_title, department,
+      `SELECT id, matricula, display_name, war_name, email, job_title, department,
               must_change_password, mfa_required, mfa_enabled
          FROM users
         WHERE id = $1 AND active = true`,
