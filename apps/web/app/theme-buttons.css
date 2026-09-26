@@ -1,0 +1,158 @@
+/* SIGDEC — padrão cromático e de botões institucional (v1.61)
+   Mantém o dashboard como referência visual e propaga o mesmo padrão aos módulos. */
+
+:root{
+  --sigdec-red:#e7242c;
+  --sigdec-blue:#1265c1;
+  --sigdec-green:#169642;
+  --sigdec-orange:#f26b21;
+  --sigdec-purple:#793fd1;
+  --sigdec-navy:#173f70;
+  --sigdec-gray:#dbe2ea;
+  --sigdec-gray-text:#0b2853;
+  --sigdec-button-radius:10px;
+  --sigdec-button-shadow:0 4px 12px rgba(9,40,74,.12);
+  --sigdec-button-shadow-hover:0 8px 18px rgba(9,40,74,.18);
+}
+
+/* Dashboard: garante cor da Operação PLANCON e uniformidade entre todos os atalhos. */
+.opsQuick .quick{
+  min-height:118px;
+  border:1px solid rgba(0,0,0,.04);
+  border-radius:var(--sigdec-button-radius);
+  box-shadow:var(--sigdec-button-shadow);
+  transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;
+}
+.opsQuick .quick:hover{
+  transform:translateY(-2px);
+  box-shadow:var(--sigdec-button-shadow-hover);
+  filter:brightness(1.03);
+}
+.opsQuick .quick.red{background:var(--sigdec-red)}
+.opsQuick .quick.blue{background:var(--sigdec-blue)}
+.opsQuick .quick.green{background:var(--sigdec-green)}
+.opsQuick .quick.orange{background:var(--sigdec-orange)}
+.opsQuick .quick.purple{background:var(--sigdec-purple)}
+.opsQuick .quick.navy{background:var(--sigdec-navy)}
+.opsQuick .quick.gray{background:var(--sigdec-gray);color:var(--sigdec-gray-text)!important}
+
+/* Botões comuns em todas as páginas/módulos. */
+.primaryButton,
+.primaryLink,
+.moduleShell .primaryButton,
+.moduleShell .primaryLink,
+.moduleShell button[type="submit"],
+.shell:not(.loginShell) button[type="submit"]{
+  min-height:42px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid transparent;
+  border-radius:var(--sigdec-button-radius);
+  padding:11px 16px;
+  background:var(--sigdec-blue);
+  color:#fff;
+  font-weight:800;
+  text-decoration:none;
+  box-shadow:var(--sigdec-button-shadow);
+  cursor:pointer;
+  transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;
+}
+.primaryButton:hover,
+.primaryLink:hover,
+.moduleShell .primaryButton:hover,
+.moduleShell .primaryLink:hover,
+.moduleShell button[type="submit"]:hover,
+.shell:not(.loginShell) button[type="submit"]:hover{
+  transform:translateY(-1px);
+  box-shadow:var(--sigdec-button-shadow-hover);
+  filter:brightness(1.04);
+}
+
+.secondaryButton,
+.secondaryLink,
+.moduleShell .secondaryButton,
+.moduleShell .secondaryLink{
+  min-height:42px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid #c8d5e2;
+  border-radius:var(--sigdec-button-radius);
+  padding:11px 16px;
+  background:var(--sigdec-gray);
+  color:var(--sigdec-gray-text);
+  font-weight:800;
+  text-decoration:none;
+  box-shadow:0 3px 9px rgba(9,40,74,.08);
+  cursor:pointer;
+  transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;
+}
+.secondaryButton:hover,
+.secondaryLink:hover,
+.moduleShell .secondaryButton:hover,
+.moduleShell .secondaryLink:hover{
+  transform:translateY(-1px);
+  box-shadow:var(--sigdec-button-shadow);
+  filter:brightness(.99);
+}
+
+/* Classes utilitárias para ações semânticas — mesma paleta do painel. */
+.sigdecButton{
+  min-height:42px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid transparent;
+  border-radius:var(--sigdec-button-radius);
+  padding:11px 16px;
+  color:#fff!important;
+  font-weight:800;
+  text-decoration:none!important;
+  box-shadow:var(--sigdec-button-shadow);
+  cursor:pointer;
+  transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;
+}
+.sigdecButton:hover{transform:translateY(-1px);box-shadow:var(--sigdec-button-shadow-hover);filter:brightness(1.04)}
+.sigdecButton.red,.dangerButton,.deleteButton{background:var(--sigdec-red)!important;color:#fff!important}
+.sigdecButton.blue{background:var(--sigdec-blue)!important}
+.sigdecButton.green,.successButton{background:var(--sigdec-green)!important;color:#fff!important}
+.sigdecButton.orange,.warningButton{background:var(--sigdec-orange)!important;color:#fff!important}
+.sigdecButton.purple{background:var(--sigdec-purple)!important}
+.sigdecButton.navy{background:var(--sigdec-navy)!important}
+.sigdecButton.gray{background:var(--sigdec-gray)!important;color:var(--sigdec-gray-text)!important;border-color:#c8d5e2}
+
+/* Cards clicáveis passam a ter o mesmo acabamento dos atalhos, sem forçar cor de fundo. */
+.moduleShell .cardLink,
+.shell:not(.loginShell) .cardLink{
+  border-radius:var(--sigdec-button-radius);
+  transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease;
+}
+.moduleShell .cardLink:hover,
+.shell:not(.loginShell) .cardLink:hover{
+  transform:translateY(-2px);
+  box-shadow:var(--sigdec-button-shadow);
+}
+
+/* Estados de acessibilidade e consistência. */
+.primaryButton:focus-visible,.primaryLink:focus-visible,
+.secondaryButton:focus-visible,.secondaryLink:focus-visible,
+.sigdecButton:focus-visible,.quick:focus-visible{
+  outline:3px solid rgba(242,107,33,.35);
+  outline-offset:3px;
+}
+.primaryButton:disabled,.secondaryButton:disabled,.sigdecButton:disabled,
+.moduleShell button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none!important;
+  box-shadow:none!important;
+}
+
+@media(max-width:800px){
+  .opsQuick .quick{min-height:104px}
+  .primaryButton,.primaryLink,.secondaryButton,.secondaryLink,.sigdecButton{min-height:44px}
+}
