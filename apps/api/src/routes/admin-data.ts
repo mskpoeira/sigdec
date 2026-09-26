@@ -81,7 +81,8 @@ export async function adminDataRoutes(app:FastifyInstance){
   values.push(q.limit);
   const result=await db.query(`SELECT a.id,a.occurred_at AS "occurredAt",a.actor_matricula AS "actorMatricula",
     u.display_name AS "actorName",a.action,a.entity_type AS "entityType",a.entity_id AS "entityId",
-    a.ip::text AS ip,a.metadata
+    a.ip::text AS ip,a.metadata,a.integrity_version AS "integrityVersion",a.integrity_hash AS "integrityHash",
+    (a.integrity_hash=sigdec_calculate_audit_hash(a)) AS "integrityValid"
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
     WHERE ${where.join(" AND ")}
     ORDER BY a.occurred_at DESC,a.id DESC LIMIT $${values.length}`,values);
@@ -97,15 +98,36 @@ export async function adminDataRoutes(app:FastifyInstance){
   if(q.from){values.push(q.from);where.push(`a.occurred_at >= $${values.length}`);}
   if(q.to){values.push(q.to);where.push(`a.occurred_at <= $${values.length}`);}
   const result=await db.query(`SELECT to_char(a.occurred_at AT TIME ZONE 'America/Sao_Paulo','DD/MM/YYYY HH24:MI:SS') AS horario,
-    a.actor_matricula AS matricula,u.display_name AS servidor,a.action,a.entity_type,a.entity_id,a.ip::text AS ip,a.metadata::text AS metadata
+    a.actor_matricula AS matricula,u.display_name AS servidor,a.action,a.entity_type,a.entity_id,a.ip::text AS ip,
+    a.metadata::text AS metadata,a.integrity_version,a.integrity_hash,
+    CASE WHEN a.integrity_hash=sigdec_calculate_audit_hash(a) THEN 'OK' ELSE 'FALHA' END AS integridade
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
     WHERE ${where.join(" AND ")}
     ORDER BY a.occurred_at DESC,a.id DESC LIMIT 500`,values);
-  const header=["Horário","Matrícula","Servidor","Ação","Tipo","Registro","IP","Metadados"];
-  const rows=result.rows.map(x=>[x.horario,x.matricula,x.servidor,x.action,x.entity_type,x.entity_id,x.ip,x.metadata]);
+  const header=["Horário","Matrícula","Servidor","Ação","Tipo","Registro","IP","Metadados","Versão de integridade","SHA-256","Integridade"];
+  const rows=result.rows.map(x=>[x.horario,x.matricula,x.servidor,x.action,x.entity_type,x.entity_id,x.ip,x.metadata,x.integrity_version,x.integrity_hash,x.integridade]);
   reply.header("content-type","text/csv; charset=utf-8").header("content-disposition",'attachment; filename="sigdec-auditoria.csv"')
    .header("cache-control","no-store");
   return "\uFEFF"+[header,...rows].map(row=>row.map(csvCell).join(";")).join("\r\n")+"\r\n";
+ });
+
+ app.get("/api/v1/admin/audit/verify",{preHandler:requirePermission("audit.read")},async request=>{
+  const organizationId=org(request);
+  const result=await db.query(`SELECT count(*)::int AS total,
+    count(*) FILTER(WHERE a.integrity_hash IS NULL)::int AS unsealed,
+    count(*) FILTER(WHERE a.integrity_hash IS NOT NULL AND a.integrity_hash<>sigdec_calculate_audit_hash(a))::int AS invalid,
+    min(a.occurred_at) AS "oldestAt",max(a.occurred_at) AS "newestAt"
+    FROM audit_logs a
+    JOIN users u ON u.id=a.actor_user_id
+    WHERE u.organization_id=$1`,[organizationId]);
+  const row=result.rows[0]??{total:0,unsealed:0,invalid:0,oldestAt:null,newestAt:null};
+  return {
+   status:Number(row.unsealed)===0&&Number(row.invalid)===0?"verified":"failed",
+   algorithm:"SHA-256",
+   appendOnly:true,
+   checkedAt:new Date().toISOString(),
+   ...row
+  };
  });
 
  app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("system.master")},async request=>{
