@@ -4,7 +4,7 @@ import {z} from "zod";
 import QRCode from "qrcode";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
-import {signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
+import {currentAuditEd25519KeyId,signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
 
 const uuid=z.string().uuid();
 const itemInput=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),
@@ -231,6 +231,22 @@ export async function adminDataRoutes(app:FastifyInstance){
    appendOnly:true,
    checkedAt:new Date().toISOString(),
    ...row
+  };
+ });
+
+ app.get("/api/v1/admin/audit/keys",{preHandler:requirePermission("audit.read")},async request=>{
+  const organizationId=org(request),currentKeyId=currentAuditEd25519KeyId();
+  const result=await db.query(`SELECT a.key_id AS "keyId",a.public_key_fingerprint AS "publicKeyFingerprint",
+    min(a.attested_at) AS "firstSeenAt",max(a.attested_at) AS "lastSeenAt",count(*)::int AS "attestationCount",
+    (array_agg(a.attested_by_matricula ORDER BY a.attested_at ASC))[1] AS "activatedByMatricula",
+    (array_agg(a.attested_by_matricula ORDER BY a.attested_at DESC))[1] AS "lastUsedByMatricula"
+    FROM audit_checkpoint_attestations a
+    WHERE a.organization_id=$1
+    GROUP BY a.key_id,a.public_key_fingerprint
+    ORDER BY max(a.attested_at) DESC`,[organizationId]);
+  return {
+   currentKeyId,
+   items:result.rows.map(row=>({...row,status:row.keyId===currentKeyId?"ACTIVE":"HISTORICAL"}))
   };
  });
 
