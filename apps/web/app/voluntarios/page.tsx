@@ -1,6 +1,7 @@
 "use client";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
@@ -13,6 +14,7 @@ export default function Page(){
  const [items,setItems]=useState<Volunteer[]>([]),[status,setStatus]=useState("Carregando..."),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
  const load=useCallback(()=>fetch(`${API}/api/v1/volunteers`,{credentials:"include"}).then(async r=>{if(r.status===401){location.href="/login";return null}if(!r.ok)throw new Error();return r.json()}).then(b=>{if(b){setItems(b.items??[]);setStatus("")}}).catch(()=>setStatus("Não foi possível carregar os dados.")),[]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true);
  async function submit(e:FormEvent<HTMLFormElement>){
   e.preventDefault();setBusy(true);setMessage("");const f=new FormData(e.currentTarget);
   const csv=(name:string)=>String(f.get(name)||"").split(",").map(x=>x.trim()).filter(Boolean);
