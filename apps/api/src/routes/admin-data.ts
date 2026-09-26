@@ -344,8 +344,15 @@ export async function adminDataRoutes(app:FastifyInstance){
   const audit=await computeAuditRoot(organizationId,row.lastAuditId);
   const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
    audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
+  const attestation=await ensureAuditCheckpointAttestation(organizationId,id,auth.userId);
+  const asymmetricValid=verifyAuditCheckpoint({
+   ...auditCheckpointSignatureInput(row),
+   signature:attestation.signature,
+   publicKey:attestation.publicKey,
+   publicKeyFingerprint:attestation.publicKeyFingerprint
+  });
   const receipt={
-   proofVersion:"sigdec-audit-checkpoint/1.0",
+   proofVersion:"sigdec-audit-checkpoint-proof/1.0",
    generatedAt:new Date().toISOString(),
    checkpoint:{
     id:row.id,organizationId:row.organizationId,organizationName:row.organizationName,
