@@ -13,6 +13,7 @@ import { fieldRoutes } from "./routes/field.js";
 import { commandRoutes } from "./routes/command.js";
 import { planningRoutes } from "./routes/planning.js";
 import { contingencyRoutes } from "./routes/contingency.js";
+import { resilienceRoutes } from "./routes/resilience.js";
 import { documentRoutes } from "./routes/documents.js";
 import { adminRoutes } from "./routes/admin.js";
 import {adminUserRoutes} from "./routes/admin-users.js";
@@ -60,7 +61,7 @@ app.get("/api/v1/ready",async(_request,reply)=>{
   return reply.code(503).send({status:"unavailable",service:"sigdec-api",version:release});
  }
 });
-await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
+await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
 app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release,modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","sidec-continuidade","inteligencia-assistiva","auditoria"]}));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
 const sidecDeadlineMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_DEADLINE_EVALUATION_MINUTES??60)));
