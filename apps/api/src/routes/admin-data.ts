@@ -1,4 +1,5 @@
 import type {FastifyInstance,FastifyRequest} from "fastify";
+import {createHash} from "node:crypto";
 import {z} from "zod";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
@@ -25,6 +26,35 @@ const csvCell=(value:unknown)=>{
  const safe=/^[=+\-@]/.test(plain)?"'"+plain:plain;
  return '"'+safe.replace(/"/g,'""')+'"';
 };
+
+const sha256=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
+const checkpointCanonical=(value:{organizationId:string;createdAt:string;matricula:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;integrityVersion:number})=>
+ [value.integrityVersion,value.organizationId,value.createdAt,value.matricula,value.auditCount,value.firstAuditId??"",value.lastAuditId??"",value.auditRootHash,value.previousCheckpointHash??""].join("\n");
+
+async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
+ const hash=createHash("sha256");
+ let cursor="0",count=0,firstAuditId:string|null=null,lastAuditId:string|null=null,invalid=0,unsealed=0;
+ while(true){
+  const values:unknown[]=[organizationId,cursor];
+  let upper="";
+  if(maxAuditId){values.push(maxAuditId);upper=` AND a.id<=${values.length}`;}
+  const result=await db.query(`SELECT a.id::text AS id,a.integrity_hash AS "integrityHash",
+    (a.integrity_hash IS NOT NULL AND a.integrity_hash=sigdec_calculate_audit_hash(a)) AS "integrityValid"
+    FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+    WHERE u.organization_id=$1 AND a.id>$2${upper}
+    ORDER BY a.id ASC LIMIT 5000`,values);
+  if(!result.rows.length)break;
+  for(const row of result.rows){
+   if(firstAuditId===null)firstAuditId=row.id;
+   lastAuditId=row.id;cursor=row.id;count+=1;
+   if(!row.integrityHash)unsealed+=1;
+   else if(!row.integrityValid)invalid+=1;
+   hash.update(`${row.id}:${row.integrityHash??"UNSEALED"}\n`,"utf8");
+  }
+  if(result.rows.length<5000)break;
+ }
+ return {auditRootHash:hash.digest("hex"),auditCount:count,firstAuditId,lastAuditId,invalid,unsealed};
+}
 
 export async function adminDataRoutes(app:FastifyInstance){
  app.post("/api/v1/admin/items",{preHandler:requirePermission("system.master")},async(request,reply)=>{
@@ -127,6 +157,94 @@ export async function adminDataRoutes(app:FastifyInstance){
    appendOnly:true,
    checkedAt:new Date().toISOString(),
    ...row
+  };
+ });
+
+ app.get("/api/v1/admin/audit/checkpoints",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const parsed=z.object({limit:z.coerce.number().int().min(1).max(100).default(20)}).safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY"});
+  const result=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
+    u.display_name AS "createdByName",c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",
+    c.last_audit_id::text AS "lastAuditId",c.audit_root_hash AS "auditRootHash",
+    c.previous_checkpoint_hash AS "previousCheckpointHash",c.checkpoint_hash AS "checkpointHash",
+    c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c JOIN users u ON u.id=c.created_by
+    WHERE c.organization_id=$1 ORDER BY c.created_at DESC,c.id DESC LIMIT $2`,[org(request),parsed.data.limit]);
+  const items=result.rows.map(row=>{
+   const expected=sha256(checkpointCanonical({
+    organizationId:org(request),createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+    auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+   }));
+   return {...row,checkpointValid:expected===row.checkpointHash};
+  });
+  return {items};
+ });
+
+ app.post("/api/v1/admin/audit/checkpoints",{preHandler:requirePermission("audit.checkpoint")},async(request,reply)=>{
+  const auth=authFrom(request),organizationId=org(request);
+  const integrity=await computeAuditRoot(organizationId);
+  if(integrity.invalid>0||integrity.unsealed>0){
+   return reply.code(409).send({error:"AUDIT_INTEGRITY_FAILED",message:"A trilha possui registros inválidos ou sem selo.",...integrity});
+  }
+  const [actor,clock,previous]=await Promise.all([
+   db.query("SELECT matricula FROM users WHERE id=$1 AND organization_id=$2",[auth.userId,organizationId]),
+   db.query("SELECT now() AS now"),
+   db.query("SELECT checkpoint_hash FROM audit_integrity_checkpoints WHERE organization_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1",[organizationId])
+  ]);
+  if(!actor.rows[0])return reply.code(409).send({error:"ACTOR_NOT_FOUND"});
+  const createdAt=new Date(clock.rows[0].now).toISOString(),matricula=String(actor.rows[0].matricula);
+  const previousCheckpointHash=previous.rows[0]?.checkpoint_hash??null,integrityVersion=1;
+  const checkpointHash=sha256(checkpointCanonical({
+   organizationId,createdAt,matricula,auditCount:integrity.auditCount,firstAuditId:integrity.firstAuditId,
+   lastAuditId:integrity.lastAuditId,auditRootHash:integrity.auditRootHash,previousCheckpointHash,integrityVersion
+  }));
+  try{
+   const result=await db.query(`INSERT INTO audit_integrity_checkpoints(
+     organization_id,created_at,created_by,created_by_matricula,audit_count,first_audit_id,last_audit_id,
+     audit_root_hash,previous_checkpoint_hash,checkpoint_hash,integrity_version,algorithm,metadata
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'SHA-256',$12::jsonb)
+    RETURNING id::text AS id,created_at AS "createdAt",created_by_matricula AS "createdByMatricula",
+     audit_count::int AS "auditCount",first_audit_id::text AS "firstAuditId",last_audit_id::text AS "lastAuditId",
+     audit_root_hash AS "auditRootHash",previous_checkpoint_hash AS "previousCheckpointHash",
+     checkpoint_hash AS "checkpointHash",integrity_version AS "integrityVersion",algorithm`,[
+    organizationId,createdAt,auth.userId,matricula,integrity.auditCount,integrity.firstAuditId,integrity.lastAuditId,
+    integrity.auditRootHash,previousCheckpointHash,checkpointHash,integrityVersion,JSON.stringify({invalid:0,unsealed:0})
+   ]);
+   return reply.code(201).send({...result.rows[0],checkpointValid:true});
+  }catch(error:any){
+   if(error?.code==="23505")return reply.code(409).send({error:"CHECKPOINT_CONFLICT",message:"Outro checkpoint foi criado simultaneamente. Atualize a tela e tente novamente."});
+   throw error;
+  }
+ });
+
+ app.get("/api/v1/admin/audit/checkpoints/verify",{preHandler:requirePermission("audit.read")},async request=>{
+  const organizationId=org(request);
+  const all=await db.query(`SELECT c.id::text AS id,c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",
+    c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+    c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+    c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c WHERE c.organization_id=$1 ORDER BY c.created_at ASC,c.id ASC`,[organizationId]);
+  if(!all.rows.length)return {status:"none",message:"Nenhum ponto de verificação criado.",checkedAt:new Date().toISOString(),checkpointCount:0};
+  let previousHash:string|null=null,chainInvalid=0,contentInvalid=0;
+  for(const row of all.rows){
+   const expected=sha256(checkpointCanonical({
+    organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+    auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+   }));
+   if(expected!==row.checkpointHash)contentInvalid+=1;
+   if((row.previousCheckpointHash??null)!==previousHash)chainInvalid+=1;
+   previousHash=row.checkpointHash;
+  }
+  const latest=all.rows[all.rows.length-1],audit=await computeAuditRoot(organizationId,latest.lastAuditId);
+  const rootValid=audit.auditRootHash===latest.auditRootHash&&audit.auditCount===Number(latest.auditCount)&&
+   audit.firstAuditId===latest.firstAuditId&&audit.lastAuditId===latest.lastAuditId;
+  const status=rootValid&&audit.invalid===0&&audit.unsealed===0&&chainInvalid===0&&contentInvalid===0?"verified":"failed";
+  return {
+   status,checkedAt:new Date().toISOString(),checkpointCount:all.rows.length,chainInvalid,contentInvalid,
+   latest:{...latest,checkpointValid:contentInvalid===0&&chainInvalid===0},
+   audit:{...audit,rootValid}
   };
  });
 
