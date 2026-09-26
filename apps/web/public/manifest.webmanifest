@@ -1,13 +1,13 @@
 {
-  "name": "SIGDEC — Sistema Integrado de Gestão da Defesa Civil",
-  "short_name": "SIGDEC",
+  "name": "SIGDEC — Defesa Civil de Ubatuba",
+  "short_name": "SIGDEC Ubatuba",
   "start_url": "/painel",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f5f7fa",
-  "theme_color": "#173f69",
+  "background_color": "#f4f8fb",
+  "theme_color": "#082f55",
   "lang": "pt-BR",
-  "description": "Operação integrada da Defesa Civil de Ubatuba",
+  "description": "Sistema Integrado de Gestão da Defesa Civil de Ubatuba",
   "icons": [
     {
       "src": "/sigdec-icon.svg",
