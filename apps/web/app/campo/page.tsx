@@ -244,6 +244,93 @@ export default function CampoPage() {
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
   }
 
+  if(monitorMode){
+    const priorityCount=(priority:string)=>incidents.filter(item=>item.priority===priority).length;
+    const criticalSignals=monitoringEvents.filter(item=>item.severity==="EMERGENCY"||item.severity==="WARNING");
+    const recentPositions=positions.filter(item=>Date.now()-new Date(item.recordedAt).getTime()<=30*60*1000);
+    return <main className="situationRoomMonitor">
+      <header className="situationRoomHeader">
+        <div className="situationRoomBrand">
+          <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA · {SIGDEC_VERSION_LABEL}</span>
+          <h1>Sala de Situação — Monitor em Tempo Real</h1>
+          <p>Ocorrências, equipes, alertas ambientais e resposta operacional em uma única tela.</p>
+        </div>
+        <div className="situationRoomHeaderStatus">
+          <div className={online?"monitorConnection online":"monitorConnection offline"}><span>●</span>{online?"ONLINE":"OFFLINE"}</div>
+          <div className="monitorClock"><strong>{clock.toLocaleTimeString("pt-BR")}</strong><small>{clock.toLocaleDateString("pt-BR")}</small></div>
+          <button type="button" className="monitorFullscreenButton" onClick={()=>void toggleFullscreen()}>⛶ Tela cheia</button>
+          <Link className="monitorExitButton" href="/campo">Sair do monitor</Link>
+        </div>
+      </header>
+
+      <section className="situationRoomKpis">
+        <article className="monitorKpi danger"><strong>{sitrep?.activeIncidents??incidents.length}</strong><span>Ocorrências ativas</span><small>P1 {priorityCount("P1")} · P2 {priorityCount("P2")}</small></article>
+        <article className="monitorKpi warning"><strong>{sitrep?.openMonitoringEvents??monitoringEvents.length}</strong><span>Eventos ambientais</span><small>{criticalSignals.length} crítico(s)/alerta</small></article>
+        <article className="monitorKpi blue"><strong>{recentPositions.length}</strong><span>Equipes/agentes recentes</span><small>posição nos últimos 30 min</small></article>
+        <article className="monitorKpi green"><strong>{sitrep?.openShelters??0}</strong><span>Abrigos abertos</span><small>{sitrep?.displacedHouseholds??0} desaloj. · {sitrep?.homelessHouseholds??0} desabrig.</small></article>
+        <article className="monitorKpi navy"><strong>{sitrep?.activeOperations??0}</strong><span>Operações SCO</span><small>{sitrep?.activeOperationalPeriods??0} período(s) ativo(s)</small></article>
+      </section>
+
+      <section className="situationRoomBody">
+        <div className="situationRoomMap">
+          <iframe className="mapFrame" src={mapUrl} title="Mapa operacional de Ubatuba em tempo real"/>
+          {locatedIncidents.map(item=><Link
+            href={"/ocorrencias/"+item.id} target="_blank" rel="noreferrer"
+            className={"monitorIncidentPin priorityMap-"+item.priority+(item.priority==="P1"?" criticalPulse":"")}
+            style={mapPosition(item.latitude,item.longitude)} key={"monitor-inc-"+item.id}
+            title={item.protocol+" · "+item.summary+" · "+(item.neighborhood??"localização georreferenciada")}>
+            <span>{item.priority}</span>
+          </Link>)}
+          {recentPositions.map(position=><a
+            href={"https://www.openstreetmap.org/?mlat="+position.latitude+"&mlon="+position.longitude+"#map=17/"+position.latitude+"/"+position.longitude}
+            target="_blank" rel="noreferrer" className="monitorTeamPin" style={mapPosition(position.latitude,position.longitude)}
+            key={"monitor-team-"+position.userId} title={(position.teamCode??position.displayName)+" · "+position.displayName}>
+            <span>◆</span>
+          </a>)}
+          {monitoringEvents.filter(signal=>Number.isFinite(Number(signal.latitude))&&Number.isFinite(Number(signal.longitude))).map(signal=><a
+            href={"https://www.openstreetmap.org/?mlat="+signal.latitude+"&mlon="+signal.longitude+"#map=17/"+signal.latitude+"/"+signal.longitude}
+            target="_blank" rel="noreferrer"
+            className={"monitorSignalPin "+(signal.severity==="EMERGENCY"?"emergency":signal.severity==="WARNING"?"warning":"")}
+            style={mapPosition(signal.latitude,signal.longitude)} key={"monitor-signal-"+signal.id}
+            title={signal.stationCode+" · "+signal.title}><span>▲</span></a>)}
+          <div className="situationRoomLegend">
+            <span><i className="legendIncident"/> Ocorrência</span>
+            <span><i className="legendTeam"/> Equipe/agente</span>
+            <span><i className="legendSignal"/> Monitoramento</span>
+            <strong>Atualização contínua</strong>
+          </div>
+        </div>
+
+        <aside className="situationRoomFeed">
+          <section className="monitorFeedSection">
+            <header><div><span className="eyebrow">OCORRÊNCIAS</span><h2>Atendimentos ativos</h2></div><strong>{incidents.length}</strong></header>
+            <div className="monitorFeedList">
+              {incidents.slice().sort((a,b)=>a.priority.localeCompare(b.priority)).slice(0,12).map(item=><Link href={"/ocorrencias/"+item.id} target="_blank" className={"monitorFeedItem priority-"+item.priority} key={item.id}>
+                <span className={"priorityBadge priority-"+item.priority}>{item.priority}</span>
+                <span><strong>{item.protocol}</strong><small>{item.summary}</small><small>{[item.neighborhood,item.teamCode?"Equipe "+item.teamCode:null].filter(Boolean).join(" · ")||item.typeName}</small></span>
+              </Link>)}
+              {incidents.length===0&&<div className="monitorEmpty">Nenhuma ocorrência ativa.</div>}
+            </div>
+          </section>
+
+          <section className="monitorFeedSection">
+            <header><div><span className="eyebrow">ALERTAS</span><h2>Monitoramento ambiental</h2></div><strong>{monitoringEvents.length}</strong></header>
+            <div className="monitorFeedList compact">
+              {monitoringEvents.slice(0,8).map(signal=><article className={"monitorFeedItem signal-"+signal.severity.toLowerCase()} key={signal.id}>
+                <span className="signalIcon">▲</span><span><strong>{signal.stationCode} · {signal.stationName}</strong><small>{signal.title}</small><small>{signal.metric}: {signal.observedValue} {signal.unit}</small></span>
+              </article>)}
+              {monitoringEvents.length===0&&<div className="monitorEmpty">Nenhum evento ambiental em aberto.</div>}
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      <footer className="situationRoomFooter">
+        <span><strong>Legenda:</strong> P1 crítica · P2 muito alta · P3 alta · P4 normal · P5 programada</span>
+        <span>Mapa © OpenStreetMap · Dados operacionais SIGDEC</span>
+      </footer>
+    </main>;
+  }
   return (
     <main className={`shell moduleShell ${monitorMode?"realtimeMonitorMode":""}`}>
       <header className="listHeader">
