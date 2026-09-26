@@ -10,13 +10,14 @@ type Plan={id:string;code:string;version:number;title:string;cobradeCode:string|
 type Case={id:string;cobradeCode:string;situationType:string;status:string;summary:string;decreeNumber:string|null;decreeDate:string|null;externalProtocol:string|null;deadlineAt:string|null;createdAt:string;incidentProtocol:string|null;createdByMatricula:string;createdByName:string;fvdCount:number;pendingFvd:number};
 type Fvd={id:string;code:string;requirementType:string;title:string;status:string;dueAt:string|null;responseNotes:string|null;createdAt:string;createdByMatricula:string};
 type Summary={planCount:number;activePlans:number;openAnomalyCases:number;pendingFvd:number;activations24h:number};
+type Cobrade={code:string;name:string;groupName:string|null;subgroupName:string|null};
 const levels=["NORMAL","OBSERVATION","ATTENTION","ALERT","EMERGENCY"];
 const levelName:Record<string,string>={NORMAL:"Normal",OBSERVATION:"Observação",ATTENTION:"Atenção",ALERT:"Alerta",EMERGENCY:"Emergência"};
 const statusName:Record<string,string>={DRAFT:"Rascunho",APPROVED:"Aprovado",ACTIVE:"Ativo",ARCHIVED:"Arquivado",DOCUMENTING:"Em documentação",SUBMITTED:"Enviado",UNDER_REVIEW:"Em análise",RECOGNIZED:"Reconhecido",REJECTED:"Rejeitado",CLOSED:"Encerrado"};
 const rows=(v:string)=>v.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
 
 export default function PlanejamentoPage(){
- const[summary,setSummary]=useState<Summary|null>(null),[plans,setPlans]=useState<Plan[]>([]),[cases,setCases]=useState<Case[]>([]),[fvd,setFvd]=useState<Fvd[]>([]);
+ const[summary,setSummary]=useState<Summary|null>(null),[plans,setPlans]=useState<Plan[]>([]),[cases,setCases]=useState<Case[]>([]),[fvd,setFvd]=useState<Fvd[]>([]),[cobrade,setCobrade]=useState<Cobrade[]>([]);
  const[selectedCase,setSelectedCase]=useState(""),[activationPlan,setActivationPlan]=useState(""),[level,setLevel]=useState("OBSERVATION"),[reason,setReason]=useState("");
  const[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
 
@@ -28,8 +29,8 @@ export default function PlanejamentoPage(){
 
  const load=useCallback(async()=>{
   try{
-   const data=await Promise.all([request("/api/v1/planning/summary"),request("/api/v1/plancon"),request("/api/v1/anomaly-cases")]);
-   setSummary(data[0]);setPlans(data[1].items??[]);setCases(data[2].items??[]);
+   const data=await Promise.all([request("/api/v1/planning/summary"),request("/api/v1/plancon"),request("/api/v1/anomaly-cases"),request("/api/v1/planning/cobrade")]);
+   setSummary(data[0]);setPlans(data[1].items??[]);setCases(data[2].items??[]);setCobrade(data[3].items??[]);
    const candidate=(data[1].items??[]).find((x:Plan)=>x.status==="APPROVED"||x.status==="ACTIVE");
    if(!activationPlan&&candidate)setActivationPlan(candidate.id);setMessage("");
   }catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar.");}
@@ -59,6 +60,7 @@ export default function PlanejamentoPage(){
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">SIGDEC · PLANEJAMENTO E CONTINGÊNCIA · {SIGDEC_VERSION_LABEL}</span><h1>PLANCON e Situação de Anormalidade</h1><p>Preparação municipal, ativação operacional, SE/ECP, FVD e rascunhos FIDE/DMATE.</p></div><div className="headerActions"><Link className="secondaryLink" href="/gestao">Centro de Gestão</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   {message&&<section className="infoCard">{message}</section>}
+  <datalist id="cobradeCodes">{cobrade.map(x=><option key={x.code} value={x.code}>{x.name}</option>)}</datalist>
   <section className="dataGrid">
    <article className="card"><h2>PLANCON</h2><p className="adminNumber">{summary?.planCount??"—"}</p><p>{summary?.activePlans??0} ativo(s)</p></article>
    <article className="card"><h2>Ativações · 24h</h2><p className="adminNumber">{summary?.activations24h??"—"}</p></article>
@@ -67,7 +69,7 @@ export default function PlanejamentoPage(){
   </section>
 
   <section style={{marginTop:20}}><h2>Novo PLANCON Municipal</h2><form className="incidentForm compactForm" onSubmit={createPlan}>
-   <div className="formGrid"><label>Código<input name="code" required placeholder="PLANCON-CHUVAS"/></label><label>Título<input name="title" required/></label><label>COBRADE<input name="cobradeCode"/></label><label>Escopo<input name="scope"/></label></div>
+   <div className="formGrid"><label>Código<input name="code" required placeholder="PLANCON-CHUVAS"/></label><label>Título<input name="title" required/></label><label>COBRADE<input name="cobradeCode" list="cobradeCodes"/></label><label>Escopo<input name="scope"/></label></div>
    <label>Objetivo<textarea name="objective" rows={2}/></label><div className="formGrid"><label>Gatilhos · um por linha<textarea name="triggers" rows={4}/></label><label>Plano de chamada · um por linha<textarea name="callPlan" rows={4}/></label><label>Recursos · um por linha<textarea name="resources" rows={4}/></label><label>Abrigos e rotas · um por linha<textarea name="shelters" rows={4}/></label></div>
    <label>Procedimentos operacionais · um por linha<textarea name="procedures" rows={5}/></label><label>Observações<textarea name="notes" rows={2}/></label><button className="primaryButton" disabled={busy}>Criar PLANCON</button>
   </form></section>
@@ -81,7 +83,7 @@ export default function PlanejamentoPage(){
   <section style={{marginTop:20}}><h2>Alterar nível operacional</h2><form className="incidentForm compactForm" onSubmit={activate}><div className="formGrid"><label>PLANCON<select value={activationPlan} onChange={e=>setActivationPlan(e.target.value)}>{plans.filter(p=>p.status==="APPROVED"||p.status==="ACTIVE").map(p=><option key={p.id} value={p.id}>{p.code} · v{p.version}</option>)}</select></label><label>Novo nível<select value={level} onChange={e=>setLevel(e.target.value)}>{levels.map(x=><option key={x} value={x}>{levelName[x]}</option>)}</select></label></div><label>Motivo<textarea required rows={3} value={reason} onChange={e=>setReason(e.target.value)}/></label><button className="primaryButton" disabled={busy||!activationPlan||reason.trim().length<3}>Registrar nível</button></form></section>
 
   <section style={{marginTop:26}}><h2>Situação de Anormalidade · SE/ECP</h2><p>Controle municipal. O registro interno não representa reconhecimento automático por órgão estadual ou federal.</p><form className="incidentForm compactForm" onSubmit={createCase}>
-   <div className="formGrid"><label>Protocolo da ocorrência<input name="incidentProtocol" placeholder="Opcional"/></label><label>COBRADE<input name="cobradeCode" required/></label><label>Tipo<select name="situationType"><option value="SE">Situação de Emergência — SE</option><option value="ECP">Estado de Calamidade Pública — ECP</option></select></label><label>Nº decreto<input name="decreeNumber"/></label><label>Data decreto<input name="decreeDate" type="date"/></label><label>Protocolo externo<input name="externalProtocol"/></label><label>Prazo acompanhamento<input name="deadlineAt" type="datetime-local"/></label></div>
+   <div className="formGrid"><label>Protocolo da ocorrência<input name="incidentProtocol" placeholder="Opcional"/></label><label>COBRADE<input name="cobradeCode" list="cobradeCodes" required/></label><label>Tipo<select name="situationType"><option value="SE">Situação de Emergência — SE</option><option value="ECP">Estado de Calamidade Pública — ECP</option></select></label><label>Nº decreto<input name="decreeNumber"/></label><label>Data decreto<input name="decreeDate" type="date"/></label><label>Protocolo externo<input name="externalProtocol"/></label><label>Prazo acompanhamento<input name="deadlineAt" type="datetime-local"/></label></div>
    <label>Resumo<textarea name="summary" required rows={4}/></label><label>Observações<textarea name="notes" rows={2}/></label><button className="primaryButton" disabled={busy}>Criar processo SE/ECP</button>
   </form></section>
 
