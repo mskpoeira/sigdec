@@ -18,6 +18,7 @@ type Health={
  migrations:{count:number;lastFilename:string|null;lastAppliedAt:string|null};
  integrations:{active:number;pending:number;failed:number};
  audit24h:{total:number;mutations:number};
+ auditIntegrity:{total:number;unsealed:number;invalid:number;appendOnly:boolean;algorithm:string};
 };
 
 const duration=(seconds:number)=>{
@@ -61,6 +62,7 @@ export default function SystemHealthPage(){
     <article className="card"><h2>Migrações</h2><p className="adminNumber">{data.migrations.count}</p><p>{data.migrations.lastFilename??"Nenhuma migração"}</p><p>{data.migrations.lastAppliedAt?formatDateTimeBR(data.migrations.lastAppliedAt):"—"}</p></article>
     <article className={data.integrations.failed>0?"warningCard":"card"}><h2>Integrações</h2><p className="adminNumber">{data.integrations.active}</p><p>{data.integrations.pending} pendente(s) · {data.integrations.failed} falha(s)</p></article>
     <article className="card"><h2>Auditoria · 24h</h2><p className="adminNumber">{data.audit24h.total}</p><p>{data.audit24h.mutations} alteração(ões) autenticada(s)</p><Link className="secondaryLink" href="/administracao/auditoria">Abrir Registro de Atividades</Link></article>
+    <article className={data.auditIntegrity.invalid===0&&data.auditIntegrity.unsealed===0?"card":"warningCard"}><h2>Integridade da auditoria</h2><p className="adminNumber">{data.auditIntegrity.invalid===0&&data.auditIntegrity.unsealed===0?"OK":"ATENÇÃO"}</p><p>{data.auditIntegrity.total} registro(s) · {data.auditIntegrity.invalid} inválido(s) · {data.auditIntegrity.unsealed} sem selo</p><p>{data.auditIntegrity.algorithm} · {data.auditIntegrity.appendOnly?"append-only":"alterável"}</p></article>
    </section>
    <section className="infoCard" style={{marginTop:18}}>
     <strong>Leitura do ambiente</strong>
