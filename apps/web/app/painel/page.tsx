@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
-type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
+type SessionUser={id:string;matricula:string;displayName:string;warName:string|null;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
 
 const nav: Array<[string,string,Route,string?]> =[
 ["⌂","Início","/painel"],
@@ -73,9 +73,9 @@ export default function PainelPage(){
  const handleSideInteraction=(event:MouseEvent<HTMLElement>)=>{if(typeof window==="undefined"||!window.matchMedia("(max-width: 800px)").matches||mobileMenuOpen)return;const target=event.target as HTMLElement;if(!target.closest("a,button"))return;event.preventDefault();event.stopPropagation();setMobileMenuOpen(true)};
  return <main className="opsDashboard">
   <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
-   <div className="opsSideBrand"><span className="opsCompactMark" aria-hidden="true">DC</span><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
+   <div className="opsSideBrand"><img className="opsMunicipalCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão da Prefeitura Municipal de Ubatuba"/><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
    <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master")||user.permissions.includes("audit.read"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
-   <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div></div>
+   <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small className="opsWarName">{user.warName?.trim()||user.displayName.split(" ")[0]}</small><small className="opsUserRole">{user.roles?.[0]||"Usuário"}</small></div></div>
    <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
   </aside>
   <section className="opsMain">
@@ -86,7 +86,7 @@ export default function PainelPage(){
     <div className="dcBadge"><img className="dcOfficialLogo" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2019/02/logo_defesa_civil_edit-770x416.jpg" alt="Logo da Defesa Civil de Ubatuba"/></div>
    </header>
    <div className="opsContent">
-    <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{formatDateBR(new Date())}<br/><small>Ubatuba - SP</small></div></div>
+    <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.warName?.trim()||user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{formatDateBR(new Date())}<br/><small>Ubatuba - SP</small></div></div>
     <div className="opsStats">{stats.map(([v,l,d,c])=><article className={"stat "+c} key={l}><b>{v}</b><span>{l}</span><small>{d}</small></article>)}</div>
     <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
