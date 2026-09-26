@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
 
@@ -37,6 +38,7 @@ export default function CapacitacaoPage(){
  },[request]);
 
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar."))},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true);
  const personOptions=useMemo(()=>people.filter(x=>x.type===personType),[people,personType]);
  const expiring=records.filter(x=>x.status!=="VALID").length;
 
