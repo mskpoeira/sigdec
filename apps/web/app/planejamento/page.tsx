@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 import {formatDateTimeBR,ubatubaLocalDateTimeToIso} from "../lib/datetime";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
@@ -36,6 +37,7 @@ export default function PlanejamentoPage(){
   }catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar.");}
  },[request,activationPlan]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true);
 
  async function perform(fn:()=>Promise<void>){setBusy(true);setMessage("");try{await fn();await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha na operação.")}finally{setBusy(false)}}
 
