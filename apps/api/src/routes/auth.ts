@@ -374,7 +374,7 @@ export async function authRoutes(app: FastifyInstance) {
       mfa_required: boolean;
       mfa_enabled: boolean;
     }>(
-      `SELECT id, organization_id, matricula, display_name, email, job_title, department,
+      `SELECT id, organization_id, matricula, display_name, war_name, email, job_title, department,
               password_hash, active, failed_login_attempts, locked_until, must_change_password,
               mfa_required, mfa_enabled
          FROM users
@@ -470,7 +470,7 @@ export async function authRoutes(app: FastifyInstance) {
           challengeToken:challenge.token,expiresAt:challenge.expiresAt
         },
         user:{
-          id:user.id,matricula:user.matricula,displayName:user.display_name,
+          id:user.id,matricula:user.matricula,displayName:user.display_name,warName:user.war_name,
           mustChangePassword:user.must_change_password,mfaRequired:true,mfaEnabled:user.mfa_enabled
         }
       });
@@ -668,6 +668,7 @@ export async function authRoutes(app: FastifyInstance) {
       id: string;
       matricula: string;
       display_name: string;
+      war_name: string | null;
       email: string | null;
       job_title: string | null;
       department: string | null;
@@ -693,6 +694,7 @@ export async function authRoutes(app: FastifyInstance) {
         id: user.id,
         matricula: user.matricula,
         displayName: user.display_name,
+        warName: user.war_name,
         email: user.email,
         jobTitle: user.job_title,
         department: user.department,
