@@ -3,7 +3,7 @@ import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 const PENDING_LOCATION_KEY="sigdec.field.pending-location.v1";
@@ -21,6 +21,11 @@ type FieldIncident = {
   longitude: number | null;
   typeName: string;
   teamCode: string | null;
+  vehicleCode: string | null;
+  vehicleDescription: string | null;
+  vehiclePlate: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type MonitoringSignal = { id:string; severity:string; title:string; status:string; metric:string; observedValue:number|string; thresholdValue:number|string; unit:string; createdAt:string; stationCode:string; stationName:string; latitude:number; longitude:number; protocolCode:string|null; protocolVersionNo:number|null; };
@@ -32,6 +37,9 @@ type FieldPosition = {
   displayName: string;
   matricula: string;
   teamCode: string | null;
+  vehicleCode: string | null;
+  vehicleDescription: string | null;
+  vehiclePlate: string | null;
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
@@ -39,12 +47,14 @@ type FieldPosition = {
   capturedAt?: string | null;
 };
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
+type MonitoringReading={id:number;stationId:string;stationCode:string;stationName:string;stationType:string;latitude:number|null;longitude:number|null;metric:string;value:number;unit:string;measuredAt:string};
 
 export default function CampoPage() {
   const [monitorMode,setMonitorMode]=useState(false);
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
   const [positions, setPositions] = useState<FieldPosition[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
+  const [latestReadings,setLatestReadings]=useState<MonitoringReading[]>([]);
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [historyHours, setHistoryHours] = useState(24);
   const [historyPositions, setHistoryPositions] = useState<FieldPosition[]>([]);
@@ -60,8 +70,47 @@ export default function CampoPage() {
   const [sharing, setSharing] = useState(false);
   const [online,setOnline]=useState(true);
   const [clock,setClock]=useState(new Date());
+  const [soundEnabled,setSoundEnabled]=useState(false);
+  const [criticalNotice,setCriticalNotice]=useState("");
+  const seenP1Ref=useRef<Set<string>|null>(null);
+  const audioContextRef=useRef<AudioContext|null>(null);
   useEffect(()=>{setMonitorMode(new URLSearchParams(window.location.search).get("monitor")==="1")},[]);
   useEffect(()=>{const timer=window.setInterval(()=>setClock(new Date()),1000);return()=>window.clearInterval(timer)},[]);
+
+  function playCriticalTone(){
+    const context=audioContextRef.current;
+    if(!context||context.state!=="running")return;
+    const now=context.currentTime;
+    [0,.24,.48].forEach((offset,index)=>{
+      const oscillator=context.createOscillator(),gain=context.createGain();
+      oscillator.type="square";oscillator.frequency.value=index===1?880:740;
+      gain.gain.setValueAtTime(.0001,now+offset);
+      gain.gain.exponentialRampToValueAtTime(.15,now+offset+.02);
+      gain.gain.exponentialRampToValueAtTime(.0001,now+offset+.17);
+      oscillator.connect(gain);gain.connect(context.destination);
+      oscillator.start(now+offset);oscillator.stop(now+offset+.2);
+    });
+  }
+
+  async function enableCriticalSound(){
+    try{
+      const AudioCtor=window.AudioContext||(window as typeof window & {webkitAudioContext?:typeof AudioContext}).webkitAudioContext;
+      if(!AudioCtor)throw new Error();
+      const context=audioContextRef.current??new AudioCtor();
+      audioContextRef.current=context;
+      if(context.state==="suspended")await context.resume();
+      setSoundEnabled(true);
+      playCriticalTone();
+    }catch{setMessage("O navegador não permitiu ativar o alerta sonoro.")}
+  }
+
+  function elapsedLabel(createdAt:string){
+    const seconds=Math.max(0,Math.floor((clock.getTime()-new Date(createdAt).getTime())/1000));
+    const days=Math.floor(seconds/86400),hours=Math.floor((seconds%86400)/3600),minutes=Math.floor((seconds%3600)/60);
+    if(days>0)return days+"d "+hours+"h";
+    if(hours>0)return hours+"h "+minutes+"min";
+    return minutes+"min";
+  }
 
   async function load() {
     const response = await fetch(`${API_URL}/api/v1/field/map`, { credentials: "include" });
@@ -79,6 +128,7 @@ export default function CampoPage() {
     setIncidents(body.incidents ?? []);
     setPositions(body.positions ?? []);
     setMonitoringEvents(body.monitoringEvents ?? []);
+    setLatestReadings(body.latestReadings ?? []);
     const pointResponse=await fetch(`${API_URL}/api/v1/field/map-points`,{credentials:"include"});
     if(pointResponse.ok){const pointBody=await pointResponse.json();setPoints(pointBody.items??[]);}
     const firstLocated = (body.incidents ?? []).find(
@@ -100,6 +150,20 @@ export default function CampoPage() {
     window.addEventListener("sigdec:realtime-tick",onRealtime);
     return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:realtime-tick",onRealtime)};
   }, []);
+
+  useEffect(()=>{
+    if(!monitorMode)return;
+    const current=new Set(incidents.filter(item=>item.priority==="P1").map(item=>item.id));
+    if(seenP1Ref.current===null){seenP1Ref.current=current;return}
+    const fresh=incidents.filter(item=>item.priority==="P1"&&!seenP1Ref.current?.has(item.id));
+    seenP1Ref.current=current;
+    if(!fresh.length)return;
+    const incident=fresh[0];
+    setCriticalNotice("NOVA P1 · "+incident.protocol+" · "+incident.summary);
+    if(soundEnabled)playCriticalTone();
+    const timer=window.setTimeout(()=>setCriticalNotice(""),12000);
+    return()=>window.clearTimeout(timer);
+  },[incidents,monitorMode,soundEnabled]);
 
   useEffect(()=>{
     const update=()=>setOnline(navigator.onLine);
