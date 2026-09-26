@@ -473,3 +473,37 @@ body:has(.situationRoomMonitor) .realtimeStatus{display:none!important}
  .environmentReadingGrid{grid-template-columns:1fr}
  .situationRoomFeed{grid-template-rows:auto auto auto}
 }
+
+
+/* v1.66 — rastreamento contínuo, trilhas, ETA e posição desatualizada */
+.monitorTrailLayer{
+ position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none
+}
+.monitorTrailLayer polyline{
+ fill:none;stroke:rgba(18,101,193,.72);stroke-width:.42;stroke-linecap:round;stroke-linejoin:round;
+ vector-effect:non-scaling-stroke;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))
+}
+.stalePositionWarning{
+ position:absolute;right:12px;top:12px;z-index:10;padding:8px 10px;border-radius:9px;
+ background:rgba(126,73,8,.94);color:#fff3cf;border:1px solid rgba(255,220,145,.7);
+ font-size:.72rem;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,.22)
+}
+.monitorTeamPin.stale{
+ background:#b26a0b;border-color:#ffe2a6;animation:stalePositionPulse 1.8s ease-in-out infinite
+}
+@keyframes stalePositionPulse{0%,100%{opacity:.72}50%{opacity:1;box-shadow:0 0 0 8px rgba(242,107,33,0)}}
+
+.monitorStatus{
+ display:inline-flex;align-items:center;padding:2px 5px;border-radius:5px;font-size:.61rem;line-height:1;
+ background:#29465e;color:#dbeaff;font-weight:900;text-transform:uppercase;letter-spacing:.02em
+}
+.monitorStatus.status-dispatched,.monitorStatus.status-waiting_dispatch{background:#684f14;color:#ffe7a5}
+.monitorStatus.status-en_route{background:#0e5c99;color:#d7efff}
+.monitorStatus.status-on_scene,.monitorStatus.status-in_service{background:#176039;color:#c9f2da}
+.monitorStatus.status-waiting_support{background:#7c4c12;color:#ffe2b1}
+.monitorStatus.status-inspection,.monitorStatus.status-monitoring{background:#563a87;color:#eadcff}
+.monitorStatus.status-completed{background:#405565;color:#dbe7ef}
+
+@media(max-width:760px){
+ .stalePositionWarning{top:auto;right:8px;bottom:52px;max-width:70%;font-size:.65rem}
+}
