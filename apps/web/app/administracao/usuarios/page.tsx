@@ -2,6 +2,7 @@
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 import { formatDateTimeBR } from "../../lib/datetime";
 import Link from "next/link";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -46,6 +47,7 @@ export default function UsersAdministrationPage(){
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar a administração.")}
  },[request]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy&&!userId)return load()},true,10000);
  async function perform(fn:()=>Promise<void>){setBusy(true);setMessage("");try{await fn();await load()}catch(error){setMessage(error instanceof Error?error.message:"Falha na operação.")}finally{setBusy(false)}}
  async function saveUser(e:FormEvent){e.preventDefault();await perform(async()=>{
   const result=await request(userId?`/api/v1/admin/users/${userId}`:"/api/v1/admin/users",{method:userId?"PUT":"POST",body:JSON.stringify(userDraft)});
