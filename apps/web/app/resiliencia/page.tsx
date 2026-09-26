@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {useCallback,useEffect,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
 
@@ -24,6 +25,7 @@ export default function ResilienciaPage(){
   }catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar.");}
  },[]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(load);
 
  return <main className="shell moduleShell">
   <header className="listHeader">
