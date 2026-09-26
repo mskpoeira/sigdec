@@ -110,8 +110,8 @@ async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
  let cursor="0",count=0,firstAuditId:string|null=null,lastAuditId:string|null=null,invalid=0,unsealed=0;
  while(true){
   const values:unknown[]=[organizationId,cursor];
-  let upper="";
-  if(maxAuditId){values.push(maxAuditId);upper=` AND a.id<=${values.length}`;}
+  const upper=maxAuditId?" AND a.id<=$3":"";
+  if(maxAuditId)values.push(maxAuditId);
   const result=await db.query(`SELECT a.id::text AS id,a.integrity_hash AS "integrityHash",
     (a.integrity_hash IS NOT NULL AND a.integrity_hash=sigdec_calculate_audit_hash(a)) AS "integrityValid"
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
