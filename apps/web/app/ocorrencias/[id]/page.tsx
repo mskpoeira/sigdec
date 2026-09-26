@@ -18,6 +18,8 @@ type Incident = {
   source: string;
   caller_name: string | null;
   caller_phone: string | null;
+  caller_phone_type: "LANDLINE" | "MOBILE" | null;
+  caller_phone_whatsapp: boolean;
   address_line: string | null;
   neighborhood: string | null;
   reference_point: string | null;
@@ -314,6 +316,10 @@ export default function OcorrenciaDetalhePage() {
   }
 
   const incident = detail.incident;
+  const callerPhoneDigits = (incident.caller_phone ?? "").replace(/\D/g, "");
+  const whatsappHref = incident.caller_phone_whatsapp && callerPhoneDigits
+    ? `https://wa.me/55${callerPhoneDigits}`
+    : null;
   const availableTeams = teams.filter((item) => item.status === "AVAILABLE");
   const availableVehicles = vehicles.filter((item) => item.status === "AVAILABLE");
 
@@ -347,6 +353,8 @@ export default function OcorrenciaDetalhePage() {
             <div><dt>Aberta em</dt><dd>{formatDateTimeBR(incident.created_at)}</dd></div><div><dt>Registrada por</dt><dd>Matrícula {incident.created_by_matricula??"—"}{incident.created_by_name?` · ${incident.created_by_name}`:""}</dd></div>
             <div><dt>Solicitante</dt><dd>{incident.caller_name || "Não informado"}</dd></div>
             <div><dt>Telefone</dt><dd>{incident.caller_phone || "Não informado"}</dd></div>
+            <div><dt>Tipo do telefone</dt><dd>{incident.caller_phone_type==="MOBILE"?"Celular":incident.caller_phone_type==="LANDLINE"?"Telefone fixo":"Não informado"}</dd></div>
+            <div><dt>WhatsApp</dt><dd>{incident.caller_phone ? (incident.caller_phone_whatsapp ? "Sim" : "Não") : "Não informado"}{whatsappHref&&<> · <a href={whatsappHref} target="_blank" rel="noreferrer">Abrir conversa</a></>}</dd></div>
             <div className="detailWide"><dt>Descrição</dt><dd>{incident.description || "Sem descrição complementar."}</dd></div>
           </dl>
         </article>
