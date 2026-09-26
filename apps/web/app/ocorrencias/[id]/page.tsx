@@ -2,7 +2,7 @@
 import { formatDateTimeBR } from "../../lib/datetime";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
@@ -80,10 +80,16 @@ type EditIncident = {
   addressLine:string;neighborhood:string;referencePoint:string;latitude:string;longitude:string;
 };
 
+type IncidentAttachment={
+  id:string;fileName:string;mediaType:string;mediaKind:"IMAGE"|"VIDEO";fileSize:number;sha256:string;
+  createdAt:string;uploadedByName:string;uploadedByMatricula:string;
+};
+
 type DetailResponse = {
   incident: Incident;
   timeline: TimelineItem[];
   dispatches: Dispatch[];
+  attachments: IncidentAttachment[];
   allowedTransitions: string[];
 };
 
@@ -110,6 +116,8 @@ const eventLabels: Record<string, string> = {
   "incident.created": "Ocorrência registrada",
   "incident.status_changed": "Situação atualizada",
   "incident.updated": "Chamado editado",
+  "incident.attachment_added": "Foto/vídeo anexado",
+  "incident.attachment_removed": "Foto/vídeo removido",
   "dispatch.created": "Equipe despachada",
   "dispatch.status_changed": "Despacho atualizado",
   "civil_action.created": "Ação da Defesa Civil registrada",
@@ -173,6 +181,10 @@ export default function OcorrenciaDetalhePage() {
   const [supportDestination, setSupportDestination] = useState("");
   const [supportJustification, setSupportJustification] = useState("");
   const [supportItems, setSupportItems] = useState("");
+  const [uploadingMedia,setUploadingMedia]=useState(false);
+  const photoInputRef=useRef<HTMLInputElement|null>(null);
+  const videoInputRef=useRef<HTMLInputElement|null>(null);
+  const filesInputRef=useRef<HTMLInputElement|null>(null);
 
   const handleAuth = useCallback((response: Response) => {
     if (response.status === 401) {
@@ -226,7 +238,11 @@ export default function OcorrenciaDetalhePage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&!editing&&!busy)void load()},5000);
+    const onRealtime=()=>{if(!editing&&!busy)void load()};
+    window.addEventListener("sigdec:data-change",onRealtime);
+    return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:data-change",onRealtime)};
+  }, [load,editing,busy]);
 
   function beginEdit(){
     if(!detail)return;
@@ -268,6 +284,40 @@ export default function OcorrenciaDetalhePage() {
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Falha ao editar o chamado.");}
     finally{setBusy(false)}
+  }
+
+  async function uploadMediaFiles(list:FileList|null){
+    if(!list||list.length===0)return;
+    setUploadingMedia(true);setMessage("");
+    const failures:string[]=[];
+    for(const file of Array.from(list).slice(0,20)){
+      if(!(file.type.startsWith("image/")||file.type.startsWith("video/"))){failures.push(`${file.name}: formato não permitido`);continue}
+      try{
+        const response=await fetch(`${API_URL}/api/v1/incidents/${id}/attachments`,{
+          method:"POST",credentials:"include",
+          headers:{"Content-Type":file.type,"X-File-Name":encodeURIComponent(file.name)},
+          body:file
+        });
+        const body=await response.json().catch(()=>({}));
+        if(!response.ok)failures.push(`${file.name}: ${body.message??body.error??"falha no envio"}`);
+      }catch{failures.push(`${file.name}: falha de comunicação`)}
+    }
+    setUploadingMedia(false);
+    setMessage(failures.length?`Alguns anexos não foram enviados: ${failures.join(" | ")}`:"Fotos/vídeos anexados com sucesso.");
+    await load();
+  }
+
+  async function removeAttachment(attachment:IncidentAttachment){
+    if(!window.confirm(`Remover o anexo "${attachment.fileName}"? A remoção ficará registrada na auditoria.`))return;
+    setUploadingMedia(true);setMessage("");
+    try{
+      const response=await fetch(`${API_URL}/api/v1/incidents/${id}/attachments/${attachment.id}`,{method:"DELETE",credentials:"include"});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(body.message??body.error??"Não foi possível remover o anexo.");
+      setMessage("Anexo removido. O histórico de auditoria foi preservado.");
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:"Falha ao remover anexo.");}
+    finally{setUploadingMedia(false)}
   }
 
   async function updateIncidentStatus(event: FormEvent) {
@@ -463,6 +513,40 @@ export default function OcorrenciaDetalhePage() {
             </a>
           )}
         </article>
+      </section>
+
+      <section className="detailSection incidentMediaSection">
+        <div className="mediaSectionHeader">
+          <div><span className="eyebrow">REGISTRO VISUAL</span><h2>Fotos e vídeos da ocorrência</h2><p>Imagens e vídeos ficam vinculados ao protocolo, com autoria, data/hora e integridade SHA-256.</p></div>
+          <div className="incidentMediaActions">
+            <button type="button" className="sigdecButton blue" disabled={uploadingMedia} onClick={()=>photoInputRef.current?.click()}>📷 Tirar foto</button>
+            <button type="button" className="sigdecButton orange" disabled={uploadingMedia} onClick={()=>videoInputRef.current?.click()}>🎥 Gravar vídeo</button>
+            <button type="button" className="secondaryButton" disabled={uploadingMedia} onClick={()=>filesInputRef.current?.click()}>📁 Buscar arquivo</button>
+          </div>
+        </div>
+        <input ref={photoInputRef} className="mediaHiddenInput" type="file" accept="image/*" capture="environment" multiple onChange={e=>{void uploadMediaFiles(e.target.files);e.currentTarget.value=""}}/>
+        <input ref={videoInputRef} className="mediaHiddenInput" type="file" accept="video/*" capture="environment" onChange={e=>{void uploadMediaFiles(e.target.files);e.currentTarget.value=""}}/>
+        <input ref={filesInputRef} className="mediaHiddenInput" type="file" accept="image/*,video/*" multiple onChange={e=>{void uploadMediaFiles(e.target.files);e.currentTarget.value=""}}/>
+        {uploadingMedia&&<section className="infoCard">Enviando mídia para a ocorrência...</section>}
+        {detail.attachments?.length?<div className="incidentMediaGallery">
+          {detail.attachments.map(attachment=>{
+            const src=`${API_URL}/api/v1/incidents/${id}/attachments/${attachment.id}/content`;
+            return <article className="incidentMediaCard" key={attachment.id}>
+              <a href={src} target="_blank" rel="noreferrer" className="incidentMediaPreview" title="Abrir em nova aba">
+                {attachment.mediaKind==="IMAGE"
+                  ?<img src={src} alt={attachment.fileName} loading="lazy"/>
+                  :<video src={src} controls preload="metadata" playsInline/>}
+              </a>
+              <div className="incidentMediaMeta">
+                <strong>{attachment.fileName}</strong>
+                <small>{(Number(attachment.fileSize)/1024/1024).toLocaleString("pt-BR",{maximumFractionDigits:1})} MB · {formatDateTimeBR(attachment.createdAt)}</small>
+                <small>Matrícula {attachment.uploadedByMatricula} · {attachment.uploadedByName}</small>
+                <small title={attachment.sha256}>SHA-256 · {attachment.sha256.slice(0,16)}…</small>
+                <div className="incidentMediaCardActions"><a className="secondaryLink" href={src} target="_blank" rel="noreferrer">Abrir</a><button type="button" className="secondaryButton" disabled={uploadingMedia} onClick={()=>void removeAttachment(attachment)}>Remover</button></div>
+              </div>
+            </article>
+          })}
+        </div>:<section className="infoCard">Nenhuma foto ou vídeo anexado a esta ocorrência.</section>}
       </section>
 
       {editing&&editIncident&&<section className="detailSection">
