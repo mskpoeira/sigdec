@@ -25,6 +25,9 @@ const positionSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   accuracyMeters: z.number().nonnegative().max(10000).optional(),
+  speedMps: z.number().nonnegative().max(120).optional(),
+  headingDegrees: z.number().min(0).max(359.999).optional(),
+  trackingSessionId: z.string().uuid().optional(),
   capturedAt: z.coerce.date().optional(),
   recordedAt: z.coerce.date().optional()
 });
@@ -151,6 +154,8 @@ export async function fieldRoutes(app: FastifyInstance) {
               p.team_id AS "teamId", tm.code AS "teamCode",
               active_incident."vehicleCode",active_incident."vehicleDescription",active_incident."vehiclePlate",
               p.latitude, p.longitude, p.accuracy_meters AS "accuracyMeters",
+              p.speed_mps AS "speedMps",p.heading_degrees AS "headingDegrees",
+              p.tracking_session_id AS "trackingSessionId",
               p.recorded_at AS "recordedAt", p.captured_at AS "capturedAt"
          FROM field_positions p
          JOIN users u ON u.id = p.user_id
@@ -189,6 +194,21 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
+    const positionTrail = await db.query(
+      `SELECT p.user_id AS "userId",u.display_name AS "displayName",u.matricula,
+              tm.code AS "teamCode",p.latitude,p.longitude,p.speed_mps AS "speedMps",
+              p.heading_degrees AS "headingDegrees",p.tracking_session_id AS "trackingSessionId",
+              p.recorded_at AS "recordedAt"
+         FROM field_positions p
+         JOIN users u ON u.id=p.user_id
+         LEFT JOIN teams tm ON tm.id=p.team_id
+        WHERE p.organization_id=$1
+          AND p.recorded_at>now()-interval '60 minutes'
+        ORDER BY p.recorded_at ASC
+        LIMIT 2000`,
+      [orgId]
+    );
+
     const latestReadings = await db.query(
       `SELECT DISTINCT ON (r.station_id,r.metric)
               r.id,s.id AS "stationId",s.code AS "stationCode",s.name AS "stationName",
@@ -201,7 +221,13 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
-    return { incidents: incidents.rows, positions: positions.rows, monitoringEvents: monitoringEvents.rows, latestReadings: latestReadings.rows };
+    return {
+      incidents: incidents.rows,
+      positions: positions.rows,
+      positionTrail: positionTrail.rows,
+      monitoringEvents: monitoringEvents.rows,
+      latestReadings: latestReadings.rows
+    };
   });
 
   app.get("/api/v1/field/history", {
@@ -282,15 +308,18 @@ export async function fieldRoutes(app: FastifyInstance) {
     const result = await db.query(
       `INSERT INTO field_positions (
          organization_id, user_id, team_id, latitude, longitude,
-         accuracy_meters, captured_at, location
+         accuracy_meters, speed_mps, heading_degrees, tracking_session_id, captured_at, location
        ) VALUES (
-         $1,$2,$3,$4,$5,$6,$7,
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
          ST_SetSRID(ST_MakePoint($5::double precision,$4::double precision),4326)::geography
        )
-       RETURNING recorded_at AS "recordedAt", captured_at AS "capturedAt"`,
+       RETURNING recorded_at AS "recordedAt", captured_at AS "capturedAt",
+                 speed_mps AS "speedMps",heading_degrees AS "headingDegrees",
+                 tracking_session_id AS "trackingSessionId"`,
       [
         orgId, auth.userId, effectiveTeamId, value.latitude, value.longitude,
-        value.accuracyMeters ?? null, value.capturedAt ?? value.recordedAt ?? new Date()
+        value.accuracyMeters ?? null, value.speedMps ?? null, value.headingDegrees ?? null,
+        value.trackingSessionId ?? null, value.capturedAt ?? value.recordedAt ?? new Date()
       ]
     );
 
