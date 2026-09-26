@@ -12,6 +12,14 @@ const audit=async(request:FastifyRequest,action:string,id:string,before:unknown,
   VALUES($1,$2,'humanitarian_item',$3,$4,$5,$6::jsonb,$7::jsonb)`,[authFrom(request).userId,action,id,request.ip,
   request.headers["user-agent"]??null,JSON.stringify(before??null),JSON.stringify(after??null)]);
 };
+const auditQuery=z.object({
+ matricula:z.string().trim().max(32).optional(),
+ action:z.string().trim().max(120).optional(),
+ entityType:z.string().trim().max(120).optional(),
+ from:z.coerce.date().optional(),
+ to:z.coerce.date().optional(),
+ limit:z.coerce.number().int().min(1).max(500).default(100)
+});
 const csvCell=(value:unknown)=>{
  const plain=String(value??"").replace(/\r|\n/g," ");
  const safe=/^[=+\-@]/.test(plain)?"'"+plain:plain;
@@ -59,6 +67,45 @@ export async function adminDataRoutes(app:FastifyInstance){
   const result=await db.query("UPDATE humanitarian_items SET active=false WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,org(request)]);
   if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   await audit(request,"ADMIN_ITEM_DEACTIVATED",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/audit",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const parsed=auditQuery.safeParse(request.query??{});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY",details:parsed.error.flatten()});
+  const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
+  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
+  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE ${values.length}`);}
+  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE ${values.length}`);}
+  if(q.from){values.push(q.from);where.push(`a.occurred_at >= ${values.length}`);}
+  if(q.to){values.push(q.to);where.push(`a.occurred_at <= ${values.length}`);}
+  values.push(q.limit);
+  const result=await db.query(`SELECT a.id,a.occurred_at AS "occurredAt",a.actor_matricula AS "actorMatricula",
+    u.display_name AS "actorName",a.action,a.entity_type AS "entityType",a.entity_id AS "entityId",
+    a.ip::text AS ip,a.metadata
+    FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+    WHERE ${where.join(" AND ")}
+    ORDER BY a.occurred_at DESC,a.id DESC LIMIT ${values.length}`,values);
+  return {items:result.rows,filters:q};
+ });
+ app.get("/api/v1/admin/audit.csv",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const parsed=auditQuery.safeParse({...request.query,limit:500});
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY"});
+  const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
+  if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
+  if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE ${values.length}`);}
+  if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE ${values.length}`);}
+  if(q.from){values.push(q.from);where.push(`a.occurred_at >= ${values.length}`);}
+  if(q.to){values.push(q.to);where.push(`a.occurred_at <= ${values.length}`);}
+  const result=await db.query(`SELECT to_char(a.occurred_at AT TIME ZONE 'America/Sao_Paulo','DD/MM/YYYY HH24:MI:SS') AS horario,
+    a.actor_matricula AS matricula,u.display_name AS servidor,a.action,a.entity_type,a.entity_id,a.ip::text AS ip,a.metadata::text AS metadata
+    FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+    WHERE ${where.join(" AND ")}
+    ORDER BY a.occurred_at DESC,a.id DESC LIMIT 500`,values);
+  const header=["Horário","Matrícula","Servidor","Ação","Tipo","Registro","IP","Metadados"];
+  const rows=result.rows.map(x=>[x.horario,x.matricula,x.servidor,x.action,x.entity_type,x.entity_id,x.ip,x.metadata]);
+  reply.header("content-type","text/csv; charset=utf-8").header("content-disposition",'attachment; filename="sigdec-auditoria.csv"')
+   .header("cache-control","no-store");
+  return "\uFEFF"+[header,...rows].map(row=>row.map(csvCell).join(";")).join("\r\n")+"\r\n";
  });
 
  app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("system.master")},async request=>{
