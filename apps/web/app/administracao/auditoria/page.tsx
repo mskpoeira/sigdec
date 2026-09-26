@@ -17,7 +17,11 @@ type AuditItem={
  entityId:string|null;
  ip:string|null;
  metadata:Record<string,unknown>|null;
+ integrityVersion:number;
+ integrityHash:string;
+ integrityValid:boolean;
 };
+type Integrity={status:"verified"|"failed";algorithm:string;appendOnly:boolean;checkedAt:string;total:number;unsealed:number;invalid:number;oldestAt:string|null;newestAt:string|null};
 
 const activityLabel=(action:string)=>{
  if(action==="REQUEST_POST")return "Registro";
@@ -34,6 +38,7 @@ export default function AuditPage(){
  const[from,setFrom]=useState("");
  const[to,setTo]=useState("");
  const[message,setMessage]=useState("Carregando atividades...");
+ const[integrity,setIntegrity]=useState<Integrity|null>(null);
  const[busy,setBusy]=useState(false);
 
  const params=useMemo(()=>{
@@ -60,7 +65,14 @@ export default function AuditPage(){
   finally{setBusy(false);}
  },[params]);
 
- useEffect(()=>{void load()},[]);
+ const verify=useCallback(async()=>{
+  try{
+   const response=await fetch(`${API}/api/v1/admin/audit/verify`,{credentials:"include",cache:"no-store"});
+   const body=await response.json().catch(()=>({}));
+   if(response.ok)setIntegrity(body);
+  }catch{}
+ },[]);
+ useEffect(()=>{void load();void verify()},[verify]);
 
  function filter(event:FormEvent){event.preventDefault();void load(params)}
  function clear(){
@@ -93,13 +105,14 @@ export default function AuditPage(){
    </div>
   </form>
 
+  {integrity&&<section className={integrity.status==="verified"?"infoCard":"warningCard"}><strong>{integrity.status==="verified"?"Integridade verificada":"Falha de integridade detectada"}</strong><p>{integrity.total} registro(s) verificado(s) · {integrity.invalid} inválido(s) · {integrity.unsealed} sem selo · {integrity.algorithm} · trilha {integrity.appendOnly?"append-only":"alterável"}</p><p><small>Verificado em {formatDateTimeBR(integrity.checkedAt)}</small></p></section>}
   {message&&<section className="infoCard">{message}</section>}
 
   <section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Atividades registradas</h2><p>{items.length} registro(s) exibido(s), do mais recente para o mais antigo.</p></div></div>
    <div className="adminTableWrap">
     <table>
-     <thead><tr><th>Horário</th><th>Matrícula</th><th>Servidor</th><th>Atividade</th><th>Tipo</th><th>Registro</th><th>IP</th></tr></thead>
+     <thead><tr><th>Horário</th><th>Matrícula</th><th>Servidor</th><th>Atividade</th><th>Tipo</th><th>Registro</th><th>Integridade</th><th>IP</th></tr></thead>
      <tbody>{items.map(item=><tr key={item.id}>
       <td>{formatDateTimeBR(item.occurredAt)}</td>
       <td><strong>{item.actorMatricula??"—"}</strong></td>
@@ -107,6 +120,7 @@ export default function AuditPage(){
       <td>{activityLabel(item.action)}</td>
       <td>{item.entityType}</td>
       <td><code>{item.entityId??"—"}</code></td>
+      <td title={item.integrityHash}>{item.integrityValid?"✓ OK":"⚠ FALHA"}</td>
       <td>{item.ip??"—"}</td>
      </tr>)}</tbody>
     </table>
