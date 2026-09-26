@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import type {Route} from "next";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {formatDateTimeBR} from "../lib/datetime";
@@ -29,11 +30,12 @@ export default function InstitutionalPresentationPage(){
    if(response.status===401){location.href="/login";return}
    const body=await response.json().catch(()=>({}));
    if(!response.ok)throw new Error(body.message??body.error??"Não foi possível preparar a apresentação.");
-   setData(body);setMessage("");setSlide(0);
+   setData(body);setMessage("");
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao carregar a apresentação.");}
  },[]);
 
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(load,true,10000);
 
  const modules=useMemo(()=>data?.modules.filter(x=>x.available)??[],[data]);
  const totalSlides=modules.length+1;
