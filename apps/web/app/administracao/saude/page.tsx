@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {useCallback,useEffect,useState} from "react";
 import {formatDateTimeBR} from "../../lib/datetime";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
@@ -45,6 +46,7 @@ export default function SystemHealthPage(){
  },[]);
 
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,15000);
 
  return <main className="shell moduleShell">
   <header className="listHeader">
