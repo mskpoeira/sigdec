@@ -11,9 +11,14 @@ const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000
 type SessionUser={id:string;matricula:string;displayName:string;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
 
 const nav: Array<[string,string,Route,string?]> =[
-["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias","incidents"],["◉","Riscos e Mapas","/campo","field"],["▲","Alertas","/monitoramento","monitoring"],
-["♥","Assistência Humanitária","/assistencia","humanitarian"],["⌂","Abrigos","/assistencia#abrigos" as Route,"humanitarian"],["♟","Famílias","/assistencia#familias" as Route,"humanitarian"],["◇","Doações e Estoque","/assistencia#estoque" as Route,"humanitarian"],
-["♥","Voluntariado","/voluntarios","volunteers"],["▦","Planejamento","/planejamento"],["◆","Resiliência","/resiliencia"],["▥","Centro de Gestão","/gestao"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
+["⌂","Início","/painel"],
+["⚠","Ocorrências e Monitoramento","/ocorrencias","incidents"],
+["♥","Assistência Humanitária","/assistencia","humanitarian"],
+["▦","Planejamento e Contingência","/planejamento"],
+["▥","Operações / SCO","/gestao"],
+["◆","Resiliência","/resiliencia"],
+["▤","Documentos","/documentos","documents"],
+["⚙","Administração","/administracao"]
 ];
 const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","Operação PLANCON","/planejamento/operacao","purple"],["◆","Apoios Estado/União","/apoios","blue"],["▥","Centro de Gestão","/gestao","gray"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
@@ -52,7 +57,7 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
    <div className="opsSideBrand"><span className="opsCompactMark" aria-hidden="true">DC</span><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{user.permissions.includes("system.master")&&<Link href="/administracao/usuarios" title="Usuários"><span className="opsMenuIcon">♙</span><span className="opsMenuLabel">Usuários</span></Link>}{(user.permissions.includes("audit.read")||user.permissions.includes("system.master"))&&<Link href="/administracao/auditoria" title="Registro de Atividades"><span className="opsMenuIcon">☷</span><span className="opsMenuLabel">Auditoria</span></Link>}{user.permissions.includes("system.master")&&<Link href="/administracao/saude" title="Saúde do Sistema"><span className="opsMenuIcon">◉</span><span className="opsMenuLabel">Saúde do Sistema</span></Link>}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master")||user.permissions.includes("audit.read"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
    <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small>{user.roles?.[0]||"Master"}</small></div></div>
    <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
   </aside>

@@ -16,7 +16,7 @@ const userInput=z.object({
 const roleInput=z.object({code:z.string().trim().regex(/^[A-Z][A-Z0-9_]{2,59}$/),
  name:z.string().trim().min(3).max(120),permissionCodes:z.array(z.string()).max(100)});
 const navigationPaths=["/painel","/ocorrencias","/ocorrencias/nova","/campo","/monitoramento","/assistencia",
- "/voluntarios","/vistorias","/comunicacoes","/sco","/documentos","/planejamento","/planejamento/operacao","/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/gestao","/continuidade","/administracao","/administracao/auditoria","/administracao/saude"] as const;
+ "/voluntarios","/vistorias","/comunicacoes","/sco","/documentos","/planejamento","/planejamento/operacao","/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/gestao","/continuidade","/administracao","/administracao/cadastros","/administracao/apresentacao","/administracao/auditoria","/administracao/saude"] as const;
 const navigationInput=z.object({label:z.string().trim().min(2).max(80),path:z.enum(navigationPaths),
  permissionCode:z.string().max(120).nullable().default(null),sortOrder:z.number().int().min(0).max(1000).default(100),active:z.boolean().default(true)});
 const organization=(value:string|null)=>{if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});return value};

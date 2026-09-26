@@ -62,7 +62,25 @@ app.get("/api/v1/ready",async(_request,reply)=>{
  }
 });
 await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
-app.get("/api/v1",async()=>({name:"SIGDEC API",version:"v1",release,modules:["auth","ocorrencias","despacho","campo","riscos","monitoramento","alertas","vistorias","documentos","desastres","sco","assistencia-humanitaria","voluntariado","logistica","comunicacoes","s2id","treinamentos","recuperacao","biblioteca","bi","administracao","integracoes","sidec-interoperabilidade","sidec-continuidade","inteligencia-assistiva","auditoria"]}));
+app.get("/api/v1",async()=>({
+ name:"SIGDEC API",product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",version:"v1",release,
+ modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
+}));
+app.get("/api/v1/capabilities",async()=>({
+ product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",release,format:"application/json",
+ architecture:{apiFirst:true,postgis:true,appendOnlyAudit:true,ed25519Integrity:true,offlineField:true,multiModule:true},
+ modules:[
+  {code:"incidents",label:"Ocorrências e Monitoramento",pages:["/ocorrencias","/campo","/monitoramento","/vistorias"]},
+  {code:"humanitarian",label:"Assistência Humanitária",pages:["/assistencia"]},
+  {code:"planning",label:"Planejamento e Contingência",pages:["/planejamento","/planejamento/operacao"]},
+  {code:"operations",label:"Operações / SCO",pages:["/gestao","/sco","/comunicacoes"]},
+  {code:"resilience",label:"Resiliência",pages:["/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/voluntarios"]},
+  {code:"documents",label:"Documentos e Continuidade",pages:["/documentos","/continuidade","/verificar-integridade"]},
+  {code:"administration",label:"Administração",pages:["/administracao","/administracao/usuarios","/administracao/cadastros","/administracao/auditoria","/administracao/saude","/administracao/apresentacao"]}
+ ],
+ interoperability:["SIDEC","S2ID","webhooks","JSON","CSV","PDF","KML"],
+ generatedAt:new Date().toISOString()
+}));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
 const sidecDeadlineMinutes=Math.max(5,Math.min(1440,Number(process.env.SIDEC_DEADLINE_EVALUATION_MINUTES??60)));
 const evaluateDeadlines=()=>evaluateSidecDeadlineAlerts().catch(error=>app.log.error({err:error},"Falha ao avaliar SLAs SIDEC."));
