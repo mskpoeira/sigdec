@@ -312,7 +312,12 @@ export default function CampoPage() {
     const priorityCount=(priority:string)=>incidents.filter(item=>item.priority===priority).length;
     const criticalSignals=monitoringEvents.filter(item=>item.severity==="EMERGENCY"||item.severity==="WARNING");
     const recentPositions=positions.filter(item=>Date.now()-new Date(item.recordedAt).getTime()<=30*60*1000);
+    const activeVehiclePositions=recentPositions.filter(item=>item.vehicleCode);
+    const rainfallReadings=latestReadings.filter(item=>item.stationType==="RAIN_GAUGE"||/rain|chuva|precip|pluv/i.test(item.metric));
+    const weatherReadings=latestReadings.filter(item=>item.stationType==="WEATHER"||/temp|humid|umid|wind|vento|press/i.test(item.metric));
+    const environmentReadings=[...rainfallReadings,...weatherReadings.filter(item=>!rainfallReadings.some(r=>r.id===item.id))].slice(0,10);
     return <main className="situationRoomMonitor">
+      {criticalNotice&&<div className="criticalIncidentBanner"><strong>⚠ {criticalNotice}</strong><span>Prioridade máxima — verificar despacho e resposta.</span></div>}
       <header className="situationRoomHeader">
         <div className="situationRoomBrand">
           <span className="eyebrow">SIGDEC · DEFESA CIVIL · UBATUBA · {SIGDEC_VERSION_LABEL}</span>
@@ -322,6 +327,7 @@ export default function CampoPage() {
         <div className="situationRoomHeaderStatus">
           <div className={online?"monitorConnection online":"monitorConnection offline"}><span>●</span>{online?"ONLINE":"OFFLINE"}</div>
           <div className="monitorClock"><strong>{clock.toLocaleTimeString("pt-BR")}</strong><small>{clock.toLocaleDateString("pt-BR")}</small></div>
+          <button type="button" className={soundEnabled?"monitorSoundButton enabled":"monitorSoundButton"} onClick={()=>void enableCriticalSound()}>{soundEnabled?"🔊 Alerta P1 ativo":"🔇 Ativar som P1"}</button>
           <button type="button" className="monitorFullscreenButton" onClick={()=>void toggleFullscreen()}>⛶ Tela cheia</button>
           <Link className="monitorExitButton" href="/campo">Sair do monitor</Link>
         </div>
@@ -330,7 +336,7 @@ export default function CampoPage() {
       <section className="situationRoomKpis">
         <article className="monitorKpi danger"><strong>{sitrep?.activeIncidents??incidents.length}</strong><span>Ocorrências ativas</span><small>P1 {priorityCount("P1")} · P2 {priorityCount("P2")}</small></article>
         <article className="monitorKpi warning"><strong>{sitrep?.openMonitoringEvents??monitoringEvents.length}</strong><span>Eventos ambientais</span><small>{criticalSignals.length} crítico(s)/alerta</small></article>
-        <article className="monitorKpi blue"><strong>{recentPositions.length}</strong><span>Equipes/agentes recentes</span><small>posição nos últimos 30 min</small></article>
+        <article className="monitorKpi blue"><strong>{activeVehiclePositions.length}/{recentPositions.length}</strong><span>Viaturas / agentes</span><small>posição nos últimos 30 min</small></article>
         <article className="monitorKpi green"><strong>{sitrep?.openShelters??0}</strong><span>Abrigos abertos</span><small>{sitrep?.displacedHouseholds??0} desaloj. · {sitrep?.homelessHouseholds??0} desabrig.</small></article>
         <article className="monitorKpi navy"><strong>{sitrep?.activeOperations??0}</strong><span>Operações SCO</span><small>{sitrep?.activeOperationalPeriods??0} período(s) ativo(s)</small></article>
       </section>
@@ -347,9 +353,9 @@ export default function CampoPage() {
           </Link>)}
           {recentPositions.map(position=><a
             href={"https://www.openstreetmap.org/?mlat="+position.latitude+"&mlon="+position.longitude+"#map=17/"+position.latitude+"/"+position.longitude}
-            target="_blank" rel="noreferrer" className="monitorTeamPin" style={mapPosition(position.latitude,position.longitude)}
-            key={"monitor-team-"+position.userId} title={(position.teamCode??position.displayName)+" · "+position.displayName}>
-            <span>◆</span>
+            target="_blank" rel="noreferrer" className={position.vehicleCode?"monitorTeamPin vehicle":"monitorTeamPin"} style={mapPosition(position.latitude,position.longitude)}
+            key={"monitor-team-"+position.userId} title={(position.vehicleCode?position.vehicleCode+" · ":"")+(position.teamCode??position.displayName)+" · "+position.displayName}>
+            <span>{position.vehicleCode?"🚙":"◆"}</span>
           </a>)}
           {monitoringEvents.filter(signal=>Number.isFinite(Number(signal.latitude))&&Number.isFinite(Number(signal.longitude))).map(signal=><a
             href={"https://www.openstreetmap.org/?mlat="+signal.latitude+"&mlon="+signal.longitude+"#map=17/"+signal.latitude+"/"+signal.longitude}
@@ -359,7 +365,7 @@ export default function CampoPage() {
             title={signal.stationCode+" · "+signal.title}><span>▲</span></a>)}
           <div className="situationRoomLegend">
             <span><i className="legendIncident"/> Ocorrência</span>
-            <span><i className="legendTeam"/> Equipe/agente</span>
+            <span><i className="legendTeam"/> Equipe/agente/viatura</span>
             <span><i className="legendSignal"/> Monitoramento</span>
             <strong>Atualização contínua</strong>
           </div>
@@ -371,16 +377,27 @@ export default function CampoPage() {
             <div className="monitorFeedList">
               {incidents.slice().sort((a,b)=>a.priority.localeCompare(b.priority)).slice(0,12).map(item=><Link href={"/ocorrencias/"+item.id} target="_blank" className={"monitorFeedItem priority-"+item.priority} key={item.id}>
                 <span className={"priorityBadge priority-"+item.priority}>{item.priority}</span>
-                <span><strong>{item.protocol}</strong><small>{item.summary}</small><small>{[item.neighborhood,item.teamCode?"Equipe "+item.teamCode:null].filter(Boolean).join(" · ")||item.typeName}</small></span>
+                <span><strong>{item.protocol}</strong><small>{item.summary}</small><small>{[item.neighborhood,item.teamCode?"Equipe "+item.teamCode:null,item.vehicleCode?"Viatura "+item.vehicleCode:null].filter(Boolean).join(" · ")||item.typeName}</small><small>Aberta há {elapsedLabel(item.createdAt)}</small></span>
               </Link>)}
               {incidents.length===0&&<div className="monitorEmpty">Nenhuma ocorrência ativa.</div>}
             </div>
           </section>
 
+          <section className="monitorFeedSection environmentSection">
+            <header><div><span className="eyebrow">PLUVIOMETRIA / CLIMA</span><h2>Leituras mais recentes</h2></div><strong>{environmentReadings.length}</strong></header>
+            <div className="environmentReadingGrid">
+              {environmentReadings.slice(0,8).map(reading=><article className="environmentReading" key={"reading-"+reading.id}>
+                <span>{reading.stationType==="RAIN_GAUGE"?"🌧️":/temp/i.test(reading.metric)?"🌡️":/wind|vento/i.test(reading.metric)?"💨":"◉"}</span>
+                <div><strong>{reading.value} {reading.unit}</strong><small>{reading.stationCode} · {reading.metric}</small><small>{formatDateTimeBR(reading.measuredAt)}</small></div>
+              </article>)}
+              {environmentReadings.length===0&&<div className="monitorEmpty">Sem leituras meteorológicas/pluviométricas recentes cadastradas.</div>}
+            </div>
+          </section>
+
           <section className="monitorFeedSection">
-            <header><div><span className="eyebrow">ALERTAS</span><h2>Monitoramento ambiental</h2></div><strong>{monitoringEvents.length}</strong></header>
+            <header><div><span className="eyebrow">ALERTAS</span><h2>Eventos ambientais</h2></div><strong>{monitoringEvents.length}</strong></header>
             <div className="monitorFeedList compact">
-              {monitoringEvents.slice(0,8).map(signal=><article className={"monitorFeedItem signal-"+signal.severity.toLowerCase()} key={signal.id}>
+              {monitoringEvents.slice(0,6).map(signal=><article className={"monitorFeedItem signal-"+signal.severity.toLowerCase()} key={signal.id}>
                 <span className="signalIcon">▲</span><span><strong>{signal.stationCode} · {signal.stationName}</strong><small>{signal.title}</small><small>{signal.metric}: {signal.observedValue} {signal.unit}</small></span>
               </article>)}
               {monitoringEvents.length===0&&<div className="monitorEmpty">Nenhum evento ambiental em aberto.</div>}
@@ -390,7 +407,7 @@ export default function CampoPage() {
       </section>
 
       <footer className="situationRoomFooter">
-        <span><strong>Legenda:</strong> P1 crítica · P2 muito alta · P3 alta · P4 normal · P5 programada</span>
+        <span><strong>Legenda:</strong> P1 crítica · P2 muito alta · P3 alta · P4 normal · P5 programada · 🚙 viatura em posição recente</span>
         <span>Mapa © OpenStreetMap · Dados operacionais SIGDEC</span>
       </footer>
     </main>;
