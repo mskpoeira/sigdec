@@ -3,6 +3,7 @@ import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
@@ -121,6 +122,7 @@ export default function DocumentosPage() {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar documentos.");
     });
   }, [load]);
+  useRealtimeRefresh(()=>{if(!busy)return load()},true,10000);
 
   function applyTemplate(id: string) {
     setTemplateId(id);
