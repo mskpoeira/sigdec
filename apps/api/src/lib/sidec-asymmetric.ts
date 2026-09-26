@@ -22,8 +22,26 @@ export function currentSidecEd25519KeyId(){
  return process.env.SIDEC_ED25519_KEY_ID?.trim()||"derived-v1";
 }
 
+export function currentAuditEd25519KeyId(){
+ return process.env.AUDIT_ED25519_KEY_ID?.trim()||"audit-derived-v1";
+}
+
 function privateKey(){
  return createPrivateKey({key:Buffer.concat([pkcs8Prefix,baseSecret()]),format:"der",type:"pkcs8"});
+}
+
+function auditPrivateSeed(){
+ const configured=process.env.AUDIT_ED25519_PRIVATE_SEED_BASE64?.trim();
+ if(configured){
+  const seed=Buffer.from(configured,"base64");
+  if(seed.length!==32)throw new Error("AUDIT_ED25519_PRIVATE_SEED_BASE64 deve decodificar exatamente 32 bytes.");
+  return seed;
+ }
+ return createHash("sha256").update("SIGDEC/AUDIT/ED25519/DERIVED-SEED/v1","utf8").update(baseSecret()).digest();
+}
+
+function auditPrivateKey(){
+ return createPrivateKey({key:Buffer.concat([pkcs8Prefix,auditPrivateSeed()]),format:"der",type:"pkcs8"});
 }
 
 function integrityPayload(manifestHash:string,artifactHash:string){
@@ -176,12 +194,12 @@ export function verifySidecTimestamp(input:{
 
 
 export function signAuditCheckpoint(input:AuditCheckpointSignatureInput){
- const key=privateKey();
+ const key=auditPrivateKey();
  const publicKey=createPublicKey(key);
  const publicDer=publicKey.export({format:"der",type:"spki"}) as Buffer;
  return {
   algorithm:"Ed25519" as const,
-  keyId:currentSidecEd25519KeyId(),
+  keyId:currentAuditEd25519KeyId(),
   signature:sign(null,auditCheckpointPayload(input),key).toString("base64"),
   publicKey:publicKey.export({format:"pem",type:"spki"}).toString(),
   publicKeyFingerprint:createHash("sha256").update(publicDer).digest("hex")

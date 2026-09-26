@@ -1,9 +1,10 @@
 import type {FastifyInstance,FastifyRequest} from "fastify";
 import {createHash} from "node:crypto";
 import {z} from "zod";
+import QRCode from "qrcode";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
-import {signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
+import {currentAuditEd25519KeyId,signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
 
 const uuid=z.string().uuid();
 const itemInput=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),
@@ -109,8 +110,8 @@ async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
  let cursor="0",count=0,firstAuditId:string|null=null,lastAuditId:string|null=null,invalid=0,unsealed=0;
  while(true){
   const values:unknown[]=[organizationId,cursor];
-  let upper="";
-  if(maxAuditId){values.push(maxAuditId);upper=` AND a.id<=${values.length}`;}
+  const upper=maxAuditId?" AND a.id<=$3":"";
+  if(maxAuditId)values.push(maxAuditId);
   const result=await db.query(`SELECT a.id::text AS id,a.integrity_hash AS "integrityHash",
     (a.integrity_hash IS NOT NULL AND a.integrity_hash=sigdec_calculate_audit_hash(a)) AS "integrityValid"
     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
@@ -230,6 +231,22 @@ export async function adminDataRoutes(app:FastifyInstance){
    appendOnly:true,
    checkedAt:new Date().toISOString(),
    ...row
+  };
+ });
+
+ app.get("/api/v1/admin/audit/keys",{preHandler:requirePermission("audit.read")},async request=>{
+  const organizationId=org(request),currentKeyId=currentAuditEd25519KeyId();
+  const result=await db.query(`SELECT a.key_id AS "keyId",a.public_key_fingerprint AS "publicKeyFingerprint",
+    min(a.attested_at) AS "firstSeenAt",max(a.attested_at) AS "lastSeenAt",count(*)::int AS "attestationCount",
+    (array_agg(a.attested_by_matricula ORDER BY a.attested_at ASC))[1] AS "activatedByMatricula",
+    (array_agg(a.attested_by_matricula ORDER BY a.attested_at DESC))[1] AS "lastUsedByMatricula"
+    FROM audit_checkpoint_attestations a
+    WHERE a.organization_id=$1
+    GROUP BY a.key_id,a.public_key_fingerprint
+    ORDER BY max(a.attested_at) DESC`,[organizationId]);
+  return {
+   currentKeyId,
+   items:result.rows.map(row=>({...row,status:row.keyId===currentKeyId?"ACTIVE":"HISTORICAL"}))
   };
  });
 
@@ -383,6 +400,75 @@ export async function adminDataRoutes(app:FastifyInstance){
   return receipt;
  });
 
+ app.get("/api/v1/admin/audit/checkpoints/:id/dossier",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
+  const auth=authFrom(request),organizationId=org(request),{id}=request.params as {id:string};
+  if(!/^\d+$/.test(id))return reply.code(400).send({error:"INVALID_CHECKPOINT_ID"});
+  const result=await db.query(`SELECT c.id::text AS id,c.organization_id::text AS "organizationId",o.name AS "organizationName",
+    c.created_at AS "createdAt",c.created_by_matricula AS "createdByMatricula",u.display_name AS "createdByName",
+    c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+    c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+    c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",c.algorithm
+    FROM audit_integrity_checkpoints c
+    JOIN organizations o ON o.id=c.organization_id
+    JOIN users u ON u.id=c.created_by
+    WHERE c.id=$1 AND c.organization_id=$2`,[id,organizationId]);
+  const row=result.rows[0];
+  if(!row)return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+
+  const [attestation,audit,summary]=await Promise.all([
+   ensureAuditCheckpointAttestation(organizationId,id,auth.userId),
+   computeAuditRoot(organizationId,row.lastAuditId),
+   db.query(`SELECT action,entity_type AS "entityType",count(*)::int AS total,
+     min(occurred_at) AS "firstAt",max(occurred_at) AS "lastAt"
+     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id
+     WHERE u.organization_id=$1 AND a.id BETWEEN $2 AND $3
+     GROUP BY action,entity_type ORDER BY total DESC,action,entity_type`,
+    [organizationId,row.firstAuditId??"0",row.lastAuditId??"0"])
+  ]);
+
+  const checkpointValid=sha256(checkpointCanonical({
+   organizationId:row.organizationId,createdAt:new Date(row.createdAt).toISOString(),matricula:row.createdByMatricula,
+   auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+   auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,integrityVersion:Number(row.integrityVersion)
+  }))===row.checkpointHash;
+  const rootValid=audit.auditRootHash===row.auditRootHash&&audit.auditCount===Number(row.auditCount)&&
+   audit.firstAuditId===row.firstAuditId&&audit.lastAuditId===row.lastAuditId;
+  const asymmetricValid=verifyAuditCheckpoint({
+   ...auditCheckpointSignatureInput(row),signature:attestation.signature,publicKey:attestation.publicKey,
+   publicKeyFingerprint:attestation.publicKeyFingerprint
+  });
+  const publicVerificationUrl=auditCheckpointPublicUrl(row.checkpointHash);
+
+  const dossier={
+   dossierVersion:"sigdec-audit-integrity-dossier/1.0",
+   generatedAt:new Date().toISOString(),
+   generatedBy:{userId:auth.userId},
+   organization:{id:row.organizationId,name:row.organizationName},
+   checkpoint:{
+    id:row.id,createdAt:new Date(row.createdAt).toISOString(),createdByMatricula:row.createdByMatricula,
+    createdByName:row.createdByName,auditCount:Number(row.auditCount),firstAuditId:row.firstAuditId,lastAuditId:row.lastAuditId,
+    auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,checkpointHash:row.checkpointHash,
+    integrityVersion:Number(row.integrityVersion),algorithm:row.algorithm
+   },
+   ed25519:{
+    algorithm:"Ed25519",keyId:attestation.keyId,signature:attestation.signature,publicKey:attestation.publicKey,
+    publicKeyFingerprint:attestation.publicKeyFingerprint,attestedAt:new Date(attestation.attestedAt).toISOString(),
+    attestedByMatricula:attestation.attestedByMatricula
+   },
+   verification:{
+    checkpointValid,rootValid,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed,
+    valid:checkpointValid&&rootValid&&asymmetricValid&&audit.invalid===0&&audit.unsealed===0
+   },
+   activitySummary:summary.rows,
+   publicVerificationUrl,
+   qrCodeUrl:`${(process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000").replace(/\/$/,"")}/api/v1/public/audit-checkpoint/${row.checkpointHash}/qr.svg`
+  };
+  reply.header("content-type","application/json; charset=utf-8")
+   .header("content-disposition",`attachment; filename="sigdec-audit-dossier-${row.id}.json"`)
+   .header("cache-control","no-store");
+  return dossier;
+ });
+
  app.get("/api/v1/public/audit-checkpoint/:hash",async(request,reply)=>{
   const {hash}=request.params as {hash:string};
   if(!/^[a-f0-9]{64}$/i.test(hash))return reply.code(400).send({error:"INVALID_CHECKPOINT_HASH"});
@@ -435,6 +521,18 @@ export async function adminDataRoutes(app:FastifyInstance){
    verification:{checkpointValid,rootValid,previousExists,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed},
    checkedAt:new Date().toISOString()
   };
+ });
+
+ app.get("/api/v1/public/audit-checkpoint/:hash/qr.svg",async(request,reply)=>{
+  const {hash}=request.params as {hash:string};
+  if(!/^[a-f0-9]{64}$/i.test(hash))return reply.code(400).send({error:"INVALID_CHECKPOINT_HASH"});
+  const found=await db.query("SELECT 1 FROM audit_integrity_checkpoints WHERE checkpoint_hash=$1 LIMIT 1",[hash.toLowerCase()]);
+  if(!found.rows[0])return reply.code(404).send({error:"CHECKPOINT_NOT_FOUND"});
+  const url=auditCheckpointPublicUrl(hash.toLowerCase());
+  const svg=await QRCode.toString(url,{type:"svg",errorCorrectionLevel:"M",margin:2,width:220});
+  reply.header("content-type","image/svg+xml; charset=utf-8")
+   .header("cache-control","public, max-age=300");
+  return svg;
  });
 
  app.post("/api/v1/public/verify-audit-checkpoint-proof",async(request,reply)=>{
