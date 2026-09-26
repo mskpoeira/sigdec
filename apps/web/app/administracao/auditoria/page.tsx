@@ -2,6 +2,7 @@
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
 import {formatDateTimeBR,ubatubaLocalDateTimeToIso} from "../../lib/datetime";
 
@@ -136,7 +137,8 @@ export default function AuditPage(){
    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href);
   }catch(error){setMessage(error instanceof Error?error.message:"Falha ao baixar dossiê.");}
  },[]);
- useEffect(()=>{void load();void verify();void loadCheckpoints()},[verify,loadCheckpoints]);
+ useEffect(()=>{void load();
+ useRealtimeRefresh(async()=>{if(busy||checkpointBusy)return;await load();await verify();await loadCheckpoints()},true,15000);void verify();void loadCheckpoints()},[verify,loadCheckpoints]);
 
  function filter(event:FormEvent){event.preventDefault();void load(params)}
  function clear(){
