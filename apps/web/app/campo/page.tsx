@@ -496,9 +496,10 @@ export default function CampoPage() {
                   <strong>{item.protocol}</strong>
                   <small>{item.summary}</small>
                   <small>
-                    {[item.neighborhood, item.teamCode ? `Equipe ${item.teamCode}` : null]
+                    {[item.neighborhood, item.teamCode ? `Equipe ${item.teamCode}` : null, item.vehicleCode ? `Viatura ${item.vehicleCode}` : null]
                       .filter(Boolean).join(" · ") || item.typeName}
                   </small>
+                  <small>Aberta há {elapsedLabel(item.createdAt)}</small>
                 </span>
               </button>
             ))}
@@ -542,6 +543,7 @@ export default function CampoPage() {
             <article className="card" key={position.userId}>
               <h2>{position.teamCode ? `Equipe ${position.teamCode}` : position.displayName}</h2>
               <p>{position.teamCode ? position.displayName : "Agente em campo"} · matrícula {position.matricula}</p>
+              {position.vehicleCode&&<p><strong>Viatura:</strong> {position.vehicleCode}{position.vehiclePlate?` · ${position.vehiclePlate}`:""}{position.vehicleDescription?` · ${position.vehicleDescription}`:""}</p>}
               <p><strong>Registrada no SIGDEC em:</strong> {formatDateTimeBR(position.recordedAt)}</p>
               {position.capturedAt&&<p><small>Coletada pelo dispositivo em {formatDateTimeBR(position.capturedAt)}</small></p>}
               <a
