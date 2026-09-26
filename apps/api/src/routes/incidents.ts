@@ -831,7 +831,10 @@ export async function incidentRoutes(app: FastifyInstance) {
     const auth = authFrom(request);
     const organizationId = requireOrganization(auth.organizationId);
     const result = await db.query(
-      `SELECT id, code, plate, description, status, odometer_km AS "odometerKm"
+      `SELECT id, code, plate, description, vehicle_type AS "vehicleType",
+              passenger_capacity AS "passengerCapacity",
+              CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
+              status, odometer_km AS "odometerKm"
          FROM vehicles
         WHERE organization_id=$1 AND active=true
         ORDER BY code`,
