@@ -14,9 +14,11 @@ const teamInput=z.object({
  status:z.enum(["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","UNAVAILABLE"]).default("AVAILABLE"),
  active:z.boolean().default(true)
 });
+const vehicleTypeSchema=z.enum(["PICKUP","SUV","CAR","VAN","TRUCK","MOTORCYCLE","BOAT","TRAILER","OTHER"]);
 const vehicleInput=z.object({
  code:z.string().trim().min(1).max(40),plate:z.string().trim().max(16).default(""),
- description:z.string().trim().min(2).max(300),
+ description:z.string().trim().min(2).max(300),vehicleType:vehicleTypeSchema.default("OTHER"),
+ passengerCapacity:z.number().int().min(0).max(99).nullable().optional(),
  status:z.enum(["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","MAINTENANCE","UNAVAILABLE"]).default("AVAILABLE"),
  odometerKm:z.number().nonnegative().max(99999999).nullable().optional(),active:z.boolean().default(true)
 });
@@ -26,6 +28,13 @@ const incidentTypeInput=z.object({
  defaultPriority:z.enum(["P1","P2","P3","P4","P5"]).default("P3"),active:z.boolean().default(true)
 });
 const teamMemberInput=z.object({userId:uuid,roleName:z.string().trim().max(160).default("")});
+const jobTitleInput=z.object({
+ code:z.string().trim().min(2).max(80),
+ name:z.string().trim().min(3).max(240),
+ employmentType:z.enum(["COMMISSIONED","EFFECTIVE","FUNCTION","OTHER"]).default("OTHER"),
+ sourceReference:z.string().trim().max(1000).default(""),
+ active:z.boolean().default(true)
+});
 const org=(request:FastifyRequest)=>{const value=authFrom(request).organizationId;if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});return value};
 const audit=async(request:FastifyRequest,action:string,id:string,before:unknown,after:unknown)=>{
  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
@@ -195,6 +204,50 @@ export async function adminDataRoutes(app:FastifyInstance){
   await audit(request,"ADMIN_ITEM_DEACTIVATED",id,{active:true},result.rows[0]);return {ok:true};
  });
 
+ app.get("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("system.master")},async request=>{
+  const result=await db.query(`SELECT id,code,name,employment_type AS "employmentType",
+    source_reference AS "sourceReference",active,created_at AS "createdAt",updated_at AS "updatedAt"
+    FROM operational_job_titles WHERE organization_id=$1 ORDER BY active DESC,name`,[org(request)]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const parsed=jobTitleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const v=parsed.data,o=org(request);
+  try{
+   const result=await db.query(`INSERT INTO operational_job_titles(
+    organization_id,code,name,employment_type,source_reference,active)
+    VALUES($1,$2,$3,$4,$5,$6)
+    RETURNING id,code,name,employment_type AS "employmentType",source_reference AS "sourceReference",active`,
+    [o,v.code,v.name,v.employmentType,v.sourceReference||null,v.active]);
+   await auditEntity(request,"ADMIN_JOB_TITLE_CREATED","operational_job_title",result.rows[0].id,null,result.rows[0]);
+   return reply.code(201).send(result.rows[0]);
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"JOB_TITLE_CODE_EXISTS"});throw error}
+ });
+
+ app.put("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string},parsed=jobTitleInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const o=org(request),before=await db.query("SELECT * FROM operational_job_titles WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const v=parsed.data;
+  try{
+   const result=await db.query(`UPDATE operational_job_titles SET code=$3,name=$4,employment_type=$5,
+    source_reference=$6,active=$7,updated_at=now()
+    WHERE id=$1 AND organization_id=$2
+    RETURNING id,code,name,employment_type AS "employmentType",source_reference AS "sourceReference",active`,
+    [id,o,v.code,v.name,v.employmentType,v.sourceReference||null,v.active]);
+   await auditEntity(request,"ADMIN_JOB_TITLE_UPDATED","operational_job_title",id,before.rows[0],result.rows[0]);return result.rows[0];
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"JOB_TITLE_CODE_EXISTS"});throw error}
+ });
+
+ app.delete("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const result=await db.query("UPDATE operational_job_titles SET active=false,updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,org(request)]);
+  if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await auditEntity(request,"ADMIN_JOB_TITLE_DEACTIVATED","operational_job_title",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
  app.get("/api/v1/admin/resources/teams",{preHandler:requirePermission("system.master")},async request=>{
   const result=await db.query(`SELECT t.id,t.code,t.name,t.status,t.active,t.created_at AS "createdAt",
     count(tm.user_id)::int AS "memberCount"
@@ -274,7 +327,10 @@ export async function adminDataRoutes(app:FastifyInstance){
  });
 
  app.get("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("system.master")},async request=>{
-  const result=await db.query(`SELECT id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm",created_at AS "createdAt"
+  const result=await db.query(`SELECT id,code,plate,description,vehicle_type AS "vehicleType",
+    passenger_capacity AS "passengerCapacity",
+    CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
+    status,active,odometer_km::float8 AS "odometerKm",created_at AS "createdAt"
     FROM vehicles WHERE organization_id=$1 ORDER BY active DESC,code`,[org(request)]);
   return {items:result.rows};
  });
@@ -283,9 +339,13 @@ export async function adminDataRoutes(app:FastifyInstance){
   const parsed=vehicleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,o=org(request);
   try{
-   const result=await db.query(`INSERT INTO vehicles(organization_id,code,plate,description,status,active,odometer_km)
-    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm"`,
-    [o,v.code,v.plate||null,v.description,v.status,v.active,v.odometerKm??null]);
+   const result=await db.query(`INSERT INTO vehicles(
+    organization_id,code,plate,description,vehicle_type,passenger_capacity,status,active,odometer_km)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    RETURNING id,code,plate,description,vehicle_type AS "vehicleType",passenger_capacity AS "passengerCapacity",
+      CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
+      status,active,odometer_km::float8 AS "odometerKm"`,
+    [o,v.code,v.plate||null,v.description,v.vehicleType,v.passengerCapacity??null,v.status,v.active,v.odometerKm??null]);
    await auditEntity(request,"ADMIN_VEHICLE_CREATED","vehicle",result.rows[0].id,null,result.rows[0]);return reply.code(201).send(result.rows[0]);
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
  });
@@ -293,13 +353,17 @@ export async function adminDataRoutes(app:FastifyInstance){
  app.put("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=vehicleInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
-  const o=org(request),before=await db.query("SELECT id,code,plate,description,status,active,odometer_km FROM vehicles WHERE id=$1 AND organization_id=$2",[id,o]);
+  const o=org(request),before=await db.query("SELECT id,code,plate,description,vehicle_type,passenger_capacity,status,active,odometer_km FROM vehicles WHERE id=$1 AND organization_id=$2",[id,o]);
   if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   const v=parsed.data;
   try{
-   const result=await db.query(`UPDATE vehicles SET code=$3,plate=$4,description=$5,status=$6,active=$7,odometer_km=$8
-    WHERE id=$1 AND organization_id=$2 RETURNING id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm"`,
-    [id,o,v.code,v.plate||null,v.description,v.status,v.active,v.odometerKm??null]);
+   const result=await db.query(`UPDATE vehicles SET code=$3,plate=$4,description=$5,vehicle_type=$6,
+    passenger_capacity=$7,status=$8,active=$9,odometer_km=$10
+    WHERE id=$1 AND organization_id=$2
+    RETURNING id,code,plate,description,vehicle_type AS "vehicleType",passenger_capacity AS "passengerCapacity",
+      CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
+      status,active,odometer_km::float8 AS "odometerKm"`,
+    [id,o,v.code,v.plate||null,v.description,v.vehicleType,v.passengerCapacity??null,v.status,v.active,v.odometerKm??null]);
    await auditEntity(request,"ADMIN_VEHICLE_UPDATED","vehicle",id,before.rows[0],result.rows[0]);return result.rows[0];
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
  });
