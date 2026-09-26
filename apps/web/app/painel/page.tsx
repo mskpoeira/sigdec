@@ -13,9 +13,9 @@ type SessionUser={id:string;matricula:string;displayName:string;email:string|nul
 const nav: Array<[string,string,Route,string?]> =[
 ["⌂","Início","/painel"],["⚠","Ocorrências","/ocorrencias","incidents"],["◉","Riscos e Mapas","/campo","field"],["▲","Alertas","/monitoramento","monitoring"],
 ["♥","Assistência Humanitária","/assistencia","humanitarian"],["⌂","Abrigos","/assistencia#abrigos" as Route,"humanitarian"],["♟","Famílias","/assistencia#familias" as Route,"humanitarian"],["◇","Doações e Estoque","/assistencia#estoque" as Route,"humanitarian"],
-["♥","Voluntariado","/voluntarios","volunteers"],["▥","Centro de Gestão","/gestao"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
+["♥","Voluntariado","/voluntarios","volunteers"],["▦","Planejamento","/planejamento"],["▥","Centro de Gestão","/gestao"],["▤","Documentos","/documentos","documents"],["⚙","Administração","/administracao"]
 ];
-const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▥","Centro de Gestão","/gestao","gray"]];
+const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","PLANCON / SE-ECP","/planejamento","purple"],["▥","Centro de Gestão","/gestao","gray"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
 type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;neighborhood:string|null;latitude:number|null;longitude:number|null};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
