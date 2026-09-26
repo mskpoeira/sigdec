@@ -478,9 +478,9 @@ export async function incidentRoutes(app: FastifyInstance) {
     const before=await db.query(`SELECT id,status,incident_id AS "incidentId" FROM operational_support_requests WHERE id=$1 AND organization_id=$2`,[id,organizationId]);
     const current=before.rows[0] as {status:string;incidentId?:string|null}|undefined;if(!current)return reply.code(404).send({error:"NOT_FOUND"});
     const v=parsed.data;
-    const r=await db.query(`UPDATE operational_support_requests SET status=$1,external_protocol=COALESCE($2,external_protocol),resolution_notes=COALESCE($3,resolution_notes),
-      submitted_at=CASE WHEN $1='SUBMITTED' THEN COALESCE(submitted_at,now()) ELSE submitted_at END,
-      resolved_at=CASE WHEN $1 IN ('APPROVED','REJECTED','COMPLETED','CANCELLED') THEN now() ELSE resolved_at END,updated_at=now()
+    const r=await db.query(`UPDATE operational_support_requests SET status=$1::varchar,external_protocol=COALESCE($2,external_protocol),resolution_notes=COALESCE($3,resolution_notes),
+      submitted_at=CASE WHEN $1::varchar='SUBMITTED' THEN COALESCE(submitted_at,now()) ELSE submitted_at END,
+      resolved_at=CASE WHEN $1::varchar IN ('APPROVED','REJECTED','COMPLETED','CANCELLED') THEN now() ELSE resolved_at END,updated_at=now()
       WHERE id=$4 AND organization_id=$5 RETURNING id,status,external_protocol AS "externalProtocol",resolved_at AS "resolvedAt"`,[v.status,v.externalProtocol??null,v.resolutionNotes??null,id,organizationId]);
     if(current.incidentId)await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata) VALUES($1,'support_request.status_changed',$2,$3,$4::jsonb)`,[current.incidentId,auth.userId,`Solicitação operacional atualizada para ${v.status}.`,JSON.stringify({requestId:id,from:current.status,to:v.status})]);
     await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'support_request.status','operational_support_request',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
@@ -525,12 +525,12 @@ export async function incidentRoutes(app: FastifyInstance) {
 
       await client.query(
         `UPDATE incidents
-            SET status = $3,
-                dispatched_at = CASE WHEN $3='DISPATCHED' AND dispatched_at IS NULL THEN now() ELSE dispatched_at END,
-                enroute_at = CASE WHEN $3='EN_ROUTE' AND enroute_at IS NULL THEN now() ELSE enroute_at END,
-                arrived_at = CASE WHEN $3='ON_SCENE' AND arrived_at IS NULL THEN now() ELSE arrived_at END,
-                completed_at = CASE WHEN $3='COMPLETED' AND completed_at IS NULL THEN now() ELSE completed_at END,
-                closed_at = CASE WHEN $3='CLOSED' AND closed_at IS NULL THEN now() ELSE closed_at END,
+            SET status = $3::varchar,
+                dispatched_at = CASE WHEN $3::varchar='DISPATCHED' AND dispatched_at IS NULL THEN now() ELSE dispatched_at END,
+                enroute_at = CASE WHEN $3::varchar='EN_ROUTE' AND enroute_at IS NULL THEN now() ELSE enroute_at END,
+                arrived_at = CASE WHEN $3::varchar='ON_SCENE' AND arrived_at IS NULL THEN now() ELSE arrived_at END,
+                completed_at = CASE WHEN $3::varchar='COMPLETED' AND completed_at IS NULL THEN now() ELSE completed_at END,
+                closed_at = CASE WHEN $3::varchar='CLOSED' AND closed_at IS NULL THEN now() ELSE closed_at END,
                 updated_at = now()
           WHERE id = $1 AND organization_id = $2`,
         [id, organizationId, parsed.data.status]

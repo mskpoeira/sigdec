@@ -115,6 +115,28 @@ const dispatchNext: Record<string, string[]> = {
   ON_SCENE: ["RELEASED"]
 };
 
+
+const sourceLabels: Record<string,string> = {
+  phone_199: "Telefone 199",
+  phone_admin: "Telefone administrativo",
+  radio: "Rádio",
+  whatsapp: "WhatsApp",
+  portal: "Portal",
+  walk_in: "Presencial",
+  internal: "Interno",
+  other: "Outro"
+};
+
+function formatPhoneBR(value:string|null,type:"LANDLINE"|"MOBILE"|null){
+  if(!value)return "";
+  const digits=value.replace(/\D/g,"");
+  const resolved=type??(digits.length===11?"MOBILE":digits.length===10?"LANDLINE":null);
+  if(!resolved)return value;
+  if(resolved==="MOBILE"&&digits.length===11)return `(${digits.slice(0,2)}) ${digits.slice(2,7)}-${digits.slice(7)}`;
+  if(resolved==="LANDLINE"&&digits.length===10)return `(${digits.slice(0,2)}) ${digits.slice(2,6)}-${digits.slice(6)}`;
+  return value;
+}
+
 export default function OcorrenciaDetalhePage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -317,6 +339,8 @@ export default function OcorrenciaDetalhePage() {
 
   const incident = detail.incident;
   const callerPhoneDigits = (incident.caller_phone ?? "").replace(/\D/g, "");
+  const callerPhoneType = incident.caller_phone_type ?? (callerPhoneDigits.length===11?"MOBILE":callerPhoneDigits.length===10?"LANDLINE":null);
+  const callerPhoneFormatted = formatPhoneBR(incident.caller_phone,callerPhoneType);
   const whatsappHref = incident.caller_phone_whatsapp && callerPhoneDigits
     ? `https://wa.me/55${callerPhoneDigits}`
     : null;
@@ -349,11 +373,11 @@ export default function OcorrenciaDetalhePage() {
           <dl className="detailList">
             <div><dt>Situação</dt><dd>{statusLabels[incident.status] ?? incident.status}</dd></div>
             <div><dt>Risco à vida</dt><dd>{incident.risk_to_life ? "Sim" : "Não"}</dd></div>
-            <div><dt>Origem</dt><dd>{incident.source}</dd></div>
+            <div><dt>Origem</dt><dd>{sourceLabels[incident.source] ?? incident.source}</dd></div>
             <div><dt>Aberta em</dt><dd>{formatDateTimeBR(incident.created_at)}</dd></div><div><dt>Registrada por</dt><dd>Matrícula {incident.created_by_matricula??"—"}{incident.created_by_name?` · ${incident.created_by_name}`:""}</dd></div>
             <div><dt>Solicitante</dt><dd>{incident.caller_name || "Não informado"}</dd></div>
-            <div><dt>Telefone</dt><dd>{incident.caller_phone || "Não informado"}</dd></div>
-            <div><dt>Tipo do telefone</dt><dd>{incident.caller_phone_type==="MOBILE"?"Celular":incident.caller_phone_type==="LANDLINE"?"Telefone fixo":"Não informado"}</dd></div>
+            <div><dt>Telefone</dt><dd>{callerPhoneFormatted ? <a href={`tel:${callerPhoneDigits}`}>{callerPhoneFormatted}</a> : "Não informado"}</dd></div>
+            <div><dt>Tipo do telefone</dt><dd>{callerPhoneType==="MOBILE"?"Celular":callerPhoneType==="LANDLINE"?"Telefone fixo":"Não informado"}</dd></div>
             <div><dt>WhatsApp</dt><dd>{incident.caller_phone ? (incident.caller_phone_whatsapp ? "Sim" : "Não") : "Não informado"}{whatsappHref&&<> · <a href={whatsappHref} target="_blank" rel="noreferrer">Abrir conversa</a></>}</dd></div>
             <div className="detailWide"><dt>Descrição</dt><dd>{incident.description || "Sem descrição complementar."}</dd></div>
           </dl>
