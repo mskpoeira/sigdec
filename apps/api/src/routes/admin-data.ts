@@ -9,10 +9,32 @@ import {currentAuditEd25519KeyId,signAuditCheckpoint,verifyAuditCheckpoint} from
 const uuid=z.string().uuid();
 const itemInput=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),
  unit:z.string().trim().min(1).max(30),category:z.string().trim().min(1).max(50),active:z.boolean()});
+const teamInput=z.object({
+ code:z.string().trim().min(1).max(40),name:z.string().trim().min(2).max(200),
+ status:z.enum(["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","UNAVAILABLE"]).default("AVAILABLE"),
+ active:z.boolean().default(true)
+});
+const vehicleInput=z.object({
+ code:z.string().trim().min(1).max(40),plate:z.string().trim().max(16).default(""),
+ description:z.string().trim().min(2).max(300),
+ status:z.enum(["AVAILABLE","DISPATCHED","EN_ROUTE","ON_SCENE","RETURNING","MAINTENANCE","UNAVAILABLE"]).default("AVAILABLE"),
+ odometerKm:z.number().nonnegative().max(99999999).nullable().optional(),active:z.boolean().default(true)
+});
+const incidentTypeInput=z.object({
+ code:z.string().trim().min(2).max(80),name:z.string().trim().min(2).max(200),
+ groupName:z.string().trim().min(2).max(160),cobradeCode:z.string().trim().max(32).default(""),
+ defaultPriority:z.enum(["P1","P2","P3","P4","P5"]).default("P3"),active:z.boolean().default(true)
+});
+const teamMemberInput=z.object({userId:uuid,roleName:z.string().trim().max(160).default("")});
 const org=(request:FastifyRequest)=>{const value=authFrom(request).organizationId;if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});return value};
 const audit=async(request:FastifyRequest,action:string,id:string,before:unknown,after:unknown)=>{
  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
   VALUES($1,$2,'humanitarian_item',$3,$4,$5,$6::jsonb,$7::jsonb)`,[authFrom(request).userId,action,id,request.ip,
+  request.headers["user-agent"]??null,JSON.stringify(before??null),JSON.stringify(after??null)]);
+};
+const auditEntity=async(request:FastifyRequest,action:string,entityType:string,id:string,before:unknown,after:unknown)=>{
+ await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
+  VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)`,[authFrom(request).userId,action,entityType,id,request.ip,
   request.headers["user-agent"]??null,JSON.stringify(before??null),JSON.stringify(after??null)]);
 };
 const auditQuery=z.object({
@@ -171,6 +193,213 @@ export async function adminDataRoutes(app:FastifyInstance){
   const result=await db.query("UPDATE humanitarian_items SET active=false WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,org(request)]);
   if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   await audit(request,"ADMIN_ITEM_DEACTIVATED",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/resources/teams",{preHandler:requirePermission("system.master")},async request=>{
+  const result=await db.query(`SELECT t.id,t.code,t.name,t.status,t.active,t.created_at AS "createdAt",
+    count(tm.user_id)::int AS "memberCount"
+    FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id
+    WHERE t.organization_id=$1 GROUP BY t.id ORDER BY t.active DESC,t.code`,[org(request)]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/admin/resources/teams",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const parsed=teamInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const v=parsed.data,o=org(request);
+  try{
+   const result=await db.query(`INSERT INTO teams(organization_id,code,name,status,active)
+    VALUES($1,$2,$3,$4,$5) RETURNING id,code,name,status,active`,[o,v.code,v.name,v.status,v.active]);
+   await auditEntity(request,"ADMIN_TEAM_CREATED","team",result.rows[0].id,null,result.rows[0]);
+   return reply.code(201).send(result.rows[0]);
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"TEAM_CODE_EXISTS"});throw error}
+ });
+
+ app.put("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string},parsed=teamInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const o=org(request),before=await db.query("SELECT id,code,name,status,active FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const v=parsed.data;
+  try{
+   const result=await db.query(`UPDATE teams SET code=$3,name=$4,status=$5,active=$6
+    WHERE id=$1 AND organization_id=$2 RETURNING id,code,name,status,active`,[id,o,v.code,v.name,v.status,v.active]);
+   await auditEntity(request,"ADMIN_TEAM_UPDATED","team",id,before.rows[0],result.rows[0]);return result.rows[0];
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"TEAM_CODE_EXISTS"});throw error}
+ });
+
+ app.delete("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const o=org(request);
+  const inUse=await db.query(`SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND current_team_id=$1 AND status NOT IN ('COMPLETED','CLOSED','CANCELLED')) AS used`,[id,o]);
+  if(inUse.rows[0]?.used)return reply.code(409).send({error:"RESOURCE_IN_USE",message:"A equipe está vinculada a ocorrência em andamento."});
+  const result=await db.query("UPDATE teams SET active=false,status='UNAVAILABLE' WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,o]);
+  if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await auditEntity(request,"ADMIN_TEAM_DEACTIVATED","team",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const o=org(request);
+  const team=await db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);if(!team.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const result=await db.query(`SELECT u.id AS "userId",u.matricula,u.display_name AS "displayName",u.job_title AS "jobTitle",
+    tm.role_name AS "roleName",tm.joined_at AS "joinedAt"
+    FROM team_members tm JOIN users u ON u.id=tm.user_id
+    WHERE tm.team_id=$1 AND u.organization_id=$2 ORDER BY u.display_name`,[id,o]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string},parsed=teamMemberInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const o=org(request),v=parsed.data;
+  const [team,user]=await Promise.all([
+   db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]),
+   db.query("SELECT id,matricula,display_name FROM users WHERE id=$1 AND organization_id=$2 AND active=true",[v.userId,o])
+  ]);
+  if(!team.rows[0]||!user.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await db.query(`INSERT INTO team_members(team_id,user_id,role_name) VALUES($1,$2,$3)
+    ON CONFLICT(team_id,user_id) DO UPDATE SET role_name=EXCLUDED.role_name`,[id,v.userId,v.roleName||null]);
+  await auditEntity(request,"ADMIN_TEAM_MEMBER_SAVED","team_member",id+":"+v.userId,null,{teamId:id,userId:v.userId,matricula:user.rows[0].matricula,roleName:v.roleName});
+  return reply.code(201).send({ok:true});
+ });
+
+ app.delete("/api/v1/admin/resources/teams/:id/members/:userId",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id,userId}=request.params as {id:string;userId:string};
+  if(!uuid.safeParse(id).success||!uuid.safeParse(userId).success)return reply.code(400).send({error:"INVALID_ID"});
+  const o=org(request),team=await db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!team.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const result=await db.query("DELETE FROM team_members WHERE team_id=$1 AND user_id=$2 RETURNING role_name",[id,userId]);
+  if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await auditEntity(request,"ADMIN_TEAM_MEMBER_REMOVED","team_member",id+":"+userId,result.rows[0],null);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("system.master")},async request=>{
+  const result=await db.query(`SELECT id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm",created_at AS "createdAt"
+    FROM vehicles WHERE organization_id=$1 ORDER BY active DESC,code`,[org(request)]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const parsed=vehicleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const v=parsed.data,o=org(request);
+  try{
+   const result=await db.query(`INSERT INTO vehicles(organization_id,code,plate,description,status,active,odometer_km)
+    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm"`,
+    [o,v.code,v.plate||null,v.description,v.status,v.active,v.odometerKm??null]);
+   await auditEntity(request,"ADMIN_VEHICLE_CREATED","vehicle",result.rows[0].id,null,result.rows[0]);return reply.code(201).send(result.rows[0]);
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
+ });
+
+ app.put("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string},parsed=vehicleInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const o=org(request),before=await db.query("SELECT id,code,plate,description,status,active,odometer_km FROM vehicles WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const v=parsed.data;
+  try{
+   const result=await db.query(`UPDATE vehicles SET code=$3,plate=$4,description=$5,status=$6,active=$7,odometer_km=$8
+    WHERE id=$1 AND organization_id=$2 RETURNING id,code,plate,description,status,active,odometer_km::float8 AS "odometerKm"`,
+    [id,o,v.code,v.plate||null,v.description,v.status,v.active,v.odometerKm??null]);
+   await auditEntity(request,"ADMIN_VEHICLE_UPDATED","vehicle",id,before.rows[0],result.rows[0]);return result.rows[0];
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
+ });
+
+ app.delete("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const o=org(request);
+  const inUse=await db.query(`SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND current_vehicle_id=$1 AND status NOT IN ('COMPLETED','CLOSED','CANCELLED')) AS used`,[id,o]);
+  if(inUse.rows[0]?.used)return reply.code(409).send({error:"RESOURCE_IN_USE",message:"A viatura está vinculada a ocorrência em andamento."});
+  const result=await db.query("UPDATE vehicles SET active=false,status='UNAVAILABLE' WHERE id=$1 AND organization_id=$2 RETURNING id,code,description",[id,o]);
+  if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await auditEntity(request,"ADMIN_VEHICLE_DEACTIVATED","vehicle",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("system.master")},async request=>{
+  const o=org(request);
+  const result=await db.query(`SELECT id,code,name,group_name AS "groupName",cobrade_code AS "cobradeCode",
+    default_priority AS "defaultPriority",active,organization_id IS NULL AS "systemType"
+    FROM incident_types WHERE organization_id IS NULL OR organization_id=$1
+    ORDER BY organization_id NULLS FIRST,group_name,name`,[o]);
+  return {items:result.rows};
+ });
+
+ app.post("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const parsed=incidentTypeInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
+  const v=parsed.data,o=org(request);
+  try{
+   const result=await db.query(`INSERT INTO incident_types(organization_id,code,name,group_name,cobrade_code,default_priority,active)
+    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,code,name,group_name AS "groupName",cobrade_code AS "cobradeCode",default_priority AS "defaultPriority",active`,
+    [o,v.code,v.name,v.groupName,v.cobradeCode||null,v.defaultPriority,v.active]);
+   await auditEntity(request,"ADMIN_INCIDENT_TYPE_CREATED","incident_type",result.rows[0].id,null,result.rows[0]);return reply.code(201).send(result.rows[0]);
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"INCIDENT_TYPE_CODE_EXISTS"});throw error}
+ });
+
+ app.put("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string},parsed=incidentTypeInput.safeParse(request.body);
+  if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const o=org(request),before=await db.query("SELECT id,code,name,group_name,cobrade_code,default_priority,active FROM incident_types WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND",message:"Tipos do sistema são somente leitura; crie um tipo municipal para personalizar."});
+  const v=parsed.data;
+  try{
+   const result=await db.query(`UPDATE incident_types SET code=$3,name=$4,group_name=$5,cobrade_code=$6,default_priority=$7,active=$8
+    WHERE id=$1 AND organization_id=$2 RETURNING id,code,name,group_name AS "groupName",cobrade_code AS "cobradeCode",default_priority AS "defaultPriority",active`,
+    [id,o,v.code,v.name,v.groupName,v.cobradeCode||null,v.defaultPriority,v.active]);
+   await auditEntity(request,"ADMIN_INCIDENT_TYPE_UPDATED","incident_type",id,before.rows[0],result.rows[0]);return result.rows[0];
+  }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"INCIDENT_TYPE_CODE_EXISTS"});throw error}
+ });
+
+ app.delete("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+  const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const o=org(request);
+  const inUse=await db.query("SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND incident_type_id=$1) AS used",[id,o]);
+  if(inUse.rows[0]?.used)return reply.code(409).send({error:"RESOURCE_IN_USE",message:"O tipo possui ocorrências e não pode ser desativado pela tela."});
+  const result=await db.query("UPDATE incident_types SET active=false WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,o]);
+  if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  await auditEntity(request,"ADMIN_INCIDENT_TYPE_DEACTIVATED","incident_type",id,{active:true},result.rows[0]);return {ok:true};
+ });
+
+ app.get("/api/v1/admin/presentation-readiness",{preHandler:requirePermission("system.master")},async request=>{
+  const o=org(request);
+  const [counts,migration,auditIntegrity]=await Promise.all([
+   db.query(`SELECT
+    (SELECT count(*) FROM users WHERE organization_id=$1 AND active)::int AS "activeUsers",
+    (SELECT count(DISTINCT u.id) FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE u.organization_id=$1 AND u.active AND r.code='MASTER')::int AS "activeMasters",
+    (SELECT count(*) FROM incident_types WHERE active AND (organization_id IS NULL OR organization_id=$1))::int AS "incidentTypes",
+    (SELECT count(*) FROM teams WHERE organization_id=$1 AND active)::int AS teams,
+    (SELECT count(*) FROM vehicles WHERE organization_id=$1 AND active)::int AS vehicles,
+    (SELECT count(*) FROM humanitarian_items WHERE organization_id=$1 AND active)::int AS "humanitarianItems",
+    (SELECT count(*) FROM shelters WHERE organization_id=$1)::int AS shelters,
+    (SELECT count(*) FROM monitoring_stations WHERE organization_id=$1 AND active)::int AS "monitoringStations",
+    (SELECT count(*) FROM communication_assets WHERE organization_id=$1 AND status<>'INACTIVE')::int AS "communicationAssets",
+    (SELECT count(*) FROM contingency_plans WHERE organization_id=$1 AND status IN ('APPROVED','ACTIVE'))::int AS "approvedPlancon",
+    (SELECT count(*) FROM integration_endpoints WHERE organization_id=$1 AND active)::int AS integrations`,[o]),
+   db.query(`SELECT filename,applied_at AS "appliedAt" FROM schema_migrations ORDER BY applied_at DESC,filename DESC LIMIT 1`),
+   db.query(`SELECT count(*)::int AS total,
+     count(*) FILTER(WHERE a.integrity_hash IS NULL)::int AS unsealed,
+     count(*) FILTER(WHERE a.integrity_hash IS NOT NULL AND a.integrity_hash<>sigdec_calculate_audit_hash(a))::int AS invalid
+     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1`,[o])
+  ]);
+  const metrics=counts.rows[0],integrity=auditIntegrity.rows[0];
+  const checks=[
+   {code:"MASTER",label:"Administrador Master ativo",ok:Number(metrics.activeMasters)>0,critical:true,link:"/administracao/usuarios"},
+   {code:"AUDIT",label:"Auditoria sem divergências",ok:Number(integrity.invalid)===0&&Number(integrity.unsealed)===0,critical:true,link:"/administracao/auditoria"},
+   {code:"INCIDENT_TYPES",label:"Tipos de ocorrência disponíveis",ok:Number(metrics.incidentTypes)>0,critical:true,link:"/administracao/cadastros"},
+   {code:"TEAMS",label:"Equipe operacional cadastrada",ok:Number(metrics.teams)>0,critical:false,link:"/administracao/cadastros"},
+   {code:"VEHICLES",label:"Viatura cadastrada",ok:Number(metrics.vehicles)>0,critical:false,link:"/administracao/cadastros"},
+   {code:"ITEMS",label:"Itens humanitários cadastrados",ok:Number(metrics.humanitarianItems)>0,critical:false,link:"/administracao/cadastros"},
+   {code:"MONITORING",label:"Estação de monitoramento cadastrada",ok:Number(metrics.monitoringStations)>0,critical:false,link:"/monitoramento"},
+   {code:"COMMUNICATIONS",label:"Ativo de comunicação cadastrado",ok:Number(metrics.communicationAssets)>0,critical:false,link:"/comunicacoes"},
+   {code:"PLANCON",label:"PLANCON aprovado/ativo",ok:Number(metrics.approvedPlancon)>0,critical:false,link:"/planejamento"},
+   {code:"SHELTERS",label:"Abrigo cadastrado",ok:Number(metrics.shelters)>0,critical:false,link:"/assistencia#abrigos"}
+  ];
+  const criticalOk=checks.filter(x=>x.critical).every(x=>x.ok),recommendedOk=checks.every(x=>x.ok);
+  return {
+   status:criticalOk?(recommendedOk?"READY":"ATTENTION"):"BLOCKED",
+   generatedAt:new Date().toISOString(),
+   metrics:{...metrics,auditTotal:Number(integrity.total),auditInvalid:Number(integrity.invalid),auditUnsealed:Number(integrity.unsealed)},
+   migration:migration.rows[0]??null,checks,
+   architecture:{jsonApis:true,postgis:true,auditAppendOnly:true,ed25519Checkpoints:true,offlineFieldSupport:true}
+  };
  });
 
  app.get("/api/v1/admin/audit",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
