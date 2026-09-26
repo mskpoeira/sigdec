@@ -18,8 +18,11 @@ CREATE TABLE IF NOT EXISTS audit_integrity_checkpoints (
 CREATE INDEX IF NOT EXISTS audit_integrity_checkpoints_org_created_idx
   ON audit_integrity_checkpoints(organization_id, created_at DESC, id DESC);
 
-CREATE INDEX IF NOT EXISTS audit_integrity_checkpoints_hash_idx
-  ON audit_integrity_checkpoints(checkpoint_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS audit_integrity_checkpoints_hash_idx
+  ON audit_integrity_checkpoints(organization_id,checkpoint_hash);
+
+CREATE UNIQUE INDEX IF NOT EXISTS audit_integrity_checkpoints_chain_unique_idx
+  ON audit_integrity_checkpoints(organization_id,COALESCE(previous_checkpoint_hash,'GENESIS'));
 
 CREATE OR REPLACE FUNCTION sigdec_prevent_audit_checkpoint_mutation()
 RETURNS trigger
