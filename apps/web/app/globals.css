@@ -338,3 +338,212 @@ body::selection{background:#cfe5f8;color:#09284a}
 .shell:not(.moduleShell):not(.loginShell) .card,
 .shell:not(.moduleShell):not(.loginShell) .incidentForm,
 .shell:not(.moduleShell):not(.loginShell) .infoCard{box-shadow:var(--sigdec-shadow);border-color:var(--sigdec-line)}
+
+
+/* ==========================================================================
+   v1.60 — experiência institucional: busca global, breadcrumbs e apresentação
+   ========================================================================== */
+.contextBreadcrumb{
+ position:absolute;z-index:4;left:34px;bottom:8px;display:flex;align-items:center;gap:6px;max-width:calc(100% - 68px);
+ color:#dcefff;font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.contextBreadcrumb span{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.contextBreadcrumb b{opacity:.5;font-size:.9rem}
+.contextBreadcrumb button{
+ border:0;background:transparent;color:#dcefff;padding:2px 0;cursor:pointer;font:inherit;text-decoration:none
+}
+.contextBreadcrumb button:hover{color:#fff;text-decoration:underline;text-underline-offset:3px}
+.contextBreadcrumb strong{overflow:hidden;text-overflow:ellipsis;color:#fff}
+
+.globalSearchLauncher{
+ position:fixed;right:18px;bottom:18px;z-index:850;display:flex;align-items:center;gap:9px;min-height:44px;
+ padding:9px 12px;border:1px solid rgba(255,255,255,.22);border-radius:13px;
+ background:linear-gradient(135deg,#0b3159,#075a9e);color:#fff;box-shadow:0 12px 34px rgba(4,34,62,.28);
+ cursor:pointer;font:inherit
+}
+.globalSearchLauncher>span{font-size:1.35rem;line-height:1}
+.globalSearchLauncher strong{font-size:.82rem}
+.globalSearchLauncher kbd,.commandPalette kbd{
+ padding:3px 6px;border:1px solid rgba(255,255,255,.24);border-bottom-width:2px;border-radius:6px;
+ background:rgba(255,255,255,.1);color:inherit;font:700 .65rem ui-monospace,SFMono-Regular,Consolas,monospace
+}
+.globalSearchLauncher:hover{transform:translateY(-2px);box-shadow:0 15px 38px rgba(4,34,62,.34)}
+
+.commandOverlay{
+ position:fixed;inset:0;z-index:1100;display:grid;place-items:start center;padding:11vh 16px 32px;
+ background:rgba(5,24,44,.55);backdrop-filter:blur(8px)
+}
+.commandPalette{
+ width:min(760px,100%);max-height:min(720px,78vh);display:flex;flex-direction:column;overflow:hidden;
+ border:1px solid rgba(255,255,255,.32);border-radius:20px;background:#fff;color:#102f50;
+ box-shadow:0 32px 90px rgba(2,21,39,.38)
+}
+.commandHeader{
+ display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:15px 16px;
+ border-bottom:1px solid #dbe6f0;background:linear-gradient(180deg,#fbfdff,#f4f9fd)
+}
+.commandHeader>span{font-size:1.6rem;color:#0b5ea8}
+.commandHeader input{
+ width:100%;min-width:0;border:0!important;outline:0!important;background:transparent!important;color:#102f50!important;
+ box-shadow:none!important;font-size:1rem;font-weight:700
+}
+.commandHeader input::placeholder{color:#7790a8;font-weight:500}
+.commandHeader button{width:34px;height:34px;border:0;border-radius:9px;background:#e8f0f7;color:#244b6c;font-size:1.25rem;cursor:pointer}
+.commandHeader button:hover{background:#dce9f4}
+.commandIntro{display:grid;gap:10px;padding:22px;color:#607790}
+.commandIntro>div{display:flex;align-items:center;gap:10px}
+.commandIntro kbd{min-width:55px;text-align:center;background:#edf4fa;color:#315a80;border-color:#d5e2ee}
+.commandQuick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:10px}
+.commandQuick button{
+ border:1px solid #dbe6f0;border-radius:11px;background:#fff;color:#173f69;padding:12px;text-align:left;font-weight:800;cursor:pointer
+}
+.commandQuick button:hover{border-color:#a9c4da;background:#f1f7fc;transform:translateY(-1px)}
+.commandState{padding:32px 22px;text-align:center;color:#637b91}
+.commandSpinner{
+ display:inline-block;width:15px;height:15px;margin-right:9px;border:2px solid #c6d8e8;border-top-color:#0b5ea8;border-radius:50%;
+ animation:sigdecSpin .7s linear infinite;vertical-align:-2px
+}
+@keyframes sigdecSpin{to{transform:rotate(360deg)}}
+.commandResults{overflow:auto;padding:8px}
+.commandResults>button{
+ width:100%;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:11px;align-items:center;padding:10px 11px;
+ border:0;border-radius:11px;background:transparent;color:#173f69;text-align:left;cursor:pointer
+}
+.commandResults>button:hover,.commandResults>button.selected{background:#eaf4fc}
+.commandResultIcon{
+ width:38px;height:38px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(135deg,#e7f2fb,#f5f9fc);
+ color:#0b5ea8;font-size:1.05rem;font-weight:900
+}
+.commandResultText{display:grid;gap:3px;min-width:0}
+.commandResultText strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.88rem}
+.commandResultText small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6c8399}
+.commandResultMeta{
+ max-width:150px;padding:4px 7px;border-radius:999px;background:#edf3f8;color:#506b82;font-size:.66rem;font-weight:850;
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.commandFooter{
+ display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 15px;border-top:1px solid #dbe6f0;
+ background:#f7fafc;color:#72879b;font-size:.7rem
+}
+.commandFooter kbd{background:#eaf1f7;color:#49657e;border-color:#d3e0ea}
+
+/* Apresentação institucional */
+.presentationMode{
+ min-height:100vh;background:
+ radial-gradient(circle at 82% 6%,rgba(227,94,47,.16),transparent 28rem),
+ radial-gradient(circle at 10% 92%,rgba(23,98,181,.18),transparent 32rem),
+ linear-gradient(135deg,#071f39 0%,#0b3159 52%,#075a9e 100%);
+ color:#fff;overflow:hidden
+}
+.presentationTopbar{
+ height:74px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 clamp(20px,4vw,58px);
+ border-bottom:1px solid rgba(255,255,255,.14);background:rgba(5,28,52,.55);backdrop-filter:blur(12px)
+}
+.presentationBrand{display:flex;align-items:center;gap:12px}
+.presentationMark{
+ width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.45);border-radius:11px;
+ background:rgba(255,255,255,.08);font-size:.78rem;font-weight:1000
+}
+.presentationBrand div{display:grid;gap:1px}.presentationBrand strong{font-size:1.15rem;letter-spacing:.04em}.presentationBrand small{color:#bcd0e3;font-size:.69rem}
+.presentationActions{display:flex;gap:8px;align-items:center}
+.presentationActions button,.presentationActions a{
+ border:1px solid rgba(255,255,255,.22);border-radius:9px;background:rgba(255,255,255,.08);color:#fff;
+ padding:9px 11px;text-decoration:none;font:800 .73rem inherit;cursor:pointer
+}
+.presentationActions button:hover,.presentationActions a:hover{background:#fff;color:#0b3159}
+.presentationLoading{min-height:calc(100vh - 74px);display:grid;place-items:center;font-size:1.1rem;color:#d8e8f6}
+.presentationViewport{min-height:calc(100vh - 74px);display:grid;grid-template-rows:minmax(0,1fr) auto}
+.presentationHeroSlide,.presentationModuleSlide{min-height:0;padding:clamp(34px,6vh,70px) clamp(26px,7vw,96px)}
+.presentationHeroSlide{
+ display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.65fr);grid-template-rows:auto auto auto;
+ gap:28px 56px;align-content:center
+}
+.presentationHeroCopy{max-width:840px}
+.presentationEyebrow{display:inline-block;color:#ffcab5;font-size:.72rem;font-weight:900;letter-spacing:.15em}
+.presentationHeroCopy h1,.presentationModuleCopy h1{
+ margin:13px 0 17px;font-size:clamp(2.8rem,5.5vw,5.4rem);line-height:.95;letter-spacing:-.055em
+}
+.presentationHeroCopy p,.presentationModuleCopy>p{max-width:800px;color:#d7e6f3;font-size:clamp(1rem,1.6vw,1.25rem);line-height:1.6}
+.presentationInstitution{display:flex;gap:16px;align-items:center;margin-top:24px;color:#c7daea}
+.presentationInstitution strong{color:#fff}.presentationInstitution span{font-size:.75rem}
+.presentationOverview{
+ display:grid;grid-template-columns:1fr 1fr;gap:12px;align-self:center
+}
+.presentationOverview>div,.presentationMetrics>div{
+ min-height:105px;display:grid;align-content:center;padding:17px;border:1px solid rgba(255,255,255,.14);border-radius:14px;
+ background:rgba(255,255,255,.08);backdrop-filter:blur(8px);box-shadow:0 12px 35px rgba(1,15,28,.13)
+}
+.presentationOverview strong,.presentationMetrics strong{font-size:2rem;line-height:1;color:#fff}
+.presentationOverview span,.presentationMetrics span{margin-top:7px;color:#c8dced;font-size:.76rem}
+.presentationLifecycle{
+ grid-column:1/-1;display:grid;grid-template-columns:repeat(7,1fr);gap:8px
+}
+.presentationLifecycle span{
+ display:flex;align-items:center;gap:8px;min-height:48px;padding:9px;border-radius:11px;background:rgba(255,255,255,.07);
+ color:#e5f0f9;font-size:.72rem;font-weight:800
+}
+.presentationLifecycle b{
+ width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:#e35e2f;color:#fff;font-size:.67rem
+}
+.presentationPrinciples{
+ grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px
+}
+.presentationPrinciples span{
+ padding:7px 10px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(255,255,255,.055);
+ color:#c7daea;font-size:.68rem;font-weight:800
+}
+.presentationModuleSlide{
+ display:grid;grid-template-columns:120px minmax(0,1.15fr) minmax(300px,.65fr);gap:40px;align-items:center
+}
+.presentationStep{align-self:start;padding-top:16px}.presentationStep span{display:block;font-size:4.5rem;font-weight:1000;color:rgba(255,255,255,.14);line-height:1}.presentationStep small{color:#ffcab5;font-weight:900;letter-spacing:.12em}
+.presentationModuleCopy{max-width:860px}
+.presentationModuleCopy h1{font-size:clamp(2.5rem,5vw,5rem)}
+.presentationMetrics{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:12px;margin-top:28px}
+.presentationModuleActions{display:flex;align-items:center;gap:16px;margin-top:25px}
+.presentationModuleActions a{
+ display:inline-flex;padding:11px 14px;border-radius:10px;background:#fff;color:#0b4e94;text-decoration:none;font-weight:900
+}
+.presentationModuleActions span{color:#adc7dc;font-size:.69rem}
+.presentationModuleVisual{
+ min-height:360px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;
+ border:1px solid rgba(255,255,255,.16);border-radius:28px;background:
+ radial-gradient(circle at 50% 28%,rgba(255,255,255,.16),transparent 15rem),
+ linear-gradient(145deg,rgba(255,255,255,.10),rgba(255,255,255,.035));
+ box-shadow:0 22px 60px rgba(1,17,31,.25);backdrop-filter:blur(10px)
+}
+.presentationModuleIcon{font-size:5.5rem;color:#ffb99d;text-shadow:0 9px 34px rgba(227,94,47,.28)}
+.presentationModuleVisual strong{margin-top:24px;font-size:1.35rem}.presentationModuleVisual small{margin-top:8px;color:#b8d0e3}
+.presentationControls{
+ min-height:82px;display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center;padding:12px clamp(20px,4vw,58px);
+ border-top:1px solid rgba(255,255,255,.12);background:rgba(5,25,47,.52);backdrop-filter:blur(12px)
+}
+.presentationProgress{display:flex;gap:6px}
+.presentationProgress button{width:25px;height:5px;border:0;border-radius:999px;background:rgba(255,255,255,.2);padding:0;cursor:pointer}
+.presentationProgress button.active{width:42px;background:#e35e2f}
+.presentationNav{display:flex;align-items:center;gap:10px}
+.presentationNav button{
+ border:1px solid rgba(255,255,255,.18);border-radius:9px;background:rgba(255,255,255,.07);color:#fff;padding:9px 12px;font-weight:800;cursor:pointer
+}
+.presentationNav button:disabled{opacity:.3;cursor:not-allowed}
+.presentationNav span{min-width:42px;text-align:center;color:#b8cfe1;font-size:.72rem}
+.presentationPresenter{justify-self:end;display:grid;text-align:right}.presentationPresenter small,.presentationPresenter span{color:#a9c3d8;font-size:.65rem}.presentationPresenter strong{font-size:.82rem}
+.presentationMode .globalSearchLauncher{display:none}
+
+@media(max-width:900px){
+ .contextBreadcrumb{left:20px;max-width:calc(100% - 40px)}
+ .globalSearchLauncher strong,.globalSearchLauncher kbd{display:none}.globalSearchLauncher{width:46px;height:46px;padding:0;justify-content:center;border-radius:50%}
+ .commandQuick{grid-template-columns:1fr 1fr}
+ .presentationTopbar{height:auto;min-height:70px;padding:12px 18px}.presentationBrand small{display:none}.presentationActions button{display:none}
+ .presentationHeroSlide{grid-template-columns:1fr;padding:34px 24px}.presentationOverview{grid-template-columns:repeat(4,1fr)}.presentationLifecycle{grid-template-columns:repeat(4,1fr)}
+ .presentationModuleSlide{grid-template-columns:80px 1fr;padding:34px 24px}.presentationModuleVisual{display:none}
+ .presentationControls{grid-template-columns:1fr auto}.presentationPresenter{display:none}
+}
+@media(max-width:640px){
+ .contextBreadcrumb{display:none}
+ .commandOverlay{padding:4vh 9px 20px}.commandPalette{border-radius:16px;max-height:90vh}
+ .commandQuick{grid-template-columns:1fr}.commandResultMeta{display:none}.commandResults>button{grid-template-columns:38px minmax(0,1fr)}
+ .commandFooter span{max-width:75%}
+ .presentationHeroSlide{padding:28px 18px}.presentationHeroCopy h1{font-size:2.45rem}.presentationOverview{grid-template-columns:1fr 1fr}.presentationLifecycle{grid-template-columns:1fr 1fr}
+ .presentationModuleSlide{grid-template-columns:1fr;padding:28px 18px}.presentationStep{display:none}.presentationMetrics{grid-template-columns:1fr 1fr}
+ .presentationModuleActions{align-items:flex-start;flex-direction:column}.presentationControls{grid-template-columns:1fr}.presentationProgress{justify-content:center}.presentationNav{justify-content:center}
+}

@@ -18,6 +18,7 @@ import { documentRoutes } from "./routes/documents.js";
 import { adminRoutes } from "./routes/admin.js";
 import {adminUserRoutes} from "./routes/admin-users.js";
 import {adminDataRoutes} from "./routes/admin-data.js";
+import { experienceRoutes } from "./routes/experience.js";
 import { dispatchWebhooks } from "./lib/webhooks.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
@@ -61,7 +62,7 @@ app.get("/api/v1/ready",async(_request,reply)=>{
   return reply.code(503).send({status:"unavailable",service:"sigdec-api",version:release});
  }
 });
-await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
+await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(experienceRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);
 app.get("/api/v1",async()=>({
  name:"SIGDEC API",product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",version:"v1",release,
  modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
@@ -76,7 +77,8 @@ app.get("/api/v1/capabilities",async()=>({
   {code:"operations",label:"Operações / SCO",pages:["/gestao","/sco","/comunicacoes"]},
   {code:"resilience",label:"Resiliência",pages:["/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/voluntarios"]},
   {code:"documents",label:"Documentos e Continuidade",pages:["/documentos","/continuidade","/verificar-integridade"]},
-  {code:"administration",label:"Administração",pages:["/administracao","/administracao/usuarios","/administracao/cadastros","/administracao/auditoria","/administracao/saude","/administracao/apresentacao"]}
+  {code:"administration",label:"Administração",pages:["/administracao","/administracao/usuarios","/administracao/cadastros","/administracao/auditoria","/administracao/saude","/administracao/apresentacao"]},
+  {code:"institutional",label:"Experiência Institucional",pages:["/apresentacao"]}
  ],
  interoperability:["SIDEC","S2ID","webhooks","JSON","CSV","PDF","KML"],
  generatedAt:new Date().toISOString()

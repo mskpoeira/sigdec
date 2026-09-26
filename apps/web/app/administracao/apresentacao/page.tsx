@@ -43,7 +43,7 @@ export default function PresentationReadinessPage(){
   <header className="listHeader">
    <div><span className="eyebrow">SIGDEC · ADMINISTRAÇÃO · APRESENTAÇÃO · {SIGDEC_VERSION_LABEL}</span><h1>Prontidão para Apresentação Formal</h1>
     <p>Diagnóstico dos cadastros, integridade, infraestrutura e dados mínimos para demonstrações institucionais.</p></div>
-   <div className="headerActions"><button type="button" className="primaryButton" onClick={()=>void load()}>Executar novamente</button><button type="button" className="secondaryLink" disabled={!data} onClick={()=>void downloadJson()}>Baixar JSON</button><Link className="secondaryLink" href="/administracao">Administração</Link></div>
+   <div className="headerActions"><Link className="primaryButton" href="/apresentacao">▶ Modo institucional</Link><button type="button" className="secondaryLink" onClick={()=>void load()}>Executar novamente</button><button type="button" className="secondaryLink" disabled={!data} onClick={()=>void downloadJson()}>Baixar JSON</button><Link className="secondaryLink" href="/administracao">Administração</Link></div>
   </header>
 
   {message&&<section className="warningCard">{message}</section>}

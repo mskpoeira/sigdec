@@ -20,7 +20,7 @@ const nav: Array<[string,string,Route,string?]> =[
 ["▤","Documentos","/documentos","documents"],
 ["⚙","Administração","/administracao"]
 ];
-const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","Operação PLANCON","/planejamento/operacao","purple"],["◆","Apoios Estado/União","/apoios","blue"],["▥","Centro de Gestão","/gestao","gray"]];
+const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","Operação PLANCON","/planejamento/operacao","purple"],["◆","Apoios Estado/União","/apoios","blue"],["▥","Centro de Gestão","/gestao","gray"],["▶","Apresentar SIGDEC","/apresentacao","navy"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
 type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;neighborhood:string|null;latitude:number|null;longitude:number|null};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};

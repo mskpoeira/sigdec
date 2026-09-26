@@ -1,5 +1,6 @@
 import "./globals.css";
 import PwaRegister from "./PwaRegister";
+import GlobalExperience from "./GlobalExperience";
 
 export const metadata = {
   title: "SIGDEC",
@@ -10,5 +11,5 @@ export const metadata = {
 };
 
 export default function RootLayout({children}: Readonly<{children: React.ReactNode}>) {
-  return <html lang="pt-BR"><body><PwaRegister/>{children}</body></html>;
+  return <html lang="pt-BR"><body><PwaRegister/><GlobalExperience/>{children}</body></html>;
 }
