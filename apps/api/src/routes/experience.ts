@@ -157,10 +157,11 @@ export async function experienceRoutes(app:FastifyInstance){
    {code:"documents",step:6,title:"Documentos, Evidências e Integridade",description:"Relatórios técnicos, rastreabilidade, auditoria e mecanismos de integridade preservam a confiança institucional.",href:"/documentos",available:can("documents.read","documents.manage"),metrics:[["Documentos emitidos",metrics.issuedDocuments]]}
   ];
 
+  const presenter=await db.query("SELECT matricula,display_name FROM users WHERE id=$1",[auth.userId]);
   return {
    organization:organizationResult.rows[0]?.name??"Organização",
    generatedAt:new Date().toISOString(),
-   user:{matricula:(await db.query("SELECT matricula,display_name FROM users WHERE id=$1",[auth.userId])).rows[0]?.matricula??"",displayName:(await db.query("SELECT matricula,display_name FROM users WHERE id=$1",[auth.userId])).rows[0]?.display_name??""},
+   user:{matricula:presenter.rows[0]?.matricula??"",displayName:presenter.rows[0]?.display_name??""},
    metrics,modules
   };
  });
