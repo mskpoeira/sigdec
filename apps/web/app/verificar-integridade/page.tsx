@@ -10,10 +10,13 @@ type VerificationResult={
  valid:boolean;
  asymmetricValid:boolean;
  timestampValid?:boolean|null;
- hmacValid:boolean|null;
- registeredArtifact:boolean;
+ hmacValid?:boolean|null;
+ registeredArtifact?:boolean;
+ registeredCheckpoint?:boolean;
+ registeredAttestation?:boolean;
  proofVersion:string;
  publicKeyFingerprint:string;
+ checkpointHash?:string;
 };
 
 export default function VerifyIntegrityPage(){
@@ -28,7 +31,11 @@ export default function VerifyIntegrityPage(){
   let proof:unknown;
   try{proof=JSON.parse(raw)}catch{setMessage("O comprovante não contém JSON válido.");setBusy(false);return}
   try{
-   const response=await fetch(`${API}/api/v1/sidec/verify-integrity-proof`,{
+   const proofVersion=typeof proof==="object"&&proof!==null&&"proofVersion" in proof?String((proof as {proofVersion?:unknown}).proofVersion??""):"";
+   const endpoint=proofVersion.startsWith("sigdec-audit-checkpoint-proof/")
+    ?"/api/v1/public/verify-audit-checkpoint-proof"
+    :"/api/v1/sidec/verify-integrity-proof";
+   const response=await fetch(`${API}${endpoint}`,{
     method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(proof)
    });
    const body=await response.json().catch(()=>({}));
@@ -68,7 +75,7 @@ export default function VerifyIntegrityPage(){
 
   <section className="infoCard">
    <strong>O que é validado</strong>
-   <p>A assinatura Ed25519 vincula o SHA-256 do manifesto ao SHA-256 do ZIP. A chave pública e seu fingerprint fazem parte do próprio comprovante. A validação HMAC aparece quando a chave histórica correspondente está disponível no servidor.</p>
+   <p>O verificador aceita comprovantes SIDEC e comprovantes de checkpoint da auditoria. A assinatura Ed25519 é validada com a chave pública e o fingerprint contidos no próprio arquivo, sem necessidade de acesso à chave privada.</p>
   </section>
 
   <section className="incidentForm" style={{marginTop:16}}>
@@ -89,9 +96,14 @@ export default function VerifyIntegrityPage(){
    <h2>{result.valid?"✓ Comprovante criptograficamente válido":"⚠ Comprovante inválido"}</h2>
    <div className="dataGrid">
     <article className="card"><h2>Ed25519</h2><p><strong>{result.asymmetricValid?"Válido":"Inválido"}</strong></p></article>
-    <article className="card"><h2>Carimbo interno</h2><p><strong>{result.timestampValid===undefined||result.timestampValid===null?"Não aplicável (proof 1.0)":result.timestampValid?"Válido":"Inválido"}</strong></p></article>
-    <article className="card"><h2>HMAC interno</h2><p><strong>{result.hmacValid===null?"Não disponível":result.hmacValid?"Válido":"Inválido"}</strong></p></article>
-    <article className="card"><h2>Registro SIGDEC</h2><p><strong>{result.registeredArtifact?"Hash corresponde a artefato registrado":"Sem correspondência confirmada"}</strong></p></article>
+    {result.proofVersion.startsWith("sigdec-audit-checkpoint-proof/")?<>
+     <article className="card"><h2>Checkpoint registrado</h2><p><strong>{result.registeredCheckpoint?"Sim":"Não confirmado"}</strong></p></article>
+     <article className="card"><h2>Atestação registrada</h2><p><strong>{result.registeredAttestation?"Sim":"Não confirmada"}</strong></p></article>
+    </>:<>
+     <article className="card"><h2>Carimbo interno</h2><p><strong>{result.timestampValid===undefined||result.timestampValid===null?"Não aplicável (proof 1.0)":result.timestampValid?"Válido":"Inválido"}</strong></p></article>
+     <article className="card"><h2>HMAC interno</h2><p><strong>{result.hmacValid===null||result.hmacValid===undefined?"Não disponível":result.hmacValid?"Válido":"Inválido"}</strong></p></article>
+     <article className="card"><h2>Registro SIGDEC</h2><p><strong>{result.registeredArtifact?"Hash corresponde a artefato registrado":"Sem correspondência confirmada"}</strong></p></article>
+    </>}
    </div>
    <p style={{overflowWrap:"anywhere"}}><strong>Fingerprint da chave pública:</strong> {result.publicKeyFingerprint}</p>
    <p><small>Uma assinatura Ed25519 válida comprova que o par de hashes apresentado foi assinado pela chave privada correspondente à chave pública contida no comprovante. A correspondência com um artefato registrado confirma adicionalmente que esses hashes existem no SIGDEC consultado.</small></p>
