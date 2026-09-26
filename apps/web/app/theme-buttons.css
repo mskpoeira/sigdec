@@ -507,3 +507,28 @@ body:has(.situationRoomMonitor) .realtimeStatus{display:none!important}
 @media(max-width:760px){
  .stalePositionWarning{top:auto;right:8px;bottom:52px;max-width:70%;font-size:.65rem}
 }
+
+
+/* Ajuste da identidade da Defesa Civil na página de login */
+.civilDefenseMarkOfficial{
+  width:230px;
+  min-height:150px;
+  padding:0;
+  overflow:hidden;
+  background:transparent;
+  clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0 50%);
+}
+.civilDefenseLoginLogo{
+  width:100%;
+  height:100%;
+  min-height:150px;
+  display:block;
+  object-fit:cover;
+  object-position:center;
+  transform:scale(1.18);
+  transform-origin:center;
+}
+@media(max-width:820px){
+  .civilDefenseMarkOfficial{width:170px;min-height:112px}
+  .civilDefenseLoginLogo{min-height:112px}
+}
