@@ -56,7 +56,7 @@ export async function adminRoutes(app:FastifyInstance){
  app.get("/api/v1/admin/system-health",{preHandler:requirePermission("system.master")},async request=>{
   const org=organizationId(authFrom(request).organizationId);
   const started=Date.now();
-  const [dbInfo,migrations,integrations,audit24h,auditIntegrity]=await Promise.all([
+  const [dbInfo,migrations,integrations,audit24h,auditIntegrity,auditCheckpoints]=await Promise.all([
    db.query(`SELECT now() AS "databaseTime",current_setting('server_version') AS "postgresVersion",PostGIS_Version() AS "postgisVersion"`),
    db.query(`SELECT count(*)::int AS count,max(filename) AS "lastFilename",max(applied_at) AS "lastAppliedAt" FROM schema_migrations`),
    db.query(`SELECT count(*) FILTER(WHERE e.active)::int AS active,
@@ -69,7 +69,10 @@ export async function adminRoutes(app:FastifyInstance){
    db.query(`SELECT count(*)::int AS total,
      count(*) FILTER(WHERE a.integrity_hash IS NULL)::int AS unsealed,
      count(*) FILTER(WHERE a.integrity_hash IS NOT NULL AND a.integrity_hash<>sigdec_calculate_audit_hash(a))::int AS invalid
-     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1`,[org])
+     FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1`,[org]),
+   db.query(`SELECT count(*)::int AS total,max(created_at) AS "latestAt",
+     (array_agg(checkpoint_hash ORDER BY created_at DESC,id DESC))[1] AS "latestHash"
+     FROM audit_integrity_checkpoints WHERE organization_id=$1`,[org])
   ]);
   const latencyMs=Date.now()-started;
   return {
@@ -89,7 +92,8 @@ export async function adminRoutes(app:FastifyInstance){
    migrations:migrations.rows[0],
    integrations:integrations.rows[0],
    audit24h:audit24h.rows[0],
-   auditIntegrity:{...auditIntegrity.rows[0],appendOnly:true,algorithm:"SHA-256"}
+   auditIntegrity:{...auditIntegrity.rows[0],appendOnly:true,algorithm:"SHA-256"},
+   auditCheckpoints:auditCheckpoints.rows[0]
   };
  });
 
