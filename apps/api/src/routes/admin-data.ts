@@ -240,8 +240,10 @@ export async function adminDataRoutes(app:FastifyInstance){
     u.display_name AS "createdByName",c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",
     c.last_audit_id::text AS "lastAuditId",c.audit_root_hash AS "auditRootHash",
     c.previous_checkpoint_hash AS "previousCheckpointHash",c.checkpoint_hash AS "checkpointHash",
-    c.integrity_version AS "integrityVersion",c.algorithm
+    c.integrity_version AS "integrityVersion",c.algorithm,
+    a.key_id AS "ed25519KeyId",a.public_key_fingerprint AS "ed25519Fingerprint",a.attested_at AS "attestedAt"
     FROM audit_integrity_checkpoints c JOIN users u ON u.id=c.created_by
+    LEFT JOIN audit_checkpoint_attestations a ON a.checkpoint_id=c.id
     WHERE c.organization_id=$1 ORDER BY c.created_at DESC,c.id DESC LIMIT $2`,[org(request),parsed.data.limit]);
   const items=result.rows.map(row=>{
    const expected=sha256(checkpointCanonical({
