@@ -361,8 +361,19 @@ export async function adminDataRoutes(app:FastifyInstance){
     auditRootHash:row.auditRootHash,previousCheckpointHash:row.previousCheckpointHash,
     checkpointHash:row.checkpointHash,integrityVersion:Number(row.integrityVersion),algorithm:row.algorithm
    },
-   verification:{checkpointValid,rootValid,invalid:audit.invalid,unsealed:audit.unsealed,valid:checkpointValid&&rootValid&&audit.invalid===0&&audit.unsealed===0},
-   publicVerificationPath:`/integridade/auditoria/${row.checkpointHash}`
+   ed25519:{
+    algorithm:"Ed25519",
+    keyId:attestation.keyId,
+    signature:attestation.signature,
+    publicKey:attestation.publicKey,
+    publicKeyFingerprint:attestation.publicKeyFingerprint,
+    attestedAt:new Date(attestation.attestedAt).toISOString()
+   },
+   verification:{
+    checkpointValid,rootValid,asymmetricValid,invalid:audit.invalid,unsealed:audit.unsealed,
+    valid:checkpointValid&&rootValid&&asymmetricValid&&audit.invalid===0&&audit.unsealed===0
+   },
+   publicVerificationUrl:auditCheckpointPublicUrl(row.checkpointHash)
   };
   reply.header("content-type","application/json; charset=utf-8")
    .header("content-disposition",`attachment; filename="sigdec-audit-checkpoint-${row.id}.json"`)
