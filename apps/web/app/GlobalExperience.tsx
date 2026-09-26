@@ -47,6 +47,19 @@ export default function GlobalExperience(){
  },[pathname,hidden]);
 
  useEffect(()=>{
+  if(hidden)return;
+  const tick=()=>{
+   if(document.visibilityState!=="visible"||!navigator.onLine)return;
+   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at:Date.now()}}));
+   router.refresh();
+  };
+  const timer=window.setInterval(tick,5000);
+  const onOnline=()=>tick();
+  window.addEventListener("online",onOnline);
+  return()=>{window.clearInterval(timer);window.removeEventListener("online",onOnline)};
+ },[hidden,router]);
+
+ useEffect(()=>{
   const onKey=(event:KeyboardEvent)=>{
    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){
     event.preventDefault();setOpen(value=>!value);return;
