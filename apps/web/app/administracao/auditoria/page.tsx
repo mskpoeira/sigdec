@@ -24,6 +24,8 @@ type AuditItem={
 type Integrity={status:"verified"|"failed";algorithm:string;appendOnly:boolean;checkedAt:string;total:number;unsealed:number;invalid:number;oldestAt:string|null;newestAt:string|null};
 type Checkpoint={id:string;createdAt:string;createdByMatricula:string;createdByName:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;checkpointHash:string;integrityVersion:number;algorithm:string;checkpointValid:boolean;ed25519KeyId?:string|null;ed25519Fingerprint?:string|null;attestedAt?:string|null};
 type CheckpointVerification={status:"none"|"verified"|"failed";checkedAt:string;checkpointCount:number;chainInvalid?:number;contentInvalid?:number;latest?:Checkpoint;audit?:{rootValid:boolean;invalid:number;unsealed:number}};
+type AuditKey={keyId:string;publicKeyFingerprint:string;firstSeenAt:string;lastSeenAt:string;attestationCount:number;activatedByMatricula:string;lastUsedByMatricula:string;status:"ACTIVE"|"HISTORICAL"};
+type AuditKeys={currentKeyId:string;items:AuditKey[]};
 
 const activityLabel=(action:string)=>{
  if(action==="REQUEST_POST")return "Registro";
@@ -43,6 +45,7 @@ export default function AuditPage(){
  const[integrity,setIntegrity]=useState<Integrity|null>(null);
  const[checkpoints,setCheckpoints]=useState<Checkpoint[]>([]);
  const[checkpointVerification,setCheckpointVerification]=useState<CheckpointVerification|null>(null);
+ const[keys,setKeys]=useState<AuditKeys|null>(null);
  const[checkpointBusy,setCheckpointBusy]=useState(false);
  const[busy,setBusy]=useState(false);
 
@@ -79,14 +82,17 @@ export default function AuditPage(){
  },[]);
  const loadCheckpoints=useCallback(async()=>{
   try{
-   const [listResponse,verifyResponse]=await Promise.all([
+   const [listResponse,verifyResponse,keysResponse]=await Promise.all([
     fetch(`${API}/api/v1/admin/audit/checkpoints?limit=20`,{credentials:"include",cache:"no-store"}),
-    fetch(`${API}/api/v1/admin/audit/checkpoints/verify`,{credentials:"include",cache:"no-store"})
+    fetch(`${API}/api/v1/admin/audit/checkpoints/verify`,{credentials:"include",cache:"no-store"}),
+    fetch(`${API}/api/v1/admin/audit/keys`,{credentials:"include",cache:"no-store"})
    ]);
    const listBody=await listResponse.json().catch(()=>({}));
    const verifyBody=await verifyResponse.json().catch(()=>({}));
+   const keysBody=await keysResponse.json().catch(()=>({}));
    if(listResponse.ok)setCheckpoints(listBody.items??[]);
    if(verifyResponse.ok)setCheckpointVerification(verifyBody);
+   if(keysResponse.ok)setKeys(keysBody);
   }catch{}
  },[]);
  const createCheckpoint=useCallback(async()=>{
@@ -154,6 +160,13 @@ export default function AuditPage(){
    {checkpointVerification?.status!=="none"&&checkpointVerification&&<p><small>{checkpointVerification.checkpointCount} checkpoint(s) · {checkpointVerification.chainInvalid??0} quebra(s) de encadeamento · {checkpointVerification.contentInvalid??0} conteúdo(s) inválido(s) · conferido em {formatDateTimeBR(checkpointVerification.checkedAt)}</small></p>}
   </section>
   {message&&<section className="infoCard">{message}</section>}
+
+  {keys&&<section style={{marginTop:18}}>
+   <div className="listHeader"><div><h2>Chaves Ed25519 da auditoria</h2><p>Chave atual: <code>{keys.currentKeyId}</code>. Chaves históricas permanecem disponíveis para validar comprovantes antigos.</p></div></div>
+   <div className="adminTableWrap"><table><thead><tr><th>Status</th><th>Key ID</th><th>Fingerprint</th><th>Primeiro uso</th><th>Matrícula</th><th>Atestações</th></tr></thead>
+    <tbody>{keys.items.map(item=><tr key={item.keyId+item.publicKeyFingerprint}><td>{item.status==="ACTIVE"?"✓ Ativa":"Histórica"}</td><td><code>{item.keyId}</code></td><td><code title={item.publicKeyFingerprint}>{item.publicKeyFingerprint.slice(0,18)}…</code></td><td>{formatDateTimeBR(item.firstSeenAt)}</td><td><strong>{item.activatedByMatricula}</strong></td><td>{item.attestationCount}</td></tr>)}</tbody>
+   </table>{keys.items.length===0&&<p>Nenhuma chave utilizada ainda. A primeira atestação será criada ao gerar um checkpoint/comprovante.</p>}</div>
+  </section>}
 
   {checkpoints.length>0&&<section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Checkpoints criptográficos</h2><p>Âncoras append-only da trilha de auditoria, encadeadas entre si.</p></div></div>
