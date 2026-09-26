@@ -284,7 +284,10 @@ export async function adminDataRoutes(app:FastifyInstance){
     organizationId,createdAt,auth.userId,matricula,integrity.auditCount,integrity.firstAuditId,integrity.lastAuditId,
     integrity.auditRootHash,previousCheckpointHash,checkpointHash,integrityVersion,JSON.stringify({invalid:0,unsealed:0})
    ]);
-   return reply.code(201).send({...result.rows[0],checkpointValid:true});
+   const attestation=await ensureAuditCheckpointAttestation(organizationId,result.rows[0].id,auth.userId);
+   return reply.code(201).send({...result.rows[0],checkpointValid:true,ed25519:{
+    keyId:attestation.keyId,publicKeyFingerprint:attestation.publicKeyFingerprint,attestedAt:attestation.attestedAt
+   }});
   }catch(error:any){
    if(error?.code==="23505")return reply.code(409).send({error:"CHECKPOINT_CONFLICT",message:"Outro checkpoint foi criado simultaneamente. Atualize a tela e tente novamente."});
    throw error;
