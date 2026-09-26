@@ -21,7 +21,8 @@ type PublicCheckpoint={
  checkpointHash:string;
  integrityVersion:number;
  algorithm:string;
- verification:{checkpointValid:boolean;rootValid:boolean;previousExists:boolean;invalid:number;unsealed:number};
+ ed25519:{algorithm:"Ed25519";keyId:string;signature:string;publicKey:string;publicKeyFingerprint:string;attestedAt:string;valid:boolean}|null;
+ verification:{checkpointValid:boolean;rootValid:boolean;previousExists:boolean;asymmetricValid:boolean;invalid:number;unsealed:number};
  checkedAt:string;
 };
 
@@ -30,6 +31,7 @@ export default function PublicAuditCheckpointPage(){
  const hash=String(params?.hash??"");
  const[data,setData]=useState<PublicCheckpoint|null>(null);
  const[error,setError]=useState("");
+ const[publicUrl,setPublicUrl]=useState("");
 
  useEffect(()=>{
   if(!hash)return;
@@ -40,6 +42,8 @@ export default function PublicAuditCheckpointPage(){
     setData(body);setError("");
    }).catch(e=>setError(e instanceof Error?e.message:"Falha ao consultar checkpoint."));
  },[hash]);
+
+ useEffect(()=>{setPublicUrl(window.location.href)},[]);
 
  return <main className="shell moduleShell">
   <header className="listHeader">
@@ -59,10 +63,13 @@ export default function PublicAuditCheckpointPage(){
     <article className={data.verification.checkpointValid?"card":"warningCard"}><h2>Checkpoint</h2><p><strong>{data.verification.checkpointValid?"Válido":"Inválido"}</strong></p><p>{data.algorithm} · v{data.integrityVersion}</p></article>
     <article className={data.verification.rootValid?"card":"warningCard"}><h2>Raiz da auditoria</h2><p><strong>{data.verification.rootValid?"Confere":"Divergente"}</strong></p><p>{data.verification.invalid} inválido(s) · {data.verification.unsealed} sem selo</p></article>
     <article className={data.verification.previousExists?"card":"warningCard"}><h2>Encadeamento</h2><p><strong>{data.verification.previousExists?"Confirmado":"Anterior não localizado"}</strong></p><p>{data.previousCheckpointHash?"Checkpoint anterior vinculado":"Checkpoint gênese"}</p></article>
+    <article className={data.verification.asymmetricValid?"card":"warningCard"}><h2>Assinatura Ed25519</h2><p><strong>{data.verification.asymmetricValid?"Válida":"Não confirmada"}</strong></p><p>{data.ed25519?.keyId??"Sem atestação"}</p></article>
    </div>
    <p style={{overflowWrap:"anywhere"}}><strong>Checkpoint SHA-256:</strong> {data.checkpointHash}</p>
    <p style={{overflowWrap:"anywhere"}}><strong>Raiz da auditoria:</strong> {data.auditRootHash}</p>
    {data.previousCheckpointHash&&<p style={{overflowWrap:"anywhere"}}><strong>Checkpoint anterior:</strong> {data.previousCheckpointHash}</p>}
+   {data.ed25519&&<p style={{overflowWrap:"anywhere"}}><strong>Fingerprint da chave pública:</strong> {data.ed25519.publicKeyFingerprint}</p>}
+   {publicUrl&&<div className="card" style={{maxWidth:250,textAlign:"center",marginTop:16}}><h2>QR Code de verificação</h2><img src={`https://quickchart.io/qr?size=180&text=${encodeURIComponent(publicUrl)}`} alt="QR Code para verificar este checkpoint" width={180} height={180}/><p><small>Ao escanear, esta página pública de verificação será aberta.</small></p></div>}
    <p><small>Verificado pelo SIGDEC em {formatDateTimeBR(data.checkedAt)}. A consulta confirma a correspondência do checkpoint com os registros atualmente preservados no sistema, sem revelar o conteúdo da trilha.</small></p>
   </section>}
  </main>;

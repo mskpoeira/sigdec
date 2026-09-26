@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after,test } from "node:test";
-import { signSidecContinuityChangeReport,signSidecIntegrity,signSidecTimestamp,verifySidecContinuityChangeReport,verifySidecIntegrity,verifySidecTimestamp } from "./sidec-asymmetric.js";
+import { signAuditCheckpoint,signSidecContinuityChangeReport,signSidecIntegrity,signSidecTimestamp,verifyAuditCheckpoint,verifySidecContinuityChangeReport,verifySidecIntegrity,verifySidecTimestamp } from "./sidec-asymmetric.js";
 
 const previousSeed=process.env.SIDEC_ED25519_PRIVATE_SEED_BASE64;
 const previousId=process.env.SIDEC_ED25519_KEY_ID;
@@ -96,4 +96,24 @@ test("relatorio de mudanca SIDEC possui assinatura Ed25519 vinculada ao contexto
   publicKey:signed.publicKey,
   publicKeyFingerprint:signed.publicKeyFingerprint
  }),false);
+});
+
+
+test("checkpoint da auditoria possui assinatura Ed25519 portátil",()=>{
+ const checkpoint={
+  checkpointHash:"1".repeat(64),
+  auditRootHash:"2".repeat(64),
+  previousCheckpointHash:"3".repeat(64),
+  organizationId:"11111111-1111-4111-8111-111111111111",
+  createdAt:"2026-09-26T11:00:00.000Z",
+  auditCount:42,
+  firstAuditId:"1",
+  lastAuditId:"42",
+  integrityVersion:1
+ };
+ const signed=signAuditCheckpoint(checkpoint);
+ assert.equal(signed.algorithm,"Ed25519");
+ assert.equal(signed.publicKeyFingerprint.length,64);
+ assert.equal(verifyAuditCheckpoint({...checkpoint,...signed}),true);
+ assert.equal(verifyAuditCheckpoint({...checkpoint,auditRootHash:"4".repeat(64),...signed}),false);
 });

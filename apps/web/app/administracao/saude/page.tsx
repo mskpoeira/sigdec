@@ -19,7 +19,7 @@ type Health={
  integrations:{active:number;pending:number;failed:number};
  audit24h:{total:number;mutations:number};
  auditIntegrity:{total:number;unsealed:number;invalid:number;appendOnly:boolean;algorithm:string};
- auditCheckpoints:{total:number;latestAt:string|null;latestHash:string|null};
+ auditCheckpoints:{total:number;latestAt:string|null;latestHash:string|null;ed25519Attested:number;latestFingerprint:string|null};
 };
 
 const duration=(seconds:number)=>{
@@ -64,7 +64,7 @@ export default function SystemHealthPage(){
     <article className={data.integrations.failed>0?"warningCard":"card"}><h2>Integrações</h2><p className="adminNumber">{data.integrations.active}</p><p>{data.integrations.pending} pendente(s) · {data.integrations.failed} falha(s)</p></article>
     <article className="card"><h2>Auditoria · 24h</h2><p className="adminNumber">{data.audit24h.total}</p><p>{data.audit24h.mutations} alteração(ões) autenticada(s)</p><Link className="secondaryLink" href="/administracao/auditoria">Abrir Registro de Atividades</Link></article>
     <article className={data.auditIntegrity.invalid===0&&data.auditIntegrity.unsealed===0?"card":"warningCard"}><h2>Integridade da auditoria</h2><p className="adminNumber">{data.auditIntegrity.invalid===0&&data.auditIntegrity.unsealed===0?"OK":"ATENÇÃO"}</p><p>{data.auditIntegrity.total} registro(s) · {data.auditIntegrity.invalid} inválido(s) · {data.auditIntegrity.unsealed} sem selo</p><p>{data.auditIntegrity.algorithm} · {data.auditIntegrity.appendOnly?"append-only":"alterável"}</p></article>
-    <article className="card"><h2>Checkpoints da auditoria</h2><p className="adminNumber">{data.auditCheckpoints.total}</p><p>{data.auditCheckpoints.latestAt?`Último em ${formatDateTimeBR(data.auditCheckpoints.latestAt)}`:"Nenhum checkpoint criado"}</p>{data.auditCheckpoints.latestHash&&<p><code title={data.auditCheckpoints.latestHash}>{data.auditCheckpoints.latestHash.slice(0,18)}…</code></p>}<div className="headerActions"><Link className="secondaryLink" href="/administracao/auditoria">Gerenciar</Link>{data.auditCheckpoints.latestHash&&<Link className="secondaryLink" href={`/integridade/auditoria/${data.auditCheckpoints.latestHash}`} target="_blank">Ver público</Link>}</div></article>
+    <article className="card"><h2>Checkpoints da auditoria</h2><p className="adminNumber">{data.auditCheckpoints.total}</p><p>{data.auditCheckpoints.ed25519Attested} assinado(s) com Ed25519</p><p>{data.auditCheckpoints.latestAt?`Último em ${formatDateTimeBR(data.auditCheckpoints.latestAt)}`:"Nenhum checkpoint criado"}</p>{data.auditCheckpoints.latestHash&&<p><code title={data.auditCheckpoints.latestHash}>{data.auditCheckpoints.latestHash.slice(0,18)}…</code></p>}{data.auditCheckpoints.latestFingerprint&&<p><small>Fingerprint: <code title={data.auditCheckpoints.latestFingerprint}>{data.auditCheckpoints.latestFingerprint.slice(0,16)}…</code></small></p>}<div className="headerActions"><Link className="secondaryLink" href="/administracao/auditoria">Gerenciar</Link>{data.auditCheckpoints.latestHash&&<Link className="secondaryLink" href={`/integridade/auditoria/${data.auditCheckpoints.latestHash}`} target="_blank">Ver público</Link>}</div></article>
    </section>
    <section className="infoCard" style={{marginTop:18}}>
     <strong>Leitura do ambiente</strong>
