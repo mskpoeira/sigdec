@@ -16,7 +16,7 @@ type Overview={
  metrics:Record<string,number|null>;modules:Module[];
 };
 
-const metricText=(value:number|null)=>value===null?"—":Number(value).toLocaleString("pt-BR");
+const metricText=(value:number|null|undefined)=>value==null?"—":Number(value).toLocaleString("pt-BR");
 const lifecycle=["Prevenir","Monitorar","Responder","Coordenar","Assistir","Recuperar","Aprender"];
 
 export default function InstitutionalPresentationPage(){
