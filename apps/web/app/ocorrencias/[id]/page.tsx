@@ -66,6 +66,9 @@ type Resource = {
   name?: string;
   description?: string;
   plate?: string | null;
+  vehicleType?: string | null;
+  passengerCapacity?: number | null;
+  totalOccupants?: number | null;
   status: string;
 };
 
@@ -441,7 +444,7 @@ export default function OcorrenciaDetalhePage() {
               <option value="">Sem viatura</option>
               {availableVehicles.map((vehicle) => (
                 <option value={vehicle.id} key={vehicle.id}>
-                  {vehicle.code} · {vehicle.description}{vehicle.plate ? ` · ${vehicle.plate}` : ""}
+                  {vehicle.code} · {vehicle.description}{vehicle.plate ? ` · ${vehicle.plate}` : ""}{vehicle.totalOccupants!=null ? ` · ${vehicle.passengerCapacity} passageiro(s) + motorista` : ""}
                 </option>
               ))}
             </select>
