@@ -11,7 +11,7 @@ type Item={id:string;code:string;name:string;unit:string;category:string;active:
 type MenuItem={id:string;label:string;path:string;permissionCode:string|null;sortOrder:number;active:boolean};
 type Report={overview:{total:number;active:number;inactive:number;pendingPasswordChange:number;mfaEnabled:number};roles:{code:string;name:string;total:number;active:number}[]};
 type Tab="users"|"roles"|"items"|"menus"|"reports"|"database";
-const paths=["/painel","/ocorrencias","/ocorrencias/nova","/campo","/monitoramento","/assistencia","/voluntarios","/vistorias","/comunicacoes","/sco","/documentos","/gestao","/continuidade","/administracao"];
+const paths=["/painel","/ocorrencias","/ocorrencias/nova","/campo","/monitoramento","/assistencia","/voluntarios","/vistorias","/comunicacoes","/sco","/documentos","/gestao","/continuidade","/administracao","/administracao/auditoria"];
 const blankUser={matricula:"",displayName:"",email:"",phone:"",jobTitle:"",department:"",roleIds:[] as string[],active:true};
 const blankItem={code:"",name:"",unit:"un",category:"Geral",active:true};
 const blankMenu={label:"",path:"/painel",permissionCode:"",sortOrder:100,active:true};
@@ -71,7 +71,7 @@ export default function UsersAdministrationPage(){
  async function openDatabase(view=dbView){setDbView(view);try{const r=await request(`/api/v1/admin/database?view=${encodeURIComponent(view)}&limit=50`);setDbRows(r.items??[])}catch(error){setMessage(error instanceof Error?error.message:"Falha na consulta.")}}
  const tabs:[Tab,string][]=[["users","Usuários"],["roles","Perfis e permissões"],["items","Itens de estoque"],["menus","Itens do menu"],["reports","Relatórios"],["database","Banco e auditoria"]];
  return <main className="shell moduleShell adminWorkspace">
-  <header className="listHeader"><div><span className="eyebrow">SIGDEC · ADMINISTRAÇÃO · v1.48</span><h1>Usuários e dados do sistema</h1><p>Cadastros, acessos, itens, relatórios e consulta protegida.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao">Administração</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
+  <header className="listHeader"><div><span className="eyebrow">SIGDEC · ADMINISTRAÇÃO · v1.49</span><h1>Usuários e dados do sistema</h1><p>Cadastros, acessos, itens, relatórios e consulta protegida.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao">Administração</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   <nav className="adminTabs" aria-label="Áreas de administração">{tabs.map(([id,label])=><button type="button" key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setMessage("");if(id==="database")void openDatabase()}}>{label}</button>)}</nav>
   {message&&<p className="infoCard" role="status">{message}</p>}
   {temporary&&<section className="warningCard" role="status"><strong>Senha temporária: copie agora</strong><p className="temporarySecret">{temporary}</p><p>Ela não será exibida novamente. Entregue ao usuário por canal seguro; a troca será exigida no primeiro acesso.</p><button type="button" onClick={()=>setTemporary("")}>Já copiei</button></section>}
