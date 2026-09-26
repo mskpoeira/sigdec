@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
 import {formatDateTimeBR} from "../../lib/datetime";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
@@ -75,6 +76,7 @@ export default function PlanconOperationalPage(){
 
  useEffect(()=>{void loadPlans().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar PLANCON."))},[loadPlans]);
  useEffect(()=>{if(planId)void loadOperational(planId).catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar operação."))},[planId,loadOperational]);
+ useRealtimeRefresh(async()=>{if(busy)return;await loadPlans();if(planId)await loadOperational(planId)},true);
 
  async function perform(fn:()=>Promise<void>){
   setBusy(true);setMessage("");
