@@ -129,11 +129,13 @@ export async function fieldRoutes(app: FastifyInstance) {
     const incidents = await db.query(
       `SELECT i.id, i.protocol, i.status, i.priority, i.risk_to_life AS "riskToLife",
               i.summary, i.address_line AS "addressLine", i.neighborhood,
-              i.latitude, i.longitude, i.updated_at AS "updatedAt",
-              t.name AS "typeName", tm.code AS "teamCode"
+              i.latitude, i.longitude, i.created_at AS "createdAt", i.updated_at AS "updatedAt",
+              t.name AS "typeName", tm.code AS "teamCode",
+              v.code AS "vehicleCode",v.description AS "vehicleDescription",v.plate AS "vehiclePlate"
          FROM incidents i
          JOIN incident_types t ON t.id = i.incident_type_id
          LEFT JOIN teams tm ON tm.id = i.current_team_id
+         LEFT JOIN vehicles v ON v.id = i.current_vehicle_id
         WHERE i.organization_id = $1
           AND i.status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
         ORDER BY
@@ -147,11 +149,21 @@ export async function fieldRoutes(app: FastifyInstance) {
       `SELECT DISTINCT ON (p.user_id)
               p.user_id AS "userId", u.display_name AS "displayName", u.matricula,
               p.team_id AS "teamId", tm.code AS "teamCode",
+              active_incident."vehicleCode",active_incident."vehicleDescription",active_incident."vehiclePlate",
               p.latitude, p.longitude, p.accuracy_meters AS "accuracyMeters",
               p.recorded_at AS "recordedAt", p.captured_at AS "capturedAt"
          FROM field_positions p
          JOIN users u ON u.id = p.user_id
          LEFT JOIN teams tm ON tm.id = p.team_id
+         LEFT JOIN LATERAL (
+           SELECT v.code AS "vehicleCode",v.description AS "vehicleDescription",v.plate AS "vehiclePlate"
+           FROM incidents i
+           JOIN vehicles v ON v.id=i.current_vehicle_id
+           WHERE i.organization_id=p.organization_id
+             AND i.current_team_id=p.team_id
+             AND i.status NOT IN ('CLOSED','CANCELLED','DUPLICATE')
+           ORDER BY i.updated_at DESC LIMIT 1
+         ) active_incident ON true
         WHERE p.organization_id = $1
           AND p.recorded_at > now() - interval '24 hours'
         ORDER BY p.user_id, p.recorded_at DESC`,
@@ -177,7 +189,19 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
-    return { incidents: incidents.rows, positions: positions.rows, monitoringEvents: monitoringEvents.rows };
+    const latestReadings = await db.query(
+      `SELECT DISTINCT ON (r.station_id,r.metric)
+              r.id,s.id AS "stationId",s.code AS "stationCode",s.name AS "stationName",
+              s.station_type AS "stationType",s.latitude,s.longitude,
+              r.metric,r.value::float8 AS value,r.unit,r.measured_at AS "measuredAt"
+         FROM monitoring_readings r
+         JOIN monitoring_stations s ON s.id=r.station_id
+        WHERE s.organization_id=$1 AND s.active=true
+        ORDER BY r.station_id,r.metric,r.measured_at DESC`,
+      [orgId]
+    );
+
+    return { incidents: incidents.rows, positions: positions.rows, monitoringEvents: monitoringEvents.rows, latestReadings: latestReadings.rows };
   });
 
   app.get("/api/v1/field/history", {
@@ -234,14 +258,25 @@ export async function fieldRoutes(app: FastifyInstance) {
     }
 
     const value = parsed.data;
-    if (value.teamId) {
+    let effectiveTeamId=value.teamId??null;
+    if (effectiveTeamId) {
       const team = await db.query(
         "SELECT 1 FROM teams WHERE id = $1 AND organization_id = $2 AND active = true",
-        [value.teamId, orgId]
+        [effectiveTeamId, orgId]
       );
       if (!team.rows[0]) {
         return reply.code(400).send({ error: "INVALID_TEAM", message: "Equipe inválida." });
       }
+    } else {
+      const inferred=await db.query(
+        `SELECT tm.id
+           FROM team_members m JOIN teams tm ON tm.id=m.team_id
+          WHERE m.user_id=$1 AND tm.organization_id=$2 AND tm.active=true
+          ORDER BY CASE tm.status WHEN 'ON_SCENE' THEN 1 WHEN 'EN_ROUTE' THEN 2 WHEN 'DISPATCHED' THEN 3 ELSE 4 END, tm.created_at
+          LIMIT 1`,
+        [auth.userId,orgId]
+      );
+      effectiveTeamId=inferred.rows[0]?.id??null;
     }
 
     const result = await db.query(
@@ -254,7 +289,7 @@ export async function fieldRoutes(app: FastifyInstance) {
        )
        RETURNING recorded_at AS "recordedAt", captured_at AS "capturedAt"`,
       [
-        orgId, auth.userId, value.teamId ?? null, value.latitude, value.longitude,
+        orgId, auth.userId, effectiveTeamId, value.latitude, value.longitude,
         value.accuracyMeters ?? null, value.capturedAt ?? value.recordedAt ?? new Date()
       ]
     );
