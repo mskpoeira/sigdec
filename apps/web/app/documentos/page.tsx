@@ -1,4 +1,5 @@
 "use client";
+import {SIGDEC_VERSION_LABEL} from "../lib/release";
 import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
@@ -286,7 +287,7 @@ export default function DocumentosPage() {
     <main className="shell moduleShell">
       <header className="listHeader">
         <div>
-          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · v1.41</span>
+          <span className="eyebrow">SIGDEC · DOCUMENTOS OFICIAIS · {SIGDEC_VERSION_LABEL}</span>
           <h1>Documentos técnicos</h1>
           <p>Elaboração, revisão, aprovação, emissão, integridade e PDF.</p>
         </div>
