@@ -22,6 +22,8 @@ type AuditItem={
  integrityValid:boolean;
 };
 type Integrity={status:"verified"|"failed";algorithm:string;appendOnly:boolean;checkedAt:string;total:number;unsealed:number;invalid:number;oldestAt:string|null;newestAt:string|null};
+type Checkpoint={id:string;createdAt:string;createdByMatricula:string;createdByName:string;auditCount:number;firstAuditId:string|null;lastAuditId:string|null;auditRootHash:string;previousCheckpointHash:string|null;checkpointHash:string;integrityVersion:number;algorithm:string;checkpointValid:boolean};
+type CheckpointVerification={status:"none"|"verified"|"failed";checkedAt:string;checkpointCount:number;chainInvalid?:number;contentInvalid?:number;latest?:Checkpoint;audit?:{rootValid:boolean;invalid:number;unsealed:number}};
 
 const activityLabel=(action:string)=>{
  if(action==="REQUEST_POST")return "Registro";
@@ -39,6 +41,9 @@ export default function AuditPage(){
  const[to,setTo]=useState("");
  const[message,setMessage]=useState("Carregando atividades...");
  const[integrity,setIntegrity]=useState<Integrity|null>(null);
+ const[checkpoints,setCheckpoints]=useState<Checkpoint[]>([]);
+ const[checkpointVerification,setCheckpointVerification]=useState<CheckpointVerification|null>(null);
+ const[checkpointBusy,setCheckpointBusy]=useState(false);
  const[busy,setBusy]=useState(false);
 
  const params=useMemo(()=>{
@@ -72,7 +77,30 @@ export default function AuditPage(){
    if(response.ok)setIntegrity(body);
   }catch{}
  },[]);
- useEffect(()=>{void load();void verify()},[verify]);
+ const loadCheckpoints=useCallback(async()=>{
+  try{
+   const [listResponse,verifyResponse]=await Promise.all([
+    fetch(`${API}/api/v1/admin/audit/checkpoints?limit=20`,{credentials:"include",cache:"no-store"}),
+    fetch(`${API}/api/v1/admin/audit/checkpoints/verify`,{credentials:"include",cache:"no-store"})
+   ]);
+   const listBody=await listResponse.json().catch(()=>({}));
+   const verifyBody=await verifyResponse.json().catch(()=>({}));
+   if(listResponse.ok)setCheckpoints(listBody.items??[]);
+   if(verifyResponse.ok)setCheckpointVerification(verifyBody);
+  }catch{}
+ },[]);
+ const createCheckpoint=useCallback(async()=>{
+  setCheckpointBusy(true);
+  try{
+   const response=await fetch(`${API}/api/v1/admin/audit/checkpoints`,{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:"{}"});
+   const body=await response.json().catch(()=>({}));
+   if(!response.ok)throw new Error(body.message??body.error??"Não foi possível criar o ponto de verificação.");
+   setMessage("Ponto de verificação criptográfica criado com sucesso.");
+   await loadCheckpoints();
+  }catch(error){setMessage(error instanceof Error?error.message:"Falha ao criar ponto de verificação.");}
+  finally{setCheckpointBusy(false);}
+ },[loadCheckpoints]);
+ useEffect(()=>{void load();void verify();void loadCheckpoints()},[verify,loadCheckpoints]);
 
  function filter(event:FormEvent){event.preventDefault();void load(params)}
  function clear(){
@@ -106,7 +134,18 @@ export default function AuditPage(){
   </form>
 
   {integrity&&<section className={integrity.status==="verified"?"infoCard":"warningCard"}><strong>{integrity.status==="verified"?"Integridade verificada":"Falha de integridade detectada"}</strong><p>{integrity.total} registro(s) verificado(s) · {integrity.invalid} inválido(s) · {integrity.unsealed} sem selo · {integrity.algorithm} · trilha {integrity.appendOnly?"append-only":"alterável"}</p><p><small>Verificado em {formatDateTimeBR(integrity.checkedAt)}</small></p></section>}
+  <section className={checkpointVerification?.status==="failed"?"warningCard":"infoCard"} style={{marginTop:12}}>
+   <div className="listHeader"><div><strong>Cadeia de pontos de verificação</strong><p>{checkpointVerification?.status==="verified"?"Cadeia íntegra e vinculada ao histórico auditado.":checkpointVerification?.status==="failed"?"Inconsistência detectada na cadeia de checkpoints.":"Nenhum checkpoint criado ainda."}</p></div><button className="primaryButton" type="button" disabled={checkpointBusy} onClick={()=>void createCheckpoint()}>{checkpointBusy?"Criando...":"Criar checkpoint"}</button></div>
+   {checkpointVerification?.status!=="none"&&checkpointVerification&&<p><small>{checkpointVerification.checkpointCount} checkpoint(s) · {checkpointVerification.chainInvalid??0} quebra(s) de encadeamento · {checkpointVerification.contentInvalid??0} conteúdo(s) inválido(s) · conferido em {formatDateTimeBR(checkpointVerification.checkedAt)}</small></p>}
+  </section>
   {message&&<section className="infoCard">{message}</section>}
+
+  {checkpoints.length>0&&<section style={{marginTop:18}}>
+   <div className="listHeader"><div><h2>Checkpoints criptográficos</h2><p>Âncoras append-only da trilha de auditoria, encadeadas entre si.</p></div></div>
+   <div className="adminTableWrap"><table><thead><tr><th>Horário</th><th>Matrícula</th><th>Registros</th><th>Intervalo</th><th>Raiz SHA-256</th><th>Checkpoint</th></tr></thead>
+    <tbody>{checkpoints.map(item=><tr key={item.id}><td>{formatDateTimeBR(item.createdAt)}</td><td><strong>{item.createdByMatricula}</strong><br/><small>{item.createdByName}</small></td><td>{item.auditCount}</td><td>{item.firstAuditId??"—"} → {item.lastAuditId??"—"}</td><td><code title={item.auditRootHash}>{item.auditRootHash.slice(0,16)}…</code></td><td>{item.checkpointValid?"✓ OK":"⚠ FALHA"}</td></tr>)}</tbody>
+   </table></div>
+  </section>}
 
   <section style={{marginTop:18}}>
    <div className="listHeader"><div><h2>Atividades registradas</h2><p>{items.length} registro(s) exibido(s), do mais recente para o mais antigo.</p></div></div>
