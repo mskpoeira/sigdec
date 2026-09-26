@@ -43,9 +43,13 @@ type FieldPosition = {
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
+  speedMps?: number | null;
+  headingDegrees?: number | null;
+  trackingSessionId?: string | null;
   recordedAt: string;
   capturedAt?: string | null;
 };
+type TrailPoint={userId:string;displayName:string;matricula:string;teamCode:string|null;latitude:number;longitude:number;speedMps?:number|null;headingDegrees?:number|null;trackingSessionId?:string|null;recordedAt:string};
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 type MonitoringReading={id:number;stationId:string;stationCode:string;stationName:string;stationType:string;latitude:number|null;longitude:number|null;metric:string;value:number;unit:string;measuredAt:string};
 
@@ -53,6 +57,7 @@ export default function CampoPage() {
   const [monitorMode,setMonitorMode]=useState(false);
   const [incidents, setIncidents] = useState<FieldIncident[]>([]);
   const [positions, setPositions] = useState<FieldPosition[]>([]);
+  const [positionTrail,setPositionTrail]=useState<TrailPoint[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
   const [latestReadings,setLatestReadings]=useState<MonitoringReading[]>([]);
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
@@ -68,6 +73,10 @@ export default function CampoPage() {
   const [savingPoint,setSavingPoint]=useState(false);
   const [message, setMessage] = useState("Carregando operação de campo...");
   const [sharing, setSharing] = useState(false);
+  const [tracking,setTracking]=useState(false);
+  const trackingWatchRef=useRef<number|null>(null);
+  const lastTrackRef=useRef<{at:number;lat:number;lon:number}|null>(null);
+  const trackingSessionRef=useRef<string|null>(null);
   const [online,setOnline]=useState(true);
   const [clock,setClock]=useState(new Date());
   const [soundEnabled,setSoundEnabled]=useState(false);
@@ -112,6 +121,48 @@ export default function CampoPage() {
     return minutes+"min";
   }
 
+  function distanceMeters(lat1:number,lon1:number,lat2:number,lon2:number){
+    const rad=(value:number)=>value*Math.PI/180,R=6371000;
+    const dLat=rad(lat2-lat1),dLon=rad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  }
+
+  function statusLabel(status:string){
+    const labels:Record<string,string>={
+      RECEIVED:"Recebida",TRIAGE:"Triagem",WAITING_DISPATCH:"Aguardando despacho",DISPATCHED:"Despachada",
+      EN_ROUTE:"Em deslocamento",ON_SCENE:"No local",IN_SERVICE:"Em atendimento",WAITING_SUPPORT:"Aguardando apoio",
+      INSPECTION:"Vistoria",MONITORING:"Monitoramento",COMPLETED:"Concluída"
+    };
+    return labels[status]??status;
+  }
+
+  function etaForIncident(item:FieldIncident){
+    if(!item.teamCode||item.latitude===null||item.longitude===null)return null;
+    if(item.status==="ON_SCENE"||item.status==="IN_SERVICE")return {label:"No local",distanceKm:0};
+    if(!["DISPATCHED","EN_ROUTE"].includes(item.status))return null;
+    const position=positions.find(p=>p.teamCode===item.teamCode);
+    if(!position)return null;
+    const distanceKm=distanceMeters(position.latitude,position.longitude,Number(item.latitude),Number(item.longitude))/1000;
+    const speedKmh=Number(position.speedMps??0)>1.5?Number(position.speedMps)*3.6:30;
+    const minutes=Math.max(1,Math.ceil((distanceKm*1.25/speedKmh)*60));
+    return {label:"ETA aprox. "+minutes+" min",distanceKm};
+  }
+
+  function positionAgeMinutes(position:FieldPosition){
+    return Math.max(0,Math.floor((clock.getTime()-new Date(position.recordedAt).getTime())/60000));
+  }
+
+  const trailGroups=useMemo(()=>{
+    const groups=new Map<string,TrailPoint[]>();
+    for(const point of positionTrail){
+      const key=point.trackingSessionId??point.userId;
+      const list=groups.get(key)??[];
+      list.push(point);groups.set(key,list);
+    }
+    return [...groups.entries()].map(([key,points])=>({key,points:points.slice(-100)})).filter(group=>group.points.length>1);
+  },[positionTrail]);
+
   async function load() {
     const response = await fetch(`${API_URL}/api/v1/field/map`, { credentials: "include" });
     if (response.status === 401) {
@@ -127,6 +178,7 @@ export default function CampoPage() {
     const body = await response.json();
     setIncidents(body.incidents ?? []);
     setPositions(body.positions ?? []);
+    setPositionTrail(body.positionTrail ?? []);
     setMonitoringEvents(body.monitoringEvents ?? []);
     setLatestReadings(body.latestReadings ?? []);
     const pointResponse=await fetch(`${API_URL}/api/v1/field/map-points`,{credentials:"include"});
@@ -209,11 +261,15 @@ export default function CampoPage() {
 
   const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
   const locatedIncidents=useMemo(()=>incidents.filter(item=>item.latitude!==null&&item.longitude!==null&&Number.isFinite(Number(item.latitude))&&Number.isFinite(Number(item.longitude))),[incidents]);
-  const mapPosition=(latitude:number|string|null,longitude:number|string|null)=>{
+  const mapPercent=(latitude:number|string|null,longitude:number|string|null)=>{
     const lat=Number(latitude),lon=Number(longitude);
-    const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));
-    const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));
-    return {left:left+"%",top:top+"%"};
+    const x=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));
+    const y=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));
+    return {x,y};
+  };
+  const mapPosition=(latitude:number|string|null,longitude:number|string|null)=>{
+    const {x,y}=mapPercent(latitude,longitude);
+    return {left:x+"%",top:y+"%"};
   };
   const pinPosition=(item:FieldIncident)=>mapPosition(item.latitude,item.longitude);
   const mapUrl = useMemo(() => {
@@ -261,6 +317,49 @@ export default function CampoPage() {
       else await document.exitFullscreen();
     }catch{setMessage("Não foi possível alterar o modo de tela cheia neste dispositivo.")}
   }
+
+  async function postTrackedPosition(position:GeolocationPosition,trackingSessionId?:string){
+    const payload={
+      latitude:position.coords.latitude,
+      longitude:position.coords.longitude,
+      accuracyMeters:position.coords.accuracy,
+      ...(position.coords.speed!==null&&Number.isFinite(position.coords.speed)?{speedMps:position.coords.speed}:{}),
+      ...(position.coords.heading!==null&&Number.isFinite(position.coords.heading)?{headingDegrees:position.coords.heading}:{}),
+      ...(trackingSessionId?{trackingSessionId}:{}),
+      capturedAt:new Date(position.timestamp).toISOString()
+    };
+    const response=await fetch(`${API_URL}/api/v1/field/location`,{
+      method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)
+    });
+    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message??"Falha ao transmitir localização.")}
+  }
+
+  async function startTracking(){
+    if(!navigator.geolocation){setMessage("Este aparelho não disponibiliza geolocalização.");return}
+    if(trackingWatchRef.current!==null)return;
+    const sessionId=crypto.randomUUID();
+    trackingSessionRef.current=sessionId;lastTrackRef.current=null;setTracking(true);
+    setMessage("Rastreamento contínuo iniciado. A posição será atualizada durante o deslocamento.");
+    trackingWatchRef.current=navigator.geolocation.watchPosition(async position=>{
+      const now=Date.now(),previous=lastTrackRef.current;
+      const moved=previous?distanceMeters(previous.lat,previous.lon,position.coords.latitude,position.coords.longitude):Infinity;
+      if(previous&&now-previous.at<15000&&moved<30)return;
+      lastTrackRef.current={at:now,lat:position.coords.latitude,lon:position.coords.longitude};
+      if(!navigator.onLine)return;
+      try{await postTrackedPosition(position,sessionId)}
+      catch(error){setMessage(error instanceof Error?error.message:"Falha no rastreamento em tempo real.")}
+    },error=>{
+      setMessage(error.code===error.PERMISSION_DENIED?"Permissão de localização negada.":"Sinal de localização indisponível.");
+      stopTracking();
+    },{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+  }
+
+  function stopTracking(){
+    if(trackingWatchRef.current!==null)navigator.geolocation.clearWatch(trackingWatchRef.current);
+    trackingWatchRef.current=null;trackingSessionRef.current=null;lastTrackRef.current=null;setTracking(false);
+  }
+
+  useEffect(()=>()=>{if(trackingWatchRef.current!==null)navigator.geolocation.clearWatch(trackingWatchRef.current)},[]);
 
   function shareLocation() {
     if (!navigator.geolocation) {
