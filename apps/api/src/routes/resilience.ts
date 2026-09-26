@@ -222,7 +222,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   return r.rows[0];
  });
 
- app.get("/api/v1/support-requests",{preHandler:requirePermission("support_requests.manage")},async request=>{
+ app.get("/api/v1/external-support-requests",{preHandler:requirePermission("support_requests.manage")},async request=>{
   const o=org(request);
   const r=await db.query(`SELECT s.id,s.scope,s.service_type AS "serviceType",s.cobrade_code AS "cobradeCode",s.title,s.summary,s.status,
     s.external_system AS "externalSystem",s.external_protocol AS "externalProtocol",s.reference_url AS "referenceUrl",
@@ -242,7 +242,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   return {items:r.rows};
  });
 
- app.post("/api/v1/support-requests",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
+ app.post("/api/v1/external-support-requests",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),m=await matricula(request),p=supportInput.safeParse(request.body);
   if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
   const v=p.data;let incidentId:string|null=null;
@@ -279,7 +279,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   }catch(e){await client.query("ROLLBACK");throw e}finally{client.release()}
  });
 
- app.patch("/api/v1/support-requests/:id",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
+ app.patch("/api/v1/external-support-requests/:id",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),m=await matricula(request),{id}=request.params as {id:string},p=supportUpdate.safeParse(request.body);
   if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const current=await db.query("SELECT * FROM external_support_requests WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -308,7 +308,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   return r.rows[0];
  });
 
- app.get("/api/v1/support-requests/:id",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
+ app.get("/api/v1/external-support-requests/:id",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
   const o=org(request),{id}=request.params as {id:string};
   if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const [record,requirements,events]=await Promise.all([
@@ -328,7 +328,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   return {item:record.rows[0],requirements:requirements.rows,events:events.rows};
  });
 
- app.post("/api/v1/support-requests/:id/requirements",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
+ app.post("/api/v1/external-support-requests/:id/requirements",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),m=await matricula(request),{id}=request.params as {id:string},p=reqInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const parent=await db.query("SELECT id FROM external_support_requests WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -344,7 +344,7 @@ export async function resilienceRoutes(app:FastifyInstance){
   }catch(e:any){if(e?.code==="23505")return reply.code(409).send({error:"REQUIREMENT_EXISTS"});throw e}
  });
 
- app.patch("/api/v1/support-requests/:requestId/requirements/:requirementId",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
+ app.patch("/api/v1/external-support-requests/:requestId/requirements/:requirementId",{preHandler:requirePermission("support_requests.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),m=await matricula(request),{requestId,requirementId}=request.params as {requestId:string;requirementId:string},p=reqUpdate.safeParse(request.body);
   if(!uuid.safeParse(requestId).success||!uuid.safeParse(requirementId).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const v=p.data;
