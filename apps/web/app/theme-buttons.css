@@ -174,3 +174,99 @@
   transform:scale(1.22);
   transform-origin:center;
 }
+
+
+/* v1.62 — segundo ciclo visual: formulários, cartões, abas e áreas de ação */
+.moduleShell .headerActions,
+.moduleShell .formActions,
+.shell:not(.loginShell) .headerActions,
+.shell:not(.loginShell) .formActions{
+  gap:10px;
+}
+.moduleShell .card,
+.moduleShell .infoCard,
+.moduleShell .warningCard,
+.moduleShell .incidentForm,
+.shell:not(.loginShell) .card,
+.shell:not(.loginShell) .infoCard,
+.shell:not(.loginShell) .warningCard,
+.shell:not(.loginShell) .incidentForm{
+  border-radius:14px;
+  border:1px solid #dce6f0;
+  box-shadow:0 4px 14px rgba(9,40,74,.06);
+}
+.moduleShell .infoCard,
+.shell:not(.loginShell) .infoCard{
+  border-left:5px solid var(--sigdec-blue);
+}
+.moduleShell .warningCard,
+.shell:not(.loginShell) .warningCard{
+  border-left:5px solid var(--sigdec-orange);
+  background:#fff9f4;
+}
+.moduleShell .adminTabs{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  padding:7px;
+  border:1px solid #d5e4f0;
+  border-radius:12px;
+  background:#e9f1f8;
+}
+.moduleShell .adminTabs button{
+  min-height:38px;
+  border:0;
+  border-radius:8px;
+  padding:8px 12px;
+  background:transparent;
+  color:#315a80;
+  font-weight:800;
+  cursor:pointer;
+}
+.moduleShell .adminTabs button:hover{
+  background:#fff;
+  color:var(--sigdec-blue);
+}
+.moduleShell .adminTabs button.active{
+  background:var(--sigdec-blue);
+  color:#fff;
+  box-shadow:0 4px 10px rgba(18,101,193,.22);
+}
+
+/* Tabelas administrativas seguem o azul institucional do painel. */
+.moduleShell .adminTableWrap th{
+  background:#eaf3fb;
+  color:var(--sigdec-navy);
+  border-bottom:2px solid #c5d9ea;
+}
+.moduleShell .adminTableWrap tbody tr:hover{
+  background:#f1f7fc;
+}
+
+/* Campos de formulários com foco laranja/azul, igual à identidade do dashboard. */
+.moduleShell input:focus,
+.moduleShell select:focus,
+.moduleShell textarea:focus,
+.shell:not(.loginShell) input:focus,
+.shell:not(.loginShell) select:focus,
+.shell:not(.loginShell) textarea:focus{
+  outline:3px solid rgba(242,107,33,.18);
+  border-color:var(--sigdec-blue);
+  box-shadow:0 0 0 1px rgba(18,101,193,.08);
+}
+
+/* Ações em blocos estreitos permanecem confortáveis no celular. */
+@media(max-width:600px){
+  .moduleShell .headerActions,
+  .moduleShell .formActions,
+  .shell:not(.loginShell) .headerActions,
+  .shell:not(.loginShell) .formActions{
+    width:100%;
+  }
+  .moduleShell .headerActions > *,
+  .moduleShell .formActions > *,
+  .shell:not(.loginShell) .headerActions > *,
+  .shell:not(.loginShell) .formActions > *{
+    flex:1 1 150px;
+  }
+}
