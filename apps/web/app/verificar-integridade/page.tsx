@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent,useState } from "react";
+import {SIGDEC_VERSION_LABEL} from "../lib/release";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
@@ -20,6 +21,7 @@ export default function VerifyIntegrityPage(){
  const [result,setResult]=useState<VerificationResult|null>(null);
  const [message,setMessage]=useState("");
  const [busy,setBusy]=useState(false);
+ const [auditHash,setAuditHash]=useState("");
 
  async function verifyProof(){
   setBusy(true);setMessage("");setResult(null);
@@ -51,12 +53,18 @@ export default function VerifyIntegrityPage(){
  return <main className="shell moduleShell">
   <header className="listHeader">
    <div>
-    <span className="eyebrow">SIGDEC · INTEGRIDADE · Ed25519</span>
+    <span className="eyebrow">SIGDEC · INTEGRIDADE · {SIGDEC_VERSION_LABEL}</span>
     <h1>Verificar comprovante SIDEC</h1>
     <p>Validação criptográfica independente do comprovante de um ZIP selado, sem necessidade de acesso à chave privada do SIGDEC.</p>
    </div>
    <Link className="secondaryLink" href="/painel">Painel</Link>
   </header>
+
+  <section className="infoCard">
+   <strong>Checkpoint da auditoria</strong>
+   <p>Consulte publicamente uma âncora SHA-256 da trilha de atividades sem expor o conteúdo auditado.</p>
+   <div className="headerActions"><input value={auditHash} onChange={e=>setAuditHash(e.target.value.trim())} placeholder="Hash SHA-256 do checkpoint"/><Link className="secondaryLink" href={auditHash&&/^[a-f0-9]{64}$/i.test(auditHash)?`/integridade/auditoria/${auditHash}`:"/verificar-integridade"} aria-disabled={!/^[a-f0-9]{64}$/i.test(auditHash)}>Verificar checkpoint</Link></div>
+  </section>
 
   <section className="infoCard">
    <strong>O que é validado</strong>
