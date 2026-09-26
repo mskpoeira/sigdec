@@ -69,7 +69,7 @@ export default function PublicAuditCheckpointPage(){
    <p style={{overflowWrap:"anywhere"}}><strong>Raiz da auditoria:</strong> {data.auditRootHash}</p>
    {data.previousCheckpointHash&&<p style={{overflowWrap:"anywhere"}}><strong>Checkpoint anterior:</strong> {data.previousCheckpointHash}</p>}
    {data.ed25519&&<p style={{overflowWrap:"anywhere"}}><strong>Fingerprint da chave pública:</strong> {data.ed25519.publicKeyFingerprint}</p>}
-   {publicUrl&&<div className="card" style={{maxWidth:250,textAlign:"center",marginTop:16}}><h2>QR Code de verificação</h2><img src={`https://quickchart.io/qr?size=180&text=${encodeURIComponent(publicUrl)}`} alt="QR Code para verificar este checkpoint" width={180} height={180}/><p><small>Ao escanear, esta página pública de verificação será aberta.</small></p></div>}
+   {publicUrl&&<div className="card" style={{maxWidth:250,textAlign:"center",marginTop:16}}><h2>QR Code de verificação</h2><img src={`${API}/api/v1/public/audit-checkpoint/${encodeURIComponent(hash)}/qr.svg`} alt="QR Code para verificar este checkpoint" width={180} height={180}/><p><small>Gerado pelo próprio SIGDEC. Ao escanear, esta página pública de verificação será aberta.</small></p></div>}
    <p><small>Verificado pelo SIGDEC em {formatDateTimeBR(data.checkedAt)}. A consulta confirma a correspondência do checkpoint com os registros atualmente preservados no sistema, sem revelar o conteúdo da trilha.</small></p>
   </section>}
  </main>;
