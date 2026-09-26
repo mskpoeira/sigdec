@@ -146,3 +146,195 @@
  .opsUser{display:flex;align-items:center;gap:9px;padding:12px 4px 9px;white-space:nowrap}
  .opsLogout{padding:10px 4px!important;white-space:nowrap}
 }
+
+
+/* v1.59 — linguagem visual unificada inspirada no Painel SIGDEC */
+:root{
+ --sigdec-navy:#0b3159;
+ --sigdec-navy-2:#09284a;
+ --sigdec-blue:#0b5ea8;
+ --sigdec-blue-2:#1762b5;
+ --sigdec-orange:#e35e2f;
+ --sigdec-bg:#eef5fb;
+ --sigdec-surface:#ffffff;
+ --sigdec-line:#dbe6f0;
+ --sigdec-text:#0a2853;
+ --sigdec-muted:#526a87;
+ --sigdec-shadow:0 8px 26px rgba(9,49,89,.08);
+ --sigdec-shadow-hover:0 14px 34px rgba(9,49,89,.13);
+}
+body{background:linear-gradient(180deg,#f4f8fc 0,#edf5fb 100%);color:var(--sigdec-text)}
+body::selection{background:#cfe5f8;color:#09284a}
+.shell{width:min(1380px,calc(100% - 32px))}
+.moduleShell{position:relative;width:min(1380px,calc(100% - 28px));padding:0 32px 48px;background:
+ radial-gradient(circle at 96% 1%,rgba(23,98,181,.09),transparent 28%),
+ linear-gradient(180deg,#edf6fd 0,#f8fbfd 300px,#f5f8fb 100%);border-radius:0 0 22px 22px;overflow:visible}
+.moduleShell>.listHeader:first-child{
+ position:relative;overflow:hidden;min-height:154px;align-items:center;
+ margin:0 -32px 28px;padding:28px 34px 30px;
+ background:
+ linear-gradient(100deg,rgba(9,40,74,.98),rgba(0,78,148,.96) 68%,rgba(0,78,148,.86)),
+ radial-gradient(circle at 82% 20%,rgba(227,94,47,.25),transparent 34%);
+ border:0;border-bottom:5px solid var(--sigdec-orange);border-radius:0 0 18px 18px;
+ box-shadow:0 12px 30px rgba(7,42,77,.18)
+}
+.moduleShell>.listHeader:first-child::before{
+ content:"SIGDEC";position:absolute;right:34px;top:14px;font-weight:1000;font-size:5.8rem;
+ line-height:1;letter-spacing:-.06em;color:rgba(255,255,255,.055);pointer-events:none
+}
+.moduleShell>.listHeader:first-child::after{
+ content:"";position:absolute;right:-70px;bottom:-96px;width:250px;height:250px;border:42px solid rgba(255,255,255,.045);
+ border-radius:50%;pointer-events:none
+}
+.moduleShell>.listHeader:first-child>div,.moduleShell>.listHeader:first-child>.headerActions,.moduleShell>.listHeader:first-child>a{position:relative;z-index:2}
+.moduleShell>.listHeader:first-child h1{font-size:clamp(1.85rem,3vw,2.65rem);line-height:1.03;letter-spacing:-.025em;margin:7px 0 8px}
+.moduleShell>.listHeader:first-child p{max-width:820px;font-size:.98rem;line-height:1.55;color:#dcefff}
+.moduleShell>.listHeader:first-child .eyebrow{font-size:.72rem;color:#ffcfbc;letter-spacing:.14em}
+.moduleShell>.listHeader:first-child .primaryButton,.moduleShell>.listHeader:first-child .primaryLink{
+ background:#fff;color:#0b4e94;box-shadow:0 5px 16px rgba(0,0,0,.12)
+}
+.moduleShell>.listHeader:first-child .secondaryLink,.moduleShell>.listHeader:first-child .secondaryButton{
+ background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.34);backdrop-filter:blur(6px)
+}
+.moduleShell>.listHeader:first-child .secondaryLink:hover,.moduleShell>.listHeader:first-child .secondaryButton:hover{background:#fff;color:#0b4e94}
+
+.moduleShell>section>h2,.moduleShell>h2,.moduleShell .detailSection>h2{
+ display:flex;align-items:center;gap:10px;margin:28px 0 14px;color:var(--sigdec-navy);font-size:1.22rem;letter-spacing:-.01em
+}
+.moduleShell>section>h2::before,.moduleShell>h2::before,.moduleShell .detailSection>h2::before{
+ content:"";width:5px;height:23px;border-radius:999px;background:linear-gradient(180deg,var(--sigdec-orange),#f59a73);flex:0 0 auto
+}
+.moduleShell .dataGrid,.moduleShell .grid{gap:16px}
+.moduleShell .card,.moduleShell .infoCard,.moduleShell .incidentForm,.moduleShell .detailSection,.moduleShell .opsCard{
+ background:rgba(255,255,255,.98);border:1px solid var(--sigdec-line);border-top:3px solid var(--sigdec-blue);
+ border-radius:14px;box-shadow:var(--sigdec-shadow);transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease
+}
+.moduleShell .card{position:relative;overflow:hidden;padding:21px}
+.moduleShell .card::after{
+ content:"";position:absolute;right:-30px;top:-36px;width:90px;height:90px;border-radius:50%;background:rgba(11,94,168,.035);pointer-events:none
+}
+.moduleShell .card:hover{transform:translateY(-2px);box-shadow:var(--sigdec-shadow-hover);border-color:#bfd4e7}
+.moduleShell .card h2,.moduleShell .card h3{color:var(--sigdec-navy);letter-spacing:-.01em}
+.moduleShell .card h2{font-size:1.04rem}
+.moduleShell .card p{color:var(--sigdec-muted)}
+.moduleShell .adminNumber{color:var(--sigdec-blue);font-size:2.15rem;line-height:1;font-variant-numeric:tabular-nums}
+.moduleShell .warningCard{
+ position:relative;background:linear-gradient(135deg,#fffaf0,#fff5db);border:1px solid #efd58a;border-left:5px solid #e8a90f;
+ border-radius:14px;box-shadow:0 7px 22px rgba(129,91,0,.07)
+}
+.moduleShell .infoCard{
+ border-left:5px solid var(--sigdec-blue);padding:18px 20px
+}
+
+.moduleShell .incidentForm{
+ gap:18px;padding:24px;border-top-color:var(--sigdec-blue);background:linear-gradient(180deg,#fff,#fbfdff)
+}
+.moduleShell .incidentForm label{color:#1c3e63;font-size:.88rem}
+.moduleShell .incidentForm label small{font-weight:500;color:#718399}
+.moduleShell input,.moduleShell select,.moduleShell textarea{
+ border:1px solid #c9d8e6!important;border-radius:9px!important;background:#fff!important;color:#102f50!important;
+ min-height:42px;box-shadow:inset 0 1px 2px rgba(10,40,83,.025);transition:border-color .15s ease,box-shadow .15s ease
+}
+.moduleShell textarea{min-height:86px}
+.moduleShell input:hover,.moduleShell select:hover,.moduleShell textarea:hover{border-color:#9fbbd3!important}
+.moduleShell input:focus,.moduleShell select:focus,.moduleShell textarea:focus{
+ outline:0!important;border-color:var(--sigdec-blue)!important;box-shadow:0 0 0 3px rgba(11,94,168,.13)!important
+}
+.moduleShell input[type=checkbox],.moduleShell input[type=radio]{min-height:0;accent-color:var(--sigdec-blue)}
+
+.moduleShell .primaryButton,.moduleShell .primaryLink,.moduleShell button[type=submit]{
+ display:inline-flex;align-items:center;justify-content:center;min-height:42px;border:0;border-radius:9px;
+ background:linear-gradient(135deg,var(--sigdec-blue),#07477e);color:#fff;font-weight:850;text-decoration:none;
+ box-shadow:0 5px 14px rgba(11,94,168,.18);transition:transform .14s ease,box-shadow .14s ease,filter .14s ease
+}
+.moduleShell .primaryButton:hover,.moduleShell .primaryLink:hover,.moduleShell button[type=submit]:hover{
+ transform:translateY(-1px);box-shadow:0 8px 18px rgba(11,94,168,.24);filter:brightness(1.04)
+}
+.moduleShell .secondaryLink,.moduleShell .secondaryButton{
+ min-height:40px;border-radius:9px;background:#e9f1f8;color:#0b4e94;border:1px solid #d4e2ee;
+ transition:background .14s ease,transform .14s ease,border-color .14s ease
+}
+.moduleShell .secondaryLink:hover,.moduleShell .secondaryButton:hover{background:#dcecf8;border-color:#b7d0e5;transform:translateY(-1px)}
+.moduleShell button:focus-visible,.moduleShell a:focus-visible{outline:3px solid rgba(227,94,47,.35);outline-offset:2px}
+
+.moduleShell .adminTableWrap{
+ border:1px solid var(--sigdec-line);border-radius:14px;box-shadow:var(--sigdec-shadow);background:#fff;max-height:620px
+}
+.moduleShell .adminTableWrap table{font-size:.85rem}
+.moduleShell .adminTableWrap th{
+ z-index:2;background:linear-gradient(180deg,#eaf3fb,#e2eef8);color:#173f69;font-size:.76rem;text-transform:uppercase;
+ letter-spacing:.04em;border-bottom:1px solid #cbddeb;padding:12px 14px
+}
+.moduleShell .adminTableWrap td{padding:12px 14px;border-bottom:1px solid #edf2f6;color:#264866}
+.moduleShell .adminTableWrap tbody tr:nth-child(even){background:#fbfdff}
+.moduleShell .adminTableWrap tbody tr:hover{background:#f0f7fd}
+.moduleShell .adminTableWrap code{font-size:.78rem;color:#0b4e94;background:#edf5fb;padding:3px 6px;border-radius:6px}
+
+.moduleShell .incidentRow,.moduleShell .dispatchCard,.moduleShell .inspectionCard,.moduleShell .documentCard,.moduleShell .fieldIncident{
+ border:1px solid var(--sigdec-line);box-shadow:0 4px 14px rgba(9,49,89,.05);background:#fff;
+ transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease
+}
+.moduleShell .incidentRow:hover,.moduleShell .dispatchCard:hover,.moduleShell .inspectionCard:hover,.moduleShell .documentCard:hover,.moduleShell .fieldIncident:hover{
+ transform:translateY(-1px);box-shadow:0 8px 20px rgba(9,49,89,.1);border-color:#afc9df
+}
+.moduleShell .statusTag{background:#e8f1f9;color:#174f82;border:1px solid #d2e2ef}
+.moduleShell .timelineDot{background:var(--sigdec-blue);box-shadow:0 0 0 4px #e5f0fa}
+.moduleShell .timelineItem:before{background:#c9dceb}
+.moduleShell .detailList dt{color:#64809d}.moduleShell .detailList dd{color:#173f69}
+
+.moduleShell .fieldMap,.moduleShell .mapFrame,.moduleShell .situationMap{border-radius:14px;box-shadow:var(--sigdec-shadow)}
+.moduleShell .mapFrame{border:1px solid var(--sigdec-line)}
+.moduleShell .documentCard{border-left:5px solid var(--sigdec-blue);border-top:1px solid var(--sigdec-line)}
+.moduleShell .documentHash{background:#edf5fb;border:1px solid #dce8f2}
+
+.moduleShell .adminTabs{
+ padding:7px;background:#e9f1f8;border:1px solid #d5e4f0;border-radius:12px;box-shadow:inset 0 1px 2px rgba(9,49,89,.04)
+}
+.moduleShell .adminTabs button{border:0;background:transparent;color:#315a80;box-shadow:none}
+.moduleShell .adminTabs button:hover{background:#fff}
+.moduleShell .adminTabs button.active{background:#fff;color:#0b4e94;box-shadow:0 4px 12px rgba(9,49,89,.1)}
+.moduleShell fieldset{background:#fbfdff}
+.moduleShell legend{color:var(--sigdec-navy)}
+
+.moduleShell .priorityBadge{box-shadow:inset 0 0 0 1px rgba(0,0,0,.045)}
+.moduleShell .lifeRisk{box-shadow:0 3px 9px rgba(163,22,22,.2)}
+.moduleShell small{line-height:1.45}
+.moduleShell hr{border:0;border-top:1px solid #dfe8f1;margin:24px 0}
+.moduleShell a:not(.primaryButton):not(.primaryLink):not(.secondaryLink):not(.cardLink){text-underline-offset:3px}
+
+@media(max-width:900px){
+ .moduleShell{width:100%;padding:0 18px 30px;border-radius:0}
+ .moduleShell>.listHeader:first-child{margin:0 -18px 22px;padding:24px 20px;min-height:138px;border-radius:0 0 16px 16px}
+ .moduleShell>.listHeader:first-child::before{right:18px;font-size:4.2rem}
+ .moduleShell .card:hover,.moduleShell .incidentRow:hover,.moduleShell .dispatchCard:hover{transform:none}
+}
+@media(max-width:600px){
+ .shell{width:min(100% - 20px,1380px)}
+ .moduleShell{width:100%;padding:0 12px 24px}
+ .moduleShell>.listHeader:first-child{margin:0 -12px 18px;padding:22px 16px}
+ .moduleShell>.listHeader:first-child h1{font-size:1.75rem}
+ .moduleShell>.listHeader:first-child::before{font-size:3rem;top:22px}
+ .moduleShell .card,.moduleShell .incidentForm{padding:17px}
+ .moduleShell .headerActions{width:100%}
+ .moduleShell .headerActions>a,.moduleShell .headerActions>button{flex:1 1 auto}
+ .moduleShell .adminTableWrap th,.moduleShell .adminTableWrap td{padding:10px 11px}
+}
+
+
+/* v1.59 — fallback visual para telas legadas que ainda usam apenas .shell */
+.shell:not(.moduleShell):not(.loginShell)> .listHeader,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader{
+ position:relative;overflow:hidden;background:linear-gradient(105deg,var(--sigdec-navy),#075a9e);
+ color:#fff;border:0;border-bottom:4px solid var(--sigdec-orange);box-shadow:0 10px 26px rgba(7,42,77,.14)
+}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader h1,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader h1{color:#fff}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader p,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader p,
+.shell:not(.moduleShell):not(.loginShell)> .listHeader .eyebrow,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader .eyebrow{color:#dcefff}
+.shell:not(.moduleShell):not(.loginShell)> .listHeader .secondaryLink,
+.shell:not(.moduleShell):not(.loginShell)> .panelHeader .secondaryLink{background:#fff;color:#0b4e94}
+.shell:not(.moduleShell):not(.loginShell) .card,
+.shell:not(.moduleShell):not(.loginShell) .incidentForm,
+.shell:not(.moduleShell):not(.loginShell) .infoCard{box-shadow:var(--sigdec-shadow);border-color:var(--sigdec-line)}
