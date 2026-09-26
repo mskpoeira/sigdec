@@ -76,6 +76,34 @@ function auditCheckpointPublicUrl(checkpointHash:string){
  return `${base}/integridade/auditoria/${checkpointHash}`;
 }
 
+async function ensureAuditCheckpointAttestation(organizationId:string,checkpointId:string,userId:string){
+ const existing=await db.query(`SELECT checkpoint_id::text AS "checkpointId",algorithm,key_id AS "keyId",signature,
+   public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint",attested_at AS "attestedAt",
+   attested_by_matricula AS "attestedByMatricula"
+   FROM audit_checkpoint_attestations WHERE checkpoint_id=$1 AND organization_id=$2`,[checkpointId,organizationId]);
+ if(existing.rows[0])return existing.rows[0];
+
+ const source=await db.query(`SELECT c.id::text AS id,c.organization_id::text AS "organizationId",c.created_at AS "createdAt",
+   c.audit_count::int AS "auditCount",c.first_audit_id::text AS "firstAuditId",c.last_audit_id::text AS "lastAuditId",
+   c.audit_root_hash AS "auditRootHash",c.previous_checkpoint_hash AS "previousCheckpointHash",
+   c.checkpoint_hash AS "checkpointHash",c.integrity_version AS "integrityVersion",u.matricula
+   FROM audit_integrity_checkpoints c JOIN users u ON u.id=$3
+   WHERE c.id=$1 AND c.organization_id=$2 AND u.organization_id=$2`,[checkpointId,organizationId,userId]);
+ const row=source.rows[0];
+ if(!row)throw Object.assign(new Error("Checkpoint ou servidor responsável não localizado."),{statusCode:404,code:"CHECKPOINT_NOT_FOUND"});
+ const signed=signAuditCheckpoint(auditCheckpointSignatureInput(row));
+ await db.query(`INSERT INTO audit_checkpoint_attestations(
+   checkpoint_id,organization_id,algorithm,key_id,signature,public_key,public_key_fingerprint,attested_by,attested_by_matricula
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(checkpoint_id) DO NOTHING`,[
+  checkpointId,organizationId,signed.algorithm,signed.keyId,signed.signature,signed.publicKey,signed.publicKeyFingerprint,userId,row.matricula
+ ]);
+ const result=await db.query(`SELECT checkpoint_id::text AS "checkpointId",algorithm,key_id AS "keyId",signature,
+   public_key AS "publicKey",public_key_fingerprint AS "publicKeyFingerprint",attested_at AS "attestedAt",
+   attested_by_matricula AS "attestedByMatricula"
+   FROM audit_checkpoint_attestations WHERE checkpoint_id=$1 AND organization_id=$2`,[checkpointId,organizationId]);
+ return result.rows[0];
+}
+
 async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
  const hash=createHash("sha256");
  let cursor="0",count=0,firstAuditId:string|null=null,lastAuditId:string|null=null,invalid=0,unsealed=0;
