@@ -84,7 +84,7 @@ export default function NovaOcorrenciaPage() {
           callerName: callerName || undefined,
           callerPhone: callerPhone || undefined,
           callerPhoneType: callerPhone ? callerPhoneType : undefined,
-          callerPhoneWhatsapp: callerPhone ? callerPhoneWhatsapp : false,
+          callerPhoneWhatsapp: callerPhone ? (source==="whatsapp" || callerPhoneWhatsapp) : false,
           addressLine: addressLine || undefined,
           neighborhood: neighborhood || undefined,
           referencePoint: referencePoint || undefined
@@ -142,7 +142,11 @@ export default function NovaOcorrenciaPage() {
 
           <label>
             Origem
-            <select value={source} onChange={(e) => setSource(e.target.value)}>
+            <select value={source} onChange={(e) => {
+              const next=e.target.value;
+              setSource(next);
+              if(next==="whatsapp"&&callerPhone)setCallerPhoneWhatsapp(true);
+            }}>
               <option value="phone_199">199</option>
               <option value="phone_admin">Telefone administrativo</option>
               <option value="radio">Rádio</option>
@@ -211,15 +215,20 @@ export default function NovaOcorrenciaPage() {
                 inputMode="tel"
                 autoComplete="tel"
                 placeholder={callerPhoneType==="MOBILE"?"(12) 99999-9999":"(12) 3333-4444"}
-                onChange={(e) => setCallerPhone(formatBrazilPhone(e.target.value,callerPhoneType))}
+                onChange={(e) => {
+                  const next=formatBrazilPhone(e.target.value,callerPhoneType);
+                  setCallerPhone(next);
+                  if(!next)setCallerPhoneWhatsapp(false);
+                  else if(source==="whatsapp")setCallerPhoneWhatsapp(true);
+                }}
               />
               <small>{callerPhoneType==="MOBILE"?"Informe DDD + 9 dígitos.":"Informe DDD + 8 dígitos."}</small>
             </label>
             <label className="checkLabel">
               <input
                 type="checkbox"
-                checked={callerPhoneWhatsapp}
-                disabled={!callerPhone}
+                checked={source==="whatsapp"&&callerPhone ? true : callerPhoneWhatsapp}
+                disabled={!callerPhone || source==="whatsapp"}
                 onChange={(e) => setCallerPhoneWhatsapp(e.target.checked)}
               />
               Este número possui WhatsApp
