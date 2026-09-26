@@ -72,7 +72,7 @@ export async function adminDataRoutes(app:FastifyInstance){
  app.get("/api/v1/admin/audit",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
   const parsed=auditQuery.safeParse(request.query??{});
   if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY",details:parsed.error.flatten()});
-  const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
+  const q={...parsed.data,limit:500},values:unknown[]=[org(request)],where=["u.organization_id=$1"];
   if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
   if(q.action){values.push(`%${q.action}%`);where.push(`a.action ILIKE ${values.length}`);}
   if(q.entityType){values.push(`%${q.entityType}%`);where.push(`a.entity_type ILIKE ${values.length}`);}
@@ -88,7 +88,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return {items:result.rows,filters:q};
  });
  app.get("/api/v1/admin/audit.csv",{preHandler:requirePermission("audit.read")},async(request,reply)=>{
-  const parsed=auditQuery.safeParse({...request.query,limit:500});
+  const parsed=auditQuery.safeParse(request.query??{});
   if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY"});
   const q=parsed.data,values:unknown[]=[org(request)],where=["u.organization_id=$1"];
   if(q.matricula){values.push(`%${q.matricula}%`);where.push(`a.actor_matricula ILIKE ${values.length}`);}
