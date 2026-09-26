@@ -5,11 +5,12 @@ import PwaRegister from "./PwaRegister";
 import GlobalExperience from "./GlobalExperience";
 
 export const metadata = {
-  title: "SIGDEC",
-  description: "Sistema Integrado de Gestão da Defesa Civil",
+  title: "SIGDEC — Defesa Civil de Ubatuba",
+  description: "Sistema Integrado de Gestão da Defesa Civil de Ubatuba",
   manifest: "/manifest.webmanifest",
-  applicationName: "SIGDEC",
-  appleWebApp: { capable: true, title: "SIGDEC", statusBarStyle: "default" as const }
+  applicationName: "SIGDEC Ubatuba",
+  appleWebApp: { capable: true, title: "SIGDEC Ubatuba", statusBarStyle: "default" as const },
+  themeColor: "#082f55"
 };
 
 export default function RootLayout({children}: Readonly<{children: React.ReactNode}>) {
