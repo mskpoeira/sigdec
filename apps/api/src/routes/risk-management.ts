@@ -312,10 +312,16 @@ export async function riskManagementRoutes(app:FastifyInstance){
  app.patch("/api/v1/warnings/:id/status",{preHandler:requirePermission("risk_management.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),{id}=request.params as {id:string},p=warningStatus.safeParse(request.body);
   if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const current=await db.query("SELECT status FROM warning_activations WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!current.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const transitions:Record<string,string[]>={DRAFT:["PUBLISHED","CANCELLED"],PUBLISHED:["ENDED","CANCELLED"],ENDED:[],CANCELLED:[]};
+  if(current.rows[0].status!==p.data.status&&!(transitions[current.rows[0].status]??[]).includes(p.data.status)){
+   return reply.code(409).send({error:"INVALID_TRANSITION",message:`Transição de alerta ${current.rows[0].status} → ${p.data.status} não permitida.`});
+  }
   const r=await db.query(`UPDATE warning_activations SET status=$3,published_at=CASE WHEN $3='PUBLISHED' THEN COALESCE(published_at,now()) ELSE published_at END,
    ended_at=CASE WHEN $3 IN('ENDED','CANCELLED') THEN now() ELSE ended_at END,approved_by=CASE WHEN $3='PUBLISHED' THEN $4 ELSE approved_by END,updated_at=now()
    WHERE id=$1 AND organization_id=$2 RETURNING id,status,published_at AS "publishedAt",ended_at AS "endedAt"`,[id,o,p.data.status,a.userId]);
-  if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
+  return r.rows[0];
  });
 
  app.get("/api/v1/evacuation-routes",{preHandler:requirePermission("risk_management.read")},async request=>{
@@ -344,10 +350,16 @@ export async function riskManagementRoutes(app:FastifyInstance){
  app.patch("/api/v1/public-bulletins/:id/status",{preHandler:requirePermission("risk_management.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),{id}=request.params as {id:string},p=bulletinStatus.safeParse(request.body);
   if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
-  const r=await db.query(`UPDATE public_bulletins SET status=$3,approved_by=CASE WHEN $3 IN('APPROVED','PUBLISHED') THEN $4 ELSE approved_by END,
+  const current=await db.query("SELECT status FROM public_bulletins WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!current.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const transitions:Record<string,string[]>={DRAFT:["APPROVED","CANCELLED"],APPROVED:["PUBLISHED","CANCELLED"],PUBLISHED:["EXPIRED","CANCELLED"],EXPIRED:[],CANCELLED:[]};
+  if(current.rows[0].status!==p.data.status&&!(transitions[current.rows[0].status]??[]).includes(p.data.status)){
+   return reply.code(409).send({error:"INVALID_TRANSITION",message:`Transição de boletim ${current.rows[0].status} → ${p.data.status} não permitida.`});
+  }
+  const r=await db.query(`UPDATE public_bulletins SET status=$3,approved_by=CASE WHEN $3='APPROVED' THEN $4 ELSE approved_by END,
    published_at=CASE WHEN $3='PUBLISHED' THEN COALESCE(published_at,now()) ELSE published_at END,expires_at=COALESCE($5,expires_at),updated_at=now()
    WHERE id=$1 AND organization_id=$2 RETURNING id,status,published_at AS "publishedAt"`,[id,o,p.data.status,a.userId,p.data.expiresAt??null]);
-  if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
+  return r.rows[0];
  });
 
  app.get("/api/v1/damage-assessments",{preHandler:requirePermission("damages.read")},async request=>{
