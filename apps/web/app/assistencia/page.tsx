@@ -13,7 +13,8 @@ type Delivery={id:string;deliveredAt:string;recipientName:string;notes?:string|n
 type Shelter={id:string;name:string;addressLine:string|null;neighborhood:string|null;capacityPeople:number;status:string;currentPeople?:number;responsibleName?:string|null;contactPhone?:string|null;accessible?:boolean;kitchenAvailable?:boolean;generatorAvailable?:boolean;petAreaAvailable?:boolean;latitude?:number|null;longitude?:number|null;readinessNotes?:string|null;lastReadinessCheckAt?:string|null};
 
 export default function Page(){
- const[households,setHouseholds]=useState<Household[]>([]),[stock,setStock]=useState<Item[]>([]),[deliveries,setDeliveries]=useState<Delivery[]>([]),[shelters,setShelters]=useState<Shelter[]>([]);\n const[shelterAddress,setShelterAddress]=useState(emptyAddress());
+ const[households,setHouseholds]=useState<Household[]>([]),[stock,setStock]=useState<Item[]>([]),[deliveries,setDeliveries]=useState<Delivery[]>([]),[shelters,setShelters]=useState<Shelter[]>([]);
+ const[shelterAddress,setShelterAddress]=useState(emptyAddress());
  const[msg,setMsg]=useState(""),[busy,setBusy]=useState(false),[selectedHousehold,setSelectedHousehold]=useState("");
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(`${API}${path}`,{credentials:"include",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";return null}const body=await r.json().catch(()=>({}));return {ok:r.ok,status:r.status,body}},[]);
  const load=useCallback(async()=>{const [h,i,d,s]=await Promise.all([request("/api/v1/humanitarian/households"),request("/api/v1/inventory/items"),request("/api/v1/humanitarian/deliveries"),request("/api/v1/shelters/readiness")]);if(h?.ok)setHouseholds(h.body.items??[]);if(i?.ok)setStock(i.body.items??[]);if(d?.ok)setDeliveries(d.body.items??[]);if(s?.ok)setShelters(s.body.items??[])},[request]);
