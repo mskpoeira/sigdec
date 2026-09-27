@@ -20,6 +20,12 @@ export default function Page(){
  async function consult(id:string){await perform(()=>request("/api/v1/sei/process-links/"+id+"/consult",{method:"POST",body:"{}"}),"Processo consultado no SEI.")}
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">SIGDEC · SEI CIDADES · {SIGDEC_VERSION_LABEL}</span><h1>Integração SEI Cidades</h1><p>Web Services SOAP com controle de operações, vínculo de processos, consulta e inclusão de relatórios técnicos aprovados.</p></div><div className="headerActions"><Link className="secondaryLink" href="/inteligencia">Relatórios IA</Link><Link className="secondaryLink" href="/administracao">Administração</Link></div></header>
+  <nav className="sectionTabs" aria-label="Integrações específicas">
+   <Link href="/administracao/integracoes">⇄ Visão geral</Link>
+   <Link href="/administracao/integracoes/email">✉ E-mail institucional</Link>
+   <Link href="/administracao/geopixel">⌖ GeoPixel</Link>
+   <Link className="active" href="/administracao/sei">▤ SEI Cidades</Link>
+  </nav>
   {msg&&<section className="infoCard">{msg}</section>}
   <section className="warningCard"><strong>Ativação externa necessária</strong><p>O SIGDEC está preparado para o Web Service do SEI, mas a operação real exige cadastro do sistema/serviço no SEI Cidades, identificação do serviço, unidade, IP/servidor autorizado e tipos de processo/documento permitidos. O SIGDEC nunca armazena senha pessoal de servidor.</p></section>
   <section className="statsGrid"><article><strong>{connections.filter(x=>x.active).length}</strong><span>Conexões ativas</span></article><article><strong>{connections.filter(x=>x.lastTestOk).length}</strong><span>WSDL testado com sucesso</span></article><article><strong>{links.length}</strong><span>Processos vinculados</span></article><article><strong>{logs.filter(x=>!x.success).length}</strong><span>Falhas registradas</span></article></section>
