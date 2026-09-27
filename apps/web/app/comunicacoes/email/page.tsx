@@ -2,6 +2,7 @@
 import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type Status={configured:boolean;smtp:{host:string;port:number;secure:boolean};imap:{host:string;port:number;secure:boolean};webmailUrl:string;mailboxLabel:string};
@@ -12,6 +13,7 @@ export default function InstitutionalEmailPage(){
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(API+path,{credentials:"include",cache:"no-store",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";throw new Error("Sessão expirada.")}const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??b.error??"Falha no e-mail institucional.");return b},[]);
  const load=useCallback(async()=>{setMessage("");try{const s=await request("/api/v1/institutional-mail/status");setStatus(s);if(s.configured){const b=await request("/api/v1/institutional-mail/inbox?limit=25");setItems(b.items??[])}}catch(e){setMessage(e instanceof Error?e.message:"Falha ao consultar e-mail institucional.")}},[request]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,15000);
  async function send(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMessage("");const f=new FormData(e.currentTarget);const split=(name:string)=>String(f.get(name)||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean);try{const r=await request("/api/v1/institutional-mail/send",{method:"POST",body:JSON.stringify({to:split("to"),cc:split("cc"),subject:String(f.get("subject")||""),text:String(f.get("text")||"")})});setMessage("Mensagem enviada pelo e-mail institucional"+(r.messageId?" · ID "+r.messageId:"")+".");e.currentTarget.reset();await load()}catch(err){setMessage(err instanceof Error?err.message:"Falha no envio.")}finally{setBusy(false)}}
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">COMUNICAÇÕES · E-MAIL INSTITUCIONAL · {SIGDEC_VERSION_LABEL}</span><h1>Webmail da Prefeitura</h1><p>Envio SMTP e consulta somente leitura da caixa de entrada institucional pelo SIGDEC.</p></div><div className="headerActions"><Link className="secondaryLink" href="/comunicacoes">Comunicações</Link>{status?.webmailUrl&&<a className="primaryButton" href={status.webmailUrl} target="_blank" rel="noopener noreferrer">Abrir Webmail ↗</a>}</div></header>
