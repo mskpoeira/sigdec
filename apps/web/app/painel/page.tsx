@@ -12,7 +12,8 @@ type SessionUser={id:string;matricula:string;displayName:string;warName:string|n
 
 const nav: Array<[string,string,Route,string?]> =[
 ["⌂","Início","/painel"],
-["⚠","Ocorrências e Monitoramento","/ocorrencias","incidents"],
+["⚠","Ocorrências","/ocorrencias","incidents"],
+["◉","Monitoramento Ambiental","/monitoramento","monitoring"],
 ["♥","Assistência Humanitária","/assistencia","humanitarian"],
 ["▦","Planejamento e Contingência","/planejamento"],
 ["▥","Centro de Gestão","/gestao"],
