@@ -56,9 +56,12 @@ export default function UsersAdministrationPage(){
   setMessage(`Dados de ${p.fullName} preenchidos. Revise matrícula, perfis e demais campos antes de salvar.`);
  }
  async function saveUser(e:FormEvent){e.preventDefault();await perform(async()=>{
-  const result=await request(userId?`/api/v1/admin/users/${userId}`:"/api/v1/admin/users",{method:userId?"PUT":"POST",body:JSON.stringify(userDraft)});
+  const primaryPhone=userDraft.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??userDraft.contacts.find(x=>x.kind==="PHONE");
+  const primaryEmail=userDraft.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??userDraft.contacts.find(x=>x.kind==="EMAIL");
+  const payload={...userDraft,email:primaryEmail?.value??userDraft.email,phone:primaryPhone?.value??userDraft.phone};
+  const result=await request(userId?`/api/v1/admin/users/${userId}`:"/api/v1/admin/users",{method:userId?"PUT":"POST",body:JSON.stringify(payload)});
   if(result.temporaryPassword)setTemporary(`Matrícula ${userDraft.matricula}: ${result.temporaryPassword}`);
-  setMessage(userId?"Usuário atualizado. As sessões anteriores foram encerradas.":"Usuário cadastrado.");setUserId(null);setUserDraft(blankUser);
+  setMessage(userId?"Alterações do usuário salvas com sucesso.":"Usuário cadastrado.");setUserId(null);setUserDraft(blankUser);
  })}
  async function resetPassword(u:User){if(!window.confirm(`Gerar nova senha temporária para ${u.displayName} e encerrar as sessões atuais?`))return;
   await perform(async()=>{const r=await request(`/api/v1/admin/users/${u.id}/reset-password`,{method:"POST"});setTemporary(`Matrícula ${u.matricula}: ${r.temporaryPassword}`);setMessage("Senha redefinida; troca obrigatória no próximo acesso.")})}
