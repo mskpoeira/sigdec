@@ -4,7 +4,8 @@ import { formatDateBR } from "../lib/datetime";
 
 import Link from "next/link";
 import type { Route } from "next";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import type { MouseEvent } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
@@ -35,31 +36,27 @@ export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
  const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
- useEffect(()=>{
-  fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
-  fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
-  fetch(`${API_URL}/api/v1/navigation`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setCustomNavigation(b.items??[])).catch(()=>{});
-
+ const loadLive=useCallback(()=>{
   const parseCoordinate=(value:unknown)=>{
     if(value===null||value===undefined)return null;
     const parsed=Number(String(value).replace(",","."));
     return Number.isFinite(parsed)?parsed:null;
   };
-  const loadLive=()=>{
-    fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
-    fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
-    fetch(`${API_URL}/api/v1/field/map`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>{
-      if(!b)return;
-      const normalized=(b.incidents??[]).map((x:MapIncident)=>({...x,latitude:parseCoordinate(x.latitude),longitude:parseCoordinate(x.longitude)}));
-      setMapIncidents(normalized.filter((x:MapIncident)=>x.latitude!==null&&x.longitude!==null));
-    }).catch(()=>{});
-  };
-  loadLive();
-  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")loadLive()},5000);
-  const onRealtime=()=>loadLive();
-  window.addEventListener("sigdec:realtime-tick",onRealtime);
-  return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:realtime-tick",onRealtime)};
+  fetch(`${API_URL}/api/v1/incidents?limit=5`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>b&&setIncidents(b.items??[])).catch(()=>{});
+  fetch(`${API_URL}/api/v1/dashboard/summary`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>b&&setSummary(b)).catch(()=>{});
+  fetch(`${API_URL}/api/v1/field/map`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>{
+    if(!b)return;
+    const normalized=(b.incidents??[]).map((x:MapIncident)=>({...x,latitude:parseCoordinate(x.latitude),longitude:parseCoordinate(x.longitude)}));
+    setMapIncidents(normalized.filter((x:MapIncident)=>x.latitude!==null&&x.longitude!==null));
+  }).catch(()=>{});
  },[]);
+ useEffect(()=>{
+  fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
+  fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
+  fetch(`${API_URL}/api/v1/navigation`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setCustomNavigation(b.items??[])).catch(()=>{});
+  loadLive();
+ },[loadLive]);
+ useRealtimeRefresh(loadLive,true,250);
  async function logout(){await fetch(`${API_URL}/auth/logout`,{method:"POST",credentials:"include"});location.href="/login"}
  if(!user)return <main className="shell"><p>Carregando sessão...</p></main>;
  const stats:Array<[string,string,string,string]>=[
@@ -96,7 +93,7 @@ export default function PainelPage(){
     <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
      <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {x.priority}</small></div><span>{x.status}</span></Link>)}</section>
-     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">OpenStreetMap · atualização a cada 5 s</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
+     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">OpenStreetMap · atualização em tempo real</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
    <footer className="opsFooter"><span>SIGDEC {SIGDEC_VERSION_LABEL} · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
