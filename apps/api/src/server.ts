@@ -7,7 +7,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import {db} from "./db.js";
 import {authFrom,requireAuth} from "./auth.js";
-import {addRealtimeClient,publishRealtimeEvent,realtimeClientCount} from "./lib/realtime.js";
+import {addRealtimeClient,initializeRealtimeBridge,publishRealtimeEvent,realtimeBridgeStatus,realtimeClientCount} from "./lib/realtime.js";
 import { authRoutes } from "./routes/auth.js";
 import { incidentRoutes } from "./routes/incidents.js";
 import { responseRoutes } from "./routes/response.js";
@@ -34,11 +34,12 @@ app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829
 const release=apiPackage.version;
 await app.register(helmet);await app.register(cookie);await app.register(rateLimit,{global:false});
 await app.register(cors,{origin:process.env.SIGDEC_PUBLIC_URL??"http://localhost:3000",credentials:true});
+await initializeRealtimeBridge();
 app.get("/api/v1/realtime",{preHandler:requireAuth},async(request,reply)=>{
  const auth=authFrom(request);
  addRealtimeClient(auth.organizationId,reply);
 });
-app.get("/api/v1/realtime/status",{preHandler:requireAuth},async()=>({status:"ok",connections:realtimeClientCount(),transport:"sse"}));
+app.get("/api/v1/realtime/status",{preHandler:requireAuth},async()=>({status:"ok",connections:realtimeClientCount(),...realtimeBridgeStatus()}));
 app.addHook("onSend",async(request,reply,payload)=>{
  const method=request.method.toUpperCase();
  if(!["POST","PUT","PATCH","DELETE"].includes(method)||reply.statusCode>=400)return payload;
