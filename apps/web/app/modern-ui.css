@@ -619,3 +619,13 @@ legend{font-weight:900;color:var(--ui-navy)!important}
  .opsQuick .quick{min-height:116px!important}
  .opsMobileNav small{font-size:.58rem}
 }
+
+
+/* v1.75 — mapa de situação nativo e cobertura de georreferenciamento */
+.osmSituationTile{
+ position:absolute;z-index:1;display:block;max-width:none!important;object-fit:fill;
+ border:0;pointer-events:none;user-select:none
+}
+.mapSource{text-decoration:none!important}
+.mapPendingLocation{color:#8a5a00;font-weight:800}
+.situationMap{background:#dbe5ee!important}
