@@ -94,6 +94,11 @@ type RiskContext = {
   shelters:Array<{id:string;name:string;status:string;capacityPeople:number;currentPeople:number;accessible:boolean;generatorAvailable:boolean;petAreaAvailable:boolean;distanceMeters:number}>;
 };
 
+type GeoPixelContext = {
+  georeferenced:boolean;
+  features:Array<{id:string;remoteId:string;layerCode:string;layerTitle:string;category:string;properties:Record<string,unknown>;distanceMeters:number;geometry:unknown}>;
+};
+
 type DetailResponse = {
   incident: Incident;
   timeline: TimelineItem[];
@@ -171,6 +176,7 @@ export default function OcorrenciaDetalhePage() {
   const id = params.id;
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [riskContext,setRiskContext]=useState<RiskContext|null>(null);
+  const [geoPixelContext,setGeoPixelContext]=useState<GeoPixelContext|null>(null);
   const [teams, setTeams] = useState<Resource[]>([]);
   const [vehicles, setVehicles] = useState<Resource[]>([]);
   const [incidentTypes, setIncidentTypes] = useState<IncidentTypeOption[]>([]);
@@ -210,12 +216,13 @@ export default function OcorrenciaDetalhePage() {
 
   const load = useCallback(async () => {
     try {
-      const [detailResponse, teamsResponse, vehiclesResponse, typesResponse, riskContextResponse] = await Promise.all([
+      const [detailResponse, teamsResponse, vehiclesResponse, typesResponse, riskContextResponse, geoPixelContextResponse] = await Promise.all([
         fetch(`${API_URL}/api/v1/incidents/${id}`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/teams`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/vehicles`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/incident-types`, { credentials: "include" }),
-        fetch(`${API_URL}/api/v1/incidents/${id}/risk-context`, { credentials: "include", cache:"no-store" })
+        fetch(`${API_URL}/api/v1/incidents/${id}/risk-context`, { credentials: "include", cache:"no-store" }),
+        fetch(`${API_URL}/api/v1/geopixel/context/incident/${id}`, { credentials: "include", cache:"no-store" })
       ]);
 
       if (!(await handleAuth(detailResponse))) return;
@@ -239,6 +246,8 @@ export default function OcorrenciaDetalhePage() {
       }
       if(riskContextResponse.ok)setRiskContext(await riskContextResponse.json());
       else setRiskContext(null);
+      if(geoPixelContextResponse.ok)setGeoPixelContext(await geoPixelContextResponse.json());
+      else setGeoPixelContext(null);
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar dados.");
@@ -518,6 +527,10 @@ export default function OcorrenciaDetalhePage() {
           </article>
           <article className="card"><h3>Abrigos mais próximos</h3>
             {riskContext.shelters.length===0?<p>Nenhum abrigo georreferenciado em até 15 km.</p>:riskContext.shelters.slice(0,5).map(x=><p key={x.id}><strong>{x.name}</strong><br/><small>{x.status} · {x.currentPeople}/{x.capacityPeople} pessoa(s) · {x.distanceMeters.toLocaleString("pt-BR")} m{x.accessible?" · ♿":""}{x.generatorAvailable?" · gerador":""}</small></p>)}
+          </article>
+          <article className="card"><h3>Contexto GeoPixel</h3>
+            {!geoPixelContext?.georeferenced?<p>Sem contexto GeoPixel georreferenciado.</p>:geoPixelContext.features.length===0?<p>Nenhuma feição GeoPixel sincronizada em até 10 km.</p>:geoPixelContext.features.slice(0,8).map(x=><p key={x.id}><strong>{x.layerTitle}</strong> · {x.category}<br/><small>{x.remoteId} · {x.distanceMeters.toLocaleString("pt-BR")} m</small></p>)}
+            <Link className="secondaryLink" href="/administracao/geopixel">Integração GeoPixel</Link>
           </article>
         </div>}
       </section>
