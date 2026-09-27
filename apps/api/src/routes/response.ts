@@ -92,14 +92,14 @@ async function syncVolunteerContacts(client:any,organizationId:string,ownerId:st
 
 export async function responseRoutes(app:FastifyInstance){
  app.get("/api/v1/volunteers",{preHandler:requirePermission("volunteers.read")},async req=>{
-  const o=org(authFrom(req).organizationId);
+  const o=org(authFrom(req).organizationId),{includeArchived}=req.query as {includeArchived?:string};
   const r=await db.query(`SELECT id,full_name AS "fullName",phone,email,status,availability,
    shirt_size AS "shirtSize",pants_size AS "pantsSize",jacket_size AS "jacketSize",
    raincoat_size AS "raincoatSize",vest_size AS "vestSize",glove_size AS "gloveSize",shoe_size AS "shoeSize",
    profession,education,institution,cnh_category AS "cnhCategory",languages,
    radioamateur_call_sign AS "radioamateurCallSign",operation_region AS "operationRegion",
-   skills,validated_skills AS "validatedSkills",certifications,history,notes
-   FROM volunteers WHERE organization_id=$1 ORDER BY full_name`,[o]);
+   skills,validated_skills AS "validatedSkills",certifications,history,notes,archived_at AS "archivedAt"
+   FROM volunteers WHERE organization_id=$1 AND deleted_at IS NULL AND ($2::boolean OR archived_at IS NULL) ORDER BY archived_at NULLS FIRST,full_name`,[o,includeArchived==="true"]);
   const ids=r.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",extension,is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='VOLUNTEER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[o,ids]):{rows:[]};
   const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
   return {items:r.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
@@ -119,12 +119,31 @@ export async function responseRoutes(app:FastifyInstance){
   const v=p.data,primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
   const client=await db.connect();try{await client.query("BEGIN");
    const before=await client.query("SELECT * FROM volunteers WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,o]);if(!before.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
-   const r=await client.query(`UPDATE volunteers SET full_name=$1,phone=$2,email=$3,availability=$4,shirt_size=$5,pants_size=$6,jacket_size=$7,raincoat_size=$8,vest_size=$9,glove_size=$10,shoe_size=$11,profession=$12,education=$13,institution=$14,cnh_category=$15,languages=$16,radioamateur_call_sign=$17,operation_region=$18,skills=$19,validated_skills=$20,certifications=$21::jsonb,history=$22::jsonb,notes=$23,updated_at=now() WHERE id=$24 AND organization_id=$25 RETURNING id`,[
+   const r=await client.query(`UPDATE volunteers SET full_name=$1,phone=$2,email=$3,availability=$4,shirt_size=$5,pants_size=$6,jacket_size=$7,raincoat_size=$8,vest_size=$9,glove_size=$10,shoe_size=$11,profession=$12,education=$13,institution=$14,cnh_category=$15,languages=$16,radioamateur_call_sign=$17,operation_region=$18,skills=$19,validated_skills=$20,certifications=$21::jsonb,history=$22::jsonb,notes=$23,updated_at=now() WHERE id=$24 AND organization_id=$25 AND deleted_at IS NULL RETURNING id`,[
    v.fullName,primaryPhone?.value??v.phone??null,primaryEmail?.value??v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null,id,o]);
    await syncVolunteerContacts(client,o,id,v.contacts);
    await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'VOLUNTEER_UPDATED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)`,[a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(v)]);
    await client.query("COMMIT");return r.rows[0];
   }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
+ });
+ app.post("/api/v1/volunteers/:id/archive",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const before=await db.query("SELECT id,full_name,archived_at FROM volunteers WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL",[id,o]);if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query('UPDATE volunteers SET archived_at=COALESCE(archived_at,now()),archived_by=COALESCE(archived_by,$3),updated_at=now() WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL RETURNING id,archived_at AS "archivedAt"',[id,o,a.userId]);
+  await db.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'VOLUNTEER_ARCHIVED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)",[a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);return r.rows[0];
+ });
+ app.post("/api/v1/volunteers/:id/restore",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const before=await db.query("SELECT id,full_name,archived_at FROM volunteers WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL",[id,o]);if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query("UPDATE volunteers SET archived_at=NULL,archived_by=NULL,updated_at=now() WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL RETURNING id",[id,o]);
+  await db.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'VOLUNTEER_RESTORED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)",[a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);return {ok:true};
+ });
+ app.delete("/api/v1/volunteers/:id",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string};
+  const before=await db.query("SELECT id,full_name,archived_at FROM volunteers WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL",[id,o]);if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const r=await db.query("UPDATE volunteers SET deleted_at=now(),deleted_by=$3,updated_at=now() WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL RETURNING id",[id,o,a.userId]);
+  await db.query("UPDATE contact_points SET active=false,is_primary=false,updated_at=now() WHERE organization_id=$1 AND owner_type='VOLUNTEER' AND owner_id=$2 AND active",[o,id]);
+  await db.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'VOLUNTEER_DELETED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)",[a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);return {ok:true};
  });
  app.get("/api/v1/monitoring/stations",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT id,code,name,station_type AS "stationType",provider,external_id AS "externalId",latitude,longitude,active FROM monitoring_stations WHERE organization_id=$1 ORDER BY name`,[o]); return {items:r.rows};
