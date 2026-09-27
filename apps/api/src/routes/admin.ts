@@ -10,7 +10,7 @@ const FEATURES=[
  ["monitoring","Monitoramento"],["alerts","Alertas"],["humanitarian","Assistência humanitária"],["volunteers","Voluntariado"],
  ["communications","Comunicações"],["documents","Documentos"],["sco","SCO"],["risks","Riscos"],["s2id","S2iD"],
  ["training","Treinamentos"],["recovery","Recuperação"],["library","Biblioteca"],["bi","BI"],
- ["assistive","Inteligência assistiva"],["sidec","Interoperabilidade SIDEC"],["sidec-continuity","Continuidade SIDEC"]
+ ["assistive","Inteligência assistiva"],["geopixel","GeoPixel / Inteligência Territorial"],["sidec","Interoperabilidade SIDEC"],["sidec-continuity","Continuidade SIDEC"]
 ] as const;
 const featureCodes=new Set(FEATURES.map(([code])=>code));
 const featureSchema=z.object({enabled:z.boolean()});
