@@ -111,9 +111,6 @@ function fallbackDraft(input:{title:string;reportType:string;incident:any;territ
 
 export async function generateTechnicalDraft(input:{title:string;reportType:string;incident:any;territorial:any;geopixel:any;legal:any[];additionalInstructions?:string}):Promise<AssistResult>{
  const fallback=fallbackDraft(input);
- const key=(process.env.OPENAI_API_KEY??"").trim();
- const enabled=(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
- const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
  const prompt=[
   "Você é o módulo assistivo do SIGDEC — Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
   "",
@@ -135,32 +132,15 @@ export async function generateTechnicalDraft(input:{title:string;reportType:stri
   "DADOS:",
   JSON.stringify(input)
  ].join("\n");
- const promptHash=hash(prompt);
- if(!key||!enabled){
-  return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:0,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
- }
- const started=Date.now();
+ const promptHash=hash(prompt),started=Date.now();
  try{
-  const response=await fetch("https://api.openai.com/v1/responses",{
-   method:"POST",
-   headers:{"authorization":"Bearer "+key,"content-type":"application/json"},
-   body:JSON.stringify({model,input:prompt,store:false})
-  });
-  const body=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
-  const draft=extractResponseText(body);
-  if(!draft)throw new Error("Resposta de IA sem texto.");
-  return {
-   provider:"OPENAI",model:String(body.model??model),draft,result:"SUCCEEDED",latencyMs:Date.now()-started,
-   inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,
-   outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null,
-   promptHash,outputHash:hash(draft)
-  };
+  const result=await runConfiguredProvider(prompt);
+  if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+  return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
   return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
  }
 }
-
 
 export async function generateContextualAnswer(input:{module:string;route:string;question:string;context:Record<string,unknown>}):Promise<AssistResult>{
  const fallback=[
