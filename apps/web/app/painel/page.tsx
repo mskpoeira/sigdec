@@ -97,6 +97,13 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">OpenStreetMap · atualização em tempo real</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
+   <nav className="opsMobileNav" aria-label="Navegação principal no celular">
+    <Link href="/painel" className="active"><span>⌂</span><small>Início</small></Link>
+    <Link href="/ocorrencias"><span>▤</span><small>Ocorrências</small></Link>
+    <Link href="/campo"><span>⌑</span><small>Mapa</small></Link>
+    <Link href="/alertas"><span>⚠</span><small>Alertas</small></Link>
+    <button type="button" onClick={()=>setMobileMenuOpen(true)}><span>☰</span><small>Menu</small></button>
+   </nav>
    <footer className="opsFooter"><span>SIGDEC {SIGDEC_VERSION_LABEL} · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>

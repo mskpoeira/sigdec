@@ -485,3 +485,137 @@ legend{font-weight:900;color:var(--ui-navy)!important}
  .mapLayerControls button{font-size:.56rem;padding:4px 6px}
  .territorialPin{width:22px;height:22px}
 }
+
+
+/* v1.74 — painel mobile aprovado: leitura rápida, navegação inferior e cartões compactos */
+.opsMobileNav{display:none}
+
+@media(max-width:800px){
+ html,body{overflow-x:hidden}
+ body{padding-bottom:0}
+ .opsDashboard{display:block!important;min-height:100dvh;background:#f3f7fa!important}
+ .opsMain{width:100%;min-width:0;padding-bottom:76px}
+
+ /* O menu completo vira drawer; não consome largura útil do painel. */
+ .opsSide{
+  position:fixed!important;inset:0 auto 0 0!important;top:0!important;z-index:1050!important;
+  width:min(292px,88vw)!important;height:100dvh!important;padding:14px 10px!important;
+  transform:translateX(-105%);transition:transform .2s ease,box-shadow .2s ease!important;
+  overflow:hidden!important;box-shadow:none!important
+ }
+ .opsSide.mobileOpen{transform:translateX(0);box-shadow:16px 0 42px rgba(3,25,48,.34)!important}
+ .opsSide.mobileOpen .opsSideBrandText,.opsSide.mobileOpen .opsUserText,.opsSide.mobileOpen .opsMenuLabel{opacity:1!important;visibility:visible!important}
+ .opsSide.mobileOpen .opsMenuClose{display:grid!important}
+ .opsSide nav{overflow-y:auto!important}
+ .opsSide nav a{padding:10px 9px!important}
+ .opsSideBrand{padding:5px 7px 14px!important}
+ .opsUser{padding:13px 8px 10px!important}
+ .opsLogout{padding:10px 8px!important}
+
+ /* Cabeçalho institucional compacto — identidade sem ocupar a primeira tela inteira. */
+ .opsHero{
+  min-height:292px!important;height:auto!important;
+  display:grid!important;grid-template-columns:1fr!important;align-content:end!important;gap:12px!important;
+  padding:22px 20px 20px!important;
+  color:#fff!important;
+  background:
+   linear-gradient(180deg,rgba(8,47,85,.36) 0%,rgba(8,47,85,.7) 58%,rgba(8,47,85,.96) 100%),
+   url("https://turismo.ubatuba.sp.gov.br/wp-content/uploads/sites/29/2014/11/DSC05810.jpg") center 45%/cover no-repeat!important;
+  border-bottom:4px solid var(--ui-orange)!important
+ }
+ .opsMunicipal{
+  justify-self:start!important;display:flex!important;gap:10px!important;align-items:center!important;
+  border:0!important;color:#fff!important;text-shadow:0 2px 8px rgba(0,0,0,.28)
+ }
+ .opsMunicipal .officialCrest{width:58px!important;height:66px!important;object-fit:contain}
+ .opsMunicipal strong{font-size:1rem!important;line-height:1.02}
+ .opsMunicipal small{font-size:.56rem!important;line-height:1.25;margin-top:5px!important}
+ .opsTitle{justify-self:start!important;text-align:left!important;color:#fff!important;text-shadow:0 2px 10px rgba(0,0,0,.28)}
+ .opsTitle>b{font-size:2.75rem!important;line-height:.9!important;color:#fff!important;letter-spacing:-.055em}
+ .opsTitle strong{margin-top:7px!important;color:#fff!important;font-size:1rem!important;line-height:1.16}
+ .opsTitle span{margin-top:7px!important;color:#fff!important;font-size:.92rem!important}
+ .opsScenery,.dcBadge{display:none!important}
+
+ .opsContent{padding:20px 16px 18px!important;max-width:680px;margin:0 auto}
+ .opsWelcome{display:grid!important;grid-template-columns:1fr auto;gap:10px!important;align-items:start!important;margin-bottom:16px}
+ .opsWelcome h1{font-size:1.55rem!important;line-height:1.08!important;letter-spacing:-.025em}
+ .opsWelcome p{margin-top:6px!important;font-size:.88rem!important;line-height:1.42!important}
+ .opsDate{font-size:.78rem!important;line-height:1.35;white-space:nowrap}
+ .opsDate small{font-size:.68rem}
+
+ /* KPIs em cartões legíveis e compactos. */
+ .opsStats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;margin:0 0 16px!important}
+ .stat{
+  min-height:128px!important;padding:14px!important;border-radius:18px!important;
+  grid-template-columns:auto minmax(0,1fr)!important;align-content:start!important;gap:2px 9px!important
+ }
+ .stat b{font-size:2rem!important;line-height:1!important}
+ .stat span{font-size:.88rem!important;font-weight:800!important;line-height:1.18}
+ .stat small{font-size:.74rem!important;line-height:1.35!important;margin-top:9px!important}
+ .stat.red{background:linear-gradient(135deg,#fff,#fff1f2)!important}
+ .stat.blue{background:linear-gradient(135deg,#fff,#eef6ff)!important}
+ .stat.green{background:linear-gradient(135deg,#fff,#effaf3)!important}
+ .stat.orange{background:linear-gradient(135deg,#fff,#fff5e9)!important}
+ .stat.purple{background:linear-gradient(135deg,#fff,#f5efff)!important}
+
+ /* Atalhos: duas colunas no telefone, toque confortável e texto sem estouro. */
+ .opsQuick{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;margin-bottom:18px!important}
+ .opsQuick .quick{
+  min-height:124px!important;border-radius:18px!important;padding:13px 10px!important;
+  box-shadow:0 8px 20px rgba(8,47,85,.1)!important
+ }
+ .opsQuick .quick b{font-size:1.7rem!important;margin-bottom:8px!important}
+ .opsQuick .quick span{font-size:1rem!important;line-height:1.15!important}
+
+ /* Conteúdo operacional em largura total, sem cartões estreitos. */
+ .opsBottom{grid-template-columns:1fr!important;gap:14px!important}
+ .opsCard{width:100%!important;padding:15px!important;border-radius:18px!important;overflow:hidden}
+ .opsCard>header{gap:10px!important;align-items:flex-start!important}
+ .opsCard h2{font-size:1.08rem!important;line-height:1.2!important;margin:4px 0 12px!important}
+ .opsCard header a{font-size:.75rem!important;line-height:1.3!important;text-align:right}
+ .incidentMini{grid-template-columns:14px minmax(0,1fr)!important}
+ .incidentMini>span{grid-column:2;justify-self:start}
+ .emptyMini{min-height:94px;display:grid;place-items:center;text-align:center;color:#6f8397}
+ .situationMap{height:310px!important;min-height:310px!important;border-radius:15px!important}
+ .legend{max-width:calc(100% - 20px)!important;font-size:.72rem!important;line-height:1.45!important}
+ .mapSource{font-size:.55rem!important}
+
+ .opsFooter{
+  max-width:680px;margin:0 auto 8px!important;padding:18px 18px 20px!important;
+  display:grid!important;gap:5px!important;text-align:left!important;background:transparent!important;border-top:1px solid #dbe6ee!important
+ }
+ .opsFooter span,.opsFooter b{font-size:.72rem!important;line-height:1.35}
+
+ /* Barra inferior: acesso permanente às funções principais. */
+ .opsMobileNav{
+  position:fixed;left:0;right:0;bottom:0;z-index:900;display:grid;
+  grid-template-columns:repeat(5,1fr);height:68px;padding:5px max(7px,env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));
+  border-top:1px solid #d8e4ed;background:rgba(255,255,255,.96);backdrop-filter:blur(14px);
+  box-shadow:0 -8px 26px rgba(8,47,85,.08)
+ }
+ .opsMobileNav a,.opsMobileNav button{
+  min-width:0;border:0;background:transparent;color:#627b91;text-decoration:none;
+  display:grid;place-items:center;align-content:center;gap:1px;padding:3px;font:inherit;cursor:pointer
+ }
+ .opsMobileNav span{font-size:1.35rem;line-height:1}
+ .opsMobileNav small{font-size:.61rem;font-weight:800;white-space:nowrap}
+ .opsMobileNav .active{color:#0e73c8}
+
+ /* Elementos flutuantes não podem cobrir a navegação nem os cartões. */
+ .globalSearchLauncher{right:14px!important;bottom:82px!important}
+ .realtimeStatus{left:14px!important;bottom:82px!important}
+}
+
+@media(max-width:420px){
+ .opsContent{padding-inline:12px!important}
+ .opsHero{min-height:270px!important;padding:18px 16px!important}
+ .opsWelcome{grid-template-columns:1fr!important}
+ .opsDate{text-align:left!important;display:flex;gap:8px;align-items:center}
+ .opsDate br{display:none}
+ .opsStats{gap:8px!important}
+ .stat{min-height:122px!important;padding:12px!important}
+ .stat b{font-size:1.8rem!important}
+ .opsQuick{gap:8px!important}
+ .opsQuick .quick{min-height:116px!important}
+ .opsMobileNav small{font-size:.58rem}
+}
