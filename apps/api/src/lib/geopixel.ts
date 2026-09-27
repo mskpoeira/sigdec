@@ -254,3 +254,90 @@ export async function syncDueGeoPixelLayers(){
  }
  return results;
 }
+
+
+async function exportEntityRow(organizationId:string,target:string,entityId:string){
+ if(target==="RISK_AREA"){
+  const r=await db.query(`SELECT id,code,name,neighborhood,hazard_type AS "hazardType",risk_level AS "riskLevel",status,
+   exposed_buildings AS "exposedBuildings",exposed_people AS "exposedPeople",latitude,longitude,boundary_geojson AS "boundaryGeojson",notes
+   FROM territorial_risk_areas WHERE organization_id=$1 AND id=$2`,[organizationId,entityId]);return r.rows[0];
+ }
+ if(target==="CRITICAL_INFRASTRUCTURE"){
+  const r=await db.query(`SELECT id,code,name,category,owner_name AS "ownerName",responsible_name AS "responsibleName",responsible_phone AS "responsiblePhone",
+   address_line AS "addressLine",neighborhood,operational_status AS "operationalStatus",criticality,redundancy,backup_power AS "backupPower",
+   autonomy_hours::float8 AS "autonomyHours",latitude,longitude,notes FROM critical_infrastructures WHERE organization_id=$1 AND id=$2`,[organizationId,entityId]);return r.rows[0];
+ }
+ if(target==="WARNING_ASSET"){
+  const r=await db.query(`SELECT id,code,name,asset_type AS "assetType",status,address_line AS "addressLine",neighborhood,battery_percent::float8 AS "batteryPercent",
+   responsible_name AS "responsibleName",responsible_phone AS "responsiblePhone",last_tested_at AS "lastTestedAt",next_test_at AS "nextTestAt",
+   latitude,longitude,notes FROM warning_assets WHERE organization_id=$1 AND id=$2`,[organizationId,entityId]);return r.rows[0];
+ }
+ if(target==="SHELTER"){
+  const r=await db.query(`SELECT id,name,address_line AS "addressLine",neighborhood,capacity_people AS "capacityPeople",status,responsible_name AS "responsibleName",
+   contact_phone AS "contactPhone",accessible,kitchen_available AS "kitchenAvailable",generator_available AS "generatorAvailable",
+   pet_area_available AS "petAreaAvailable",latitude,longitude,readiness_notes AS "readinessNotes" FROM shelters WHERE organization_id=$1 AND id=$2`,[organizationId,entityId]);return r.rows[0];
+ }
+ return undefined;
+}
+function localGeoJsonFeature(entity:any,target:string){
+ const properties={...entity,entityType:target,sourceSystem:"SIGDEC"};
+ delete properties.latitude;delete properties.longitude;delete properties.boundaryGeojson;
+ const geometry=entity.boundaryGeojson??(entity.latitude!=null&&entity.longitude!=null?{type:"Point",coordinates:[Number(entity.longitude),Number(entity.latitude)]}:null);
+ return {type:"Feature",id:entity.id,geometry,properties};
+}
+export async function exportGeoPixelEntity(layer:GeoPixelLayer,connection:GeoPixelConnection,entityId:string){
+ if(!["EXPORT","BIDIRECTIONAL"].includes(layer.direction)||layer.sourceType!=="REST_GEOJSON")throw new Error("Camada não configurada para exportação REST/GeoJSON.");
+ if(!layer.resourcePath)throw new Error("Resource path de exportação não configurado.");
+ const entity=await exportEntityRow(layer.organizationId,layer.localTarget,entityId);
+ if(!entity)throw Object.assign(new Error("Entidade local não encontrada."),{statusCode:404});
+ const url=new URL(layer.resourcePath,connection.apiBaseUrl??undefined).toString();
+ const payload=JSON.stringify(localGeoJsonFeature(entity,layer.localTarget));
+ const response=await geoPixelHttp(connection,url,{method:layer.exportMethod,body:payload,headers:{"content-type":"application/geo+json"},maxBytes:5*1024*1024});
+ if(response.status<200||response.status>=300)throw Object.assign(new Error("GeoPixel respondeu HTTP "+response.status),{httpStatus:response.status,excerpt:response.body.toString("utf8").slice(0,1000)});
+ return {status:response.status,excerpt:response.body.toString("utf8").slice(0,1000)};
+}
+
+async function claimGeoPixelExport(id:string){
+ const r=await db.query(`WITH candidate AS (
+   SELECT q.id FROM geopixel_export_queue q
+   JOIN geopixel_layers l ON l.id=q.layer_id
+   JOIN geopixel_connections c ON c.id=l.connection_id
+   WHERE q.id=$1 AND q.status IN('PENDING','PROCESSING') AND q.next_attempt_at<=now() AND q.attempts<10
+     AND l.active=true AND c.active=true
+   FOR UPDATE OF q SKIP LOCKED
+  )
+  UPDATE geopixel_export_queue q SET status='PROCESSING',attempts=attempts+1,last_attempt_at=now(),
+    next_attempt_at=now()+interval '5 minutes',updated_at=now()
+  FROM candidate c WHERE q.id=c.id
+  RETURNING q.id,q.organization_id AS "organizationId",q.layer_id AS "layerId",q.entity_type AS "entityType",q.entity_id AS "entityId",q.attempts`,[id]);
+ return r.rows[0] as any|undefined;
+}
+export async function deliverGeoPixelExport(id:string){
+ const item=await claimGeoPixelExport(id);if(!item)return {processed:false};
+ try{
+  const layer=await loadLayer(String(item.layerId),String(item.organizationId));if(!layer)throw new Error("Camada GeoPixel indisponível.");
+  const connection=await loadConnection(layer.connectionId,String(item.organizationId));if(!connection)throw new Error("Conexão GeoPixel indisponível.");
+  const delivered=await exportGeoPixelEntity(layer,connection,String(item.entityId));
+  await db.query(`UPDATE geopixel_export_queue SET status='SUCCEEDED',delivered_at=now(),response_status=$2,response_excerpt=$3,last_error=NULL,updated_at=now() WHERE id=$1`,
+   [id,delivered.status,delivered.excerpt]);
+  await db.query(`INSERT INTO geopixel_sync_runs(organization_id,connection_id,layer_id,direction,status,finished_at,exported_count,http_status,message,details)
+   VALUES($1,$2,$3,'EXPORT','SUCCEEDED',now(),1,$4,'Exportação automática concluída.',$5::jsonb)`,
+   [item.organizationId,connection.id,layer.id,delivered.status,JSON.stringify({entityType:item.entityType,entityId:item.entityId,queueId:id})]);
+  return {processed:true,success:true};
+ }catch(error:any){
+  const attempts=Number(item.attempts??0),terminal=attempts>=10,delay=Math.min(3600,15*Math.pow(2,Math.max(0,attempts-1)));
+  const message=error instanceof Error?error.message:String(error);
+  await db.query(`UPDATE geopixel_export_queue SET status=$2,next_attempt_at=now()+($3::text||' seconds')::interval,
+    response_status=$4,response_excerpt=$5,last_error=$6,updated_at=now() WHERE id=$1`,
+   [id,terminal?"FAILED":"PENDING",delay,error?.httpStatus??null,error?.excerpt??null,message]);
+  return {processed:true,success:false,terminal,error:message};
+ }
+}
+export async function dispatchGeoPixelExports(){
+ const due=await db.query<{id:string}>(`SELECT id FROM geopixel_export_queue
+  WHERE status IN('PENDING','PROCESSING') AND attempts<10 AND next_attempt_at<=now()
+  ORDER BY next_attempt_at,created_at LIMIT 20`);
+ let success=0,failed=0;
+ for(const row of due.rows){const r=await deliverGeoPixelExport(row.id);if((r as any).success)success++;else if(r.processed)failed++}
+ return {queued:due.rowCount??0,success,failed};
+}
