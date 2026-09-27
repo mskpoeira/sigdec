@@ -318,7 +318,7 @@ export async function incidentRoutes(app: FastifyInstance) {
       await client.query("COMMIT");
 
       return reply.code(201).send({
-        incident: { id: incidentId, protocol, priority, status: "RECEIVED" }
+        incident: { id: incidentId, protocol, priority, status: "RECEIVED", georeferenced: incidentLatitude !== undefined && incidentLongitude !== undefined }
       });
     } catch (error) {
       await client.query("ROLLBACK");
