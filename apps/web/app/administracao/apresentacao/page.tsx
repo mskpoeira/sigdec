@@ -4,6 +4,7 @@ import Link from "next/link";
 import {useCallback,useEffect,useState} from "react";
 import {formatDateTimeBR} from "../../lib/datetime";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
@@ -30,6 +31,7 @@ export default function PresentationReadinessPage(){
   }catch(e){setMessage(e instanceof Error?e.message:"Falha ao executar diagnóstico.");}
  },[]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(load,true,1000);
 
  async function downloadJson(){
   if(!data)return;
