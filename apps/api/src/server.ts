@@ -26,7 +26,7 @@ import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluat
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 import { riskManagementRoutes } from "./routes/risk-management.js";
 import { geoPixelRoutes } from "./routes/geopixel.js";
-import { syncDueGeoPixelLayers } from "./lib/geopixel.js";
+import { dispatchGeoPixelExports, syncDueGeoPixelLayers } from "./lib/geopixel.js";
 const app=Fastify({logger:true,trustProxy:true});
 app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829120},(_request,body,done)=>done(null,body));
 const release=apiPackage.version;
@@ -136,3 +136,10 @@ const evaluateGeoPixelSync=()=>syncDueGeoPixelLayers().catch(error=>app.log.erro
 void evaluateGeoPixelSync();
 const geopixelSyncTimer=setInterval(evaluateGeoPixelSync,geopixelSyncMinutes*60*1000);
 geopixelSyncTimer.unref();
+
+
+const geopixelExportSeconds=Math.max(15,Math.min(300,Number(process.env.GEOPIXEL_EXPORT_DISPATCH_SECONDS??30)));
+const evaluateGeoPixelExports=()=>dispatchGeoPixelExports().catch(error=>app.log.error({err:error},"Falha ao exportar alterações para GeoPixel."));
+void evaluateGeoPixelExports();
+const geopixelExportTimer=setInterval(evaluateGeoPixelExports,geopixelExportSeconds*1000);
+geopixelExportTimer.unref();
