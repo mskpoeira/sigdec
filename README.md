@@ -25,6 +25,15 @@ Plataforma municipal modular para prevenção, preparação, monitoramento, aler
 - Caddy em homologação
 - pnpm workspaces
 
+## v1.72.0 — Tempo real distribuído
+
+- SSE como transporte primário de atualização em tempo real.
+- PostgreSQL `LISTEN/NOTIFY` para distribuir eventos entre múltiplas instâncias da API.
+- Polling de 5 segundos mantido apenas como fallback quando o SSE estiver indisponível.
+- Cobertura em tempo real para painel, Sala de Situação, ocorrências, extratos, SIDEC, SEI, Base Legal e diagnóstico institucional.
+- Verificação automática de cobertura realtime no CI.
+- Saúde do sistema e prontidão para apresentação exibem o estado do barramento distribuído.
+
 ## Desenvolvimento local
 
 1. Copie `.env.example` para `.env`.
