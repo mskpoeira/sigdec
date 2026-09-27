@@ -14,14 +14,20 @@ function extractResponseText(body:any){
 }
 
 type ProviderRun={provider:string;model:string;draft:string;inputTokens:number|null;outputTokens:number|null};
+type ProviderPurpose="CONTEXTUAL"|"TECHNICAL_REPORT";
 const aiEnabled=()=>String(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
-const providerOrder=()=>String(process.env.SIGDEC_AI_PROVIDER_ORDER??"OPENAI,GEMINI,GROQ").split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
+const providerOrder=(purpose:ProviderPurpose)=>{
+ const key=purpose==="TECHNICAL_REPORT"?"SIGDEC_AI_REPORT_PROVIDER_ORDER":"SIGDEC_AI_CONTEXT_PROVIDER_ORDER";
+ const fallback=purpose==="TECHNICAL_REPORT"?"OPENAI,GEMINI,OLLAMA,GROQ":"GROQ,GEMINI,OPENAI,OLLAMA";
+ return String(process.env[key]??process.env.SIGDEC_AI_PROVIDER_ORDER??fallback).split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
+};
 
 export function getAiProviderStatus(){
  return [
   {code:"OPENAI",label:"OpenAI",configured:Boolean((process.env.OPENAI_API_KEY??"").trim()),model:(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim(),purpose:"Minutas técnicas e análise contextual"},
   {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim(),purpose:"Análise contextual e segunda leitura multimodal quando habilitada"},
-  {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Análise rápida, checklists e segunda opinião com modelos abertos"}
+  {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Respostas rápidas, checklists e segunda opinião com modelo aberto"},
+  {code:"OLLAMA",label:"Ollama local",configured:Boolean((process.env.SIGDEC_OLLAMA_URL??"").trim()),model:(process.env.SIGDEC_OLLAMA_MODEL??"gpt-oss:20b").trim(),purpose:"Análise local para reduzir envio de contexto a provedores externos"}
  ];
 }
 
@@ -51,10 +57,21 @@ async function callGroq(prompt:string):Promise<ProviderRun|null>{
  const draft=String(body?.choices?.[0]?.message?.content??"").trim();if(!draft)throw new Error("Resposta Groq sem texto.");
  return {provider:"GROQ",model:String(body?.model??model),draft,inputTokens:Number.isFinite(Number(body?.usage?.prompt_tokens))?Number(body.usage.prompt_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.completion_tokens))?Number(body.usage.completion_tokens):null};
 }
-async function runConfiguredProvider(prompt:string):Promise<ProviderRun|null>{
+
+async function callOllama(prompt:string):Promise<ProviderRun|null>{
+ const base=(process.env.SIGDEC_OLLAMA_URL??"").trim();if(!base)return null;
+ const model=(process.env.SIGDEC_OLLAMA_MODEL??"gpt-oss:20b").trim();
+ let endpoint:URL;try{endpoint=new URL("/api/chat",base.endsWith("/")?base:base+"/")}catch{return null}
+ if(!["http:","https:"].includes(endpoint.protocol))return null;
+ const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model,messages:[{role:"user",content:prompt}],stream:false,options:{temperature:0.2}}),signal:AbortSignal.timeout(60000)});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error??("Ollama HTTP "+response.status));
+ const draft=String(body?.message?.content??"").trim();if(!draft)throw new Error("Resposta Ollama sem texto.");
+ return {provider:"OLLAMA",model:String(body?.model??model),draft,inputTokens:Number.isFinite(Number(body?.prompt_eval_count))?Number(body.prompt_eval_count):null,outputTokens:Number.isFinite(Number(body?.eval_count))?Number(body.eval_count):null};
+}
+async function runConfiguredProvider(prompt:string,purpose:ProviderPurpose):Promise<ProviderRun|null>{
  if(!aiEnabled())return null;
- const runners:Record<string,(prompt:string)=>Promise<ProviderRun|null>>={OPENAI:callOpenAi,GEMINI:callGemini,GROQ:callGroq};
- for(const code of providerOrder()){
+ const runners:Record<string,(prompt:string)=>Promise<ProviderRun|null>>={OPENAI:callOpenAi,GEMINI:callGemini,GROQ:callGroq,OLLAMA:callOllama};
+ for(const code of providerOrder(purpose)){
   const runner=runners[code];if(!runner)continue;
   try{const result=await runner(prompt);if(result)return result}catch{}
  }
@@ -134,7 +151,7 @@ export async function generateTechnicalDraft(input:{title:string;reportType:stri
  ].join("\n");
  const promptHash=hash(prompt),started=Date.now();
  try{
-  const result=await runConfiguredProvider(prompt);
+  const result=await runConfiguredProvider(prompt,"TECHNICAL_REPORT");
   if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
   return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
@@ -186,7 +203,7 @@ export async function generateContextualAnswer(input:{module:string;route:string
  ].join("\n");
  const promptHash=hash(prompt),started=Date.now();
  try{
-  const result=await runConfiguredProvider(prompt);
+  const result=await runConfiguredProvider(prompt,"CONTEXTUAL");
   if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
   return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
