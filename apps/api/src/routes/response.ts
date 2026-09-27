@@ -27,7 +27,8 @@ const volunteerSchema=z.object({
  validatedSkills:z.array(z.string().trim().min(1).max(80)).max(30).default([]),
  certifications:z.array(certificationSchema).max(100).default([]),
  history:z.array(z.record(z.string(),z.unknown())).max(200).default([]),
- notes:z.string().trim().max(3000).optional()
+ notes:z.string().trim().max(3000).optional(),
+ contacts:z.array(z.object({kind:z.enum(["PHONE","EMAIL"]),value:z.string().trim().min(3).max(254),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)})).max(20).default([])
 });
 const stationSchema=z.object({
  code:z.string().trim().min(1).max(80), name:z.string().trim().min(2).max(200),
@@ -80,6 +81,11 @@ const deliverySchema=z.object({
  }
 });
 
+async function syncVolunteerContacts(client:any,organizationId:string,ownerId:string,contacts:Array<{kind:"PHONE"|"EMAIL";value:string;label?:string;phoneType?:"MOBILE"|"LANDLINE";isWhatsapp:boolean;isPrimary:boolean}>){
+ await client.query("UPDATE contact_points SET active=false,is_primary=false,updated_at=now() WHERE organization_id=$1 AND owner_type='VOLUNTEER' AND owner_id=$2 AND active",[organizationId,ownerId]);
+ for(const x of contacts){await client.query("INSERT INTO contact_points(organization_id,owner_type,owner_id,kind,value,label,phone_type,is_whatsapp,is_primary) VALUES($1,'VOLUNTEER',$2,$3,$4,$5,$6,$7,$8)",[organizationId,ownerId,x.kind,x.value,x.label??null,x.kind==="PHONE"?(x.phoneType??null):null,x.kind==="PHONE"?x.isWhatsapp:false,x.isPrimary]);}
+}
+
 export async function responseRoutes(app:FastifyInstance){
  app.get("/api/v1/volunteers",{preHandler:requirePermission("volunteers.read")},async req=>{
   const o=org(authFrom(req).organizationId);
@@ -90,7 +96,9 @@ export async function responseRoutes(app:FastifyInstance){
    radioamateur_call_sign AS "radioamateurCallSign",operation_region AS "operationRegion",
    skills,validated_skills AS "validatedSkills",certifications,history,notes
    FROM volunteers WHERE organization_id=$1 ORDER BY full_name`,[o]);
-  return {items:r.rows};
+  const ids=r.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='VOLUNTEER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[o,ids]):{rows:[]};
+  const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
+  return {items:r.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
  });
  app.post("/api/v1/volunteers",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
   const a=authFrom(req),o=org(a.organizationId),p=volunteerSchema.safeParse(req.body); if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
