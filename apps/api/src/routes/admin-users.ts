@@ -13,7 +13,7 @@ const userInput=z.object({
  phone:z.string().trim().max(40).default(""),jobTitle:z.string().trim().max(120).default(""),
  department:z.string().trim().max(120).default(""),roleIds:z.array(uuid).min(1).max(8),
  active:z.boolean().default(true),
- contacts:z.array(z.object({kind:z.enum(["PHONE","EMAIL"]),value:z.string().trim().min(3).max(254),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)})).max(20).default([])
+ contacts:z.array(z.object({kind:z.enum(["PHONE","EMAIL"]),value:z.string().trim().min(3).max(254),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]).optional(),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)})).max(20).default([])
 });
 const roleInput=z.object({code:z.string().trim().regex(/^[A-Z][A-Z0-9_]{2,59}$/),
  name:z.string().trim().min(3).max(120),permissionCodes:z.array(z.string()).max(100)});
@@ -35,16 +35,16 @@ const userSelect=`SELECT u.id,u.matricula,u.display_name AS "displayName",u.war_
  COALESCE(array_agg(r.code) FILTER(WHERE r.code IS NOT NULL),'{}') AS roles
  FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id`;
 
-async function syncContacts(client:any,org:string,ownerId:string,contacts:Array<{kind:"PHONE"|"EMAIL";value:string;label?:string;phoneType?:"MOBILE"|"LANDLINE";isWhatsapp:boolean;isPrimary:boolean}>){
+async function syncContacts(client:any,org:string,ownerId:string,contacts:Array<{kind:"PHONE"|"EMAIL";value:string;label?:string;phoneType?:"MOBILE"|"LANDLINE";extension?:string;isWhatsapp:boolean;isPrimary:boolean}>){
  await client.query("UPDATE contact_points SET active=false,is_primary=false,updated_at=now() WHERE organization_id=$1 AND owner_type='USER' AND owner_id=$2 AND active",[org,ownerId]);
- for(const x of contacts){await client.query("INSERT INTO contact_points(organization_id,owner_type,owner_id,kind,value,label,phone_type,is_whatsapp,is_primary) VALUES($1,'USER',$2,$3,$4,$5,$6,$7,$8)",[org,ownerId,x.kind,x.value,x.label??null,x.kind==="PHONE"?(x.phoneType??null):null,x.kind==="PHONE"?x.isWhatsapp:false,x.isPrimary]);}
+ for(const x of contacts){await client.query("INSERT INTO contact_points(organization_id,owner_type,owner_id,kind,value,label,phone_type,extension,is_whatsapp,is_primary) VALUES($1,'USER',$2,$3,$4,$5,$6,$7,$8,$9)",[org,ownerId,x.kind,x.value,x.label??null,x.kind==="PHONE"?(x.phoneType??null):null,x.kind==="PHONE"?(x.extension??null):null,x.kind==="PHONE"?x.isWhatsapp:false,x.isPrimary]);}
 }
 
 export async function adminUserRoutes(app:FastifyInstance){
  app.get("/api/v1/admin/users",{preHandler:requirePermission("system.master")},async request=>{
   const org=organization(authFrom(request).organizationId);
   const users=await db.query(`${userSelect} WHERE u.organization_id=$1 GROUP BY u.id ORDER BY u.display_name,u.id LIMIT 500`,[org]);
-  const ids=users.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='USER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[org,ids]):{rows:[]};
+  const ids=users.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",extension,is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='USER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[org,ids]):{rows:[]};
   const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
   return {items:users.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
  });
