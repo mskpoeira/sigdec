@@ -221,12 +221,62 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
+    const [riskAreas,warningAssets,criticalInfrastructures,shelters,evacuationRoutes,activeWarnings] = await Promise.all([
+      db.query(`SELECT id,code,name,neighborhood,hazard_type AS "hazardType",risk_level AS "riskLevel",status,
+                       exposed_buildings AS "exposedBuildings",exposed_people AS "exposedPeople",
+                       latitude,longitude,boundary_geojson AS "boundaryGeojson"
+                  FROM territorial_risk_areas
+                 WHERE organization_id=$1 AND status<>'INACTIVE'
+                 ORDER BY CASE risk_level WHEN 'R4' THEN 1 WHEN 'R3' THEN 2 WHEN 'R2' THEN 3 ELSE 4 END,code
+                 LIMIT 500`,[orgId]),
+      db.query(`SELECT id,code,name,asset_type AS "assetType",status,neighborhood,latitude,longitude,
+                       battery_percent::float8 AS "batteryPercent",last_tested_at AS "lastTestedAt"
+                  FROM warning_assets
+                 WHERE organization_id=$1 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                 ORDER BY code LIMIT 500`,[orgId]),
+      db.query(`SELECT id,code,name,category,operational_status AS "operationalStatus",criticality,neighborhood,
+                       latitude,longitude,backup_power AS "backupPower",autonomy_hours::float8 AS "autonomyHours"
+                  FROM critical_infrastructures
+                 WHERE organization_id=$1 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                 ORDER BY CASE criticality WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 ELSE 3 END,code
+                 LIMIT 500`,[orgId]),
+      db.query(`SELECT id,name,status,neighborhood,capacity_people AS "capacityPeople",latitude,longitude,
+                       accessible,generator_available AS "generatorAvailable",pet_area_available AS "petAreaAvailable",
+                       COALESCE((SELECT sum(adults+children+elderly+persons_with_disability)
+                                   FROM assisted_households h
+                                  WHERE h.shelter_id=s.id AND h.departed_at IS NULL),0)::int AS "currentPeople"
+                  FROM shelters s
+                 WHERE organization_id=$1 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                 ORDER BY name LIMIT 300`,[orgId]),
+      db.query(`SELECT e.id,e.code,e.name,e.status,e.accessible,e.route_geojson AS "routeGeojson",
+                       e.origin_text AS "originText",e.destination_text AS "destinationText",
+                       a.code AS "riskAreaCode",a.name AS "riskAreaName"
+                  FROM evacuation_routes e
+                  LEFT JOIN territorial_risk_areas a ON a.id=e.risk_area_id
+                 WHERE e.organization_id=$1 AND e.status<>'INACTIVE'
+                 ORDER BY e.code LIMIT 500`,[orgId]),
+      db.query(`SELECT w.id,w.severity,w.title,w.message,w.instruction,w.status,w.channels,
+                       w.published_at AS "publishedAt",a.code AS "riskAreaCode",a.name AS "riskAreaName",
+                       a.latitude,a.longitude
+                  FROM warning_activations w
+                  LEFT JOIN territorial_risk_areas a ON a.id=w.risk_area_id
+                 WHERE w.organization_id=$1 AND w.status='PUBLISHED'
+                 ORDER BY CASE w.severity WHEN 'EMERGENCY' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END,w.published_at DESC
+                 LIMIT 100`,[orgId])
+    ]);
+
     return {
       incidents: incidents.rows,
       positions: positions.rows,
       positionTrail: positionTrail.rows,
       monitoringEvents: monitoringEvents.rows,
-      latestReadings: latestReadings.rows
+      latestReadings: latestReadings.rows,
+      riskAreas: riskAreas.rows,
+      warningAssets: warningAssets.rows,
+      criticalInfrastructures: criticalInfrastructures.rows,
+      shelters: shelters.rows,
+      evacuationRoutes: evacuationRoutes.rows,
+      activeWarnings: activeWarnings.rows
     };
   });
 
