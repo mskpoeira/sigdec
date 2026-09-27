@@ -14,7 +14,8 @@ type Readiness={
  metrics:{activeUsers:number;activeMasters:number;incidentTypes:number;teams:number;vehicles:number;humanitarianItems:number;shelters:number;monitoringStations:number;communicationAssets:number;approvedPlancon:number;integrations:number;auditTotal:number;auditInvalid:number;auditUnsealed:number};
  migration:{filename:string;appliedAt:string}|null;
  checks:Check[];
- architecture:{jsonApis:boolean;postgis:boolean;auditAppendOnly:boolean;ed25519Checkpoints:boolean;offlineFieldSupport:boolean};
+ architecture:{jsonApis:boolean;postgis:boolean;auditAppendOnly:boolean;ed25519Checkpoints:boolean;offlineFieldSupport:boolean;realtimeSse:boolean;distributedRealtime:boolean};
+ realtime:{transport:string;distribution:string;bridgeActive:boolean;localConnections:number;lastError:string|null};
 };
 
 const statusText={READY:"Pronto para apresentação",ATTENTION:"Pronto com recomendações",BLOCKED:"Atenção necessária"};
@@ -79,6 +80,7 @@ export default function PresentationReadinessPage(){
     <article className="card"><h2>Auditoria append-only</h2><p><strong>{data.architecture.auditAppendOnly?"✓ Habilitada":"—"}</strong></p><p>Rastreabilidade de alterações.</p></article>
     <article className="card"><h2>Ed25519</h2><p><strong>{data.architecture.ed25519Checkpoints?"✓ Habilitado":"—"}</strong></p><p>Checkpoints verificáveis de auditoria.</p></article>
     <article className="card"><h2>Campo / offline</h2><p><strong>{data.architecture.offlineFieldSupport?"✓ Preparado":"—"}</strong></p><p>Fluxos de campo e captura operacional.</p></article>
+    <article className={data.realtime?.bridgeActive?"card":"warningCard"}><h2>Tempo real distribuído</h2><p><strong>{data.architecture.realtimeSse&&data.architecture.distributedRealtime&&data.realtime?.bridgeActive?"✓ Ativo":"⚠ Verificar"}</strong></p><p>SSE + PostgreSQL LISTEN/NOTIFY · {data.realtime?.localConnections??0} conexão(ões) locais.</p></article>
    </section>
   </>}
  </main>;
