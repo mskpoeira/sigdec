@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import {useEffect,useState} from "react";
+import {useCallback,useEffect,useState} from "react";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -17,7 +18,9 @@ const externalTools=[
 
 export default function AiProvidersPage(){
  const[status,setStatus]=useState<Status|null>(null),[message,setMessage]=useState("");
- useEffect(()=>{fetch(API+"/api/v1/ai/providers",{credentials:"include",cache:"no-store"}).then(async r=>{if(r.status===401){location.href="/login";return null}if(!r.ok)throw new Error("Falha ao consultar provedores.");return r.json()}).then(b=>b&&setStatus(b)).catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar provedores."))},[]);
+ const load=useCallback(async()=>{try{const r=await fetch(API+"/api/v1/ai/providers",{credentials:"include",cache:"no-store"});if(r.status===401){location.href="/login";return}if(!r.ok)throw new Error("Falha ao consultar provedores.");setStatus(await r.json());setMessage("")}catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar provedores.")}},[]);
+ useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>load(),true,30000);
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">INTELIGÊNCIA SIGDEC · PROVEDORES · {SIGDEC_VERSION_LABEL}</span><h1>Central de IA</h1><p>Provedores internos opcionais e atalhos externos verificados, cada um com função definida e sem autonomia para alterar o SIGDEC.</p></div><div className="headerActions"><Link className="secondaryLink" href="/inteligencia">Inteligência</Link><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
   <section className="warningCard"><strong>Regra de governança</strong><p>Toda IA é consultiva. A decisão final é sempre humana. A IA incorporada não pode alterar dados, configurações, usuários, perfis, permissões, código ou integrações; não pode descobrir ou solicitar senhas, tokens, sessões, chaves ou segredos; e não pode obter acesso a contas ou dados de terceiros.</p></section>
