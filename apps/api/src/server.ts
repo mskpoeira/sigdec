@@ -25,6 +25,8 @@ import { dispatchWebhooks } from "./lib/webhooks.js";
 import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluateSidecResilience, sidecRoutes } from "./routes/sidec.js";
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 import { riskManagementRoutes } from "./routes/risk-management.js";
+import { geoPixelRoutes } from "./routes/geopixel.js";
+import { syncDueGeoPixelLayers } from "./lib/geopixel.js";
 const app=Fastify({logger:true,trustProxy:true});
 app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829120},(_request,body,done)=>done(null,body));
 const release=apiPackage.version;
@@ -72,10 +74,10 @@ app.get("/api/v1/ready",async(_request,reply)=>{
   return reply.code(503).send({status:"unavailable",service:"sigdec-api",version:release});
  }
 });
-await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(experienceRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);await app.register(riskManagementRoutes);
+await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(experienceRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);await app.register(riskManagementRoutes);await app.register(geoPixelRoutes);
 app.get("/api/v1",async()=>({
  name:"SIGDEC API",product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",version:"v1",release,
- modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","gestao-integrada-riscos","danos-fide-dmate","infraestruturas-criticas","animais-em-desastres","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
+ modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","gestao-integrada-riscos","danos-fide-dmate","infraestruturas-criticas","animais-em-desastres","geopixel-integracao-territorial","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
 }));
 app.get("/api/v1/capabilities",async()=>({
  product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",release,format:"application/json",
@@ -87,11 +89,12 @@ app.get("/api/v1/capabilities",async()=>({
   {code:"operations",label:"Operações / SCO",pages:["/gestao","/sco","/comunicacoes"]},
   {code:"resilience",label:"Resiliência",pages:["/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/voluntarios"]},
   {code:"risk-management",label:"Gestão Integrada do Risco",pages:["/gestao-riscos","/danos","/infraestruturas","/assistencia/animais","/sco/plano-acao"]},
+  {code:"geopixel",label:"GeoPixel / Inteligência Territorial",pages:["/administracao/geopixel","/campo"]},
   {code:"documents",label:"Documentos e Continuidade",pages:["/documentos","/continuidade","/verificar-integridade"]},
   {code:"administration",label:"Administração",pages:["/administracao","/administracao/usuarios","/administracao/cadastros","/administracao/auditoria","/administracao/saude","/administracao/apresentacao"]},
   {code:"institutional",label:"Experiência Institucional",pages:["/apresentacao"]}
  ],
- interoperability:["SIDEC","S2ID","webhooks","JSON","CSV","PDF","KML"],
+ interoperability:["SIDEC","S2ID","GeoPixel","WFS","WMS","GeoJSON","webhooks","JSON","CSV","PDF","KML"],
  generatedAt:new Date().toISOString()
 }));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
@@ -126,3 +129,10 @@ const evaluateWebhooks=()=>dispatchWebhooks().catch(error=>app.log.error({err:er
 void evaluateWebhooks();
 const webhookDispatchTimer=setInterval(evaluateWebhooks,webhookDispatchSeconds*1000);
 webhookDispatchTimer.unref();
+
+
+const geopixelSyncMinutes=Math.max(5,Math.min(1440,Number(process.env.GEOPIXEL_SYNC_EVALUATION_MINUTES??10)));
+const evaluateGeoPixelSync=()=>syncDueGeoPixelLayers().catch(error=>app.log.error({err:error},"Falha ao sincronizar camadas GeoPixel."));
+void evaluateGeoPixelSync();
+const geopixelSyncTimer=setInterval(evaluateGeoPixelSync,geopixelSyncMinutes*60*1000);
+geopixelSyncTimer.unref();
