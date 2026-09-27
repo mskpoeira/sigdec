@@ -919,3 +919,47 @@ body.sigdec-has-global-sidebar .opsDashboard{
  }
  .globalModuleTabsScroll>a span:first-child{display:none}
 }
+
+
+/* Abas secundárias compactas — integrações e subáreas */
+.sectionTabs{
+ display:flex;
+ gap:6px;
+ overflow-x:auto;
+ overflow-y:hidden;
+ margin:14px 0 18px;
+ padding:0 0 1px;
+ border-bottom:1px solid #dbe5ec;
+ scrollbar-width:none
+}
+.sectionTabs::-webkit-scrollbar{display:none}
+.sectionTabs>a{
+ position:relative;
+ display:inline-flex;
+ align-items:center;
+ min-height:36px;
+ padding:7px 11px 8px;
+ border:1px solid #dbe5ec;
+ border-bottom:0;
+ border-radius:9px 9px 0 0;
+ background:#f8fbfd;
+ color:#58738a;
+ text-decoration:none;
+ font-size:.76rem;
+ font-weight:820;
+ white-space:nowrap
+}
+.sectionTabs>a:hover{background:#fff;color:#075fae}
+.sectionTabs>a.active{
+ background:#fff;
+ color:#075fae;
+ border-color:#b8d0df
+}
+.sectionTabs>a.active::after{
+ content:"";
+ position:absolute;
+ left:8px;right:8px;bottom:-1px;
+ height:3px;
+ background:#0e73c8;
+ border-radius:3px 3px 0 0
+}
