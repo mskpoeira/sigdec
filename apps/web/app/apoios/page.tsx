@@ -51,6 +51,7 @@ export default function ApoiosPage(){
  const[selected,setSelected]=useState<Detail|null>(null);
  const[message,setMessage]=useState("");
  const[busy,setBusy]=useState(false);
+ const[incidentProtocol,setIncidentProtocol]=useState("");
 
  const request=useCallback(async(path:string,init?:RequestInit)=>{
   const r=await fetch(API+path,{credentials:"include",cache:"no-store",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});
@@ -69,6 +70,7 @@ export default function ApoiosPage(){
  },[request]);
 
  useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:"Falha ao carregar."))},[load]);
+ useEffect(()=>{setIncidentProtocol(new URLSearchParams(window.location.search).get("incidentProtocol")??"")},[]);
  useRealtimeRefresh(async()=>{if(busy)return;await load();if(selected)await open(selected.item.id)},true);
 
  async function perform(fn:()=>Promise<void>){
@@ -83,12 +85,12 @@ export default function ApoiosPage(){
   await perform(async()=>{
    const body=await request("/api/v1/external-support-requests",{method:"POST",body:JSON.stringify({
     scope:String(d.get("scope")??"STATE"),serviceType:String(d.get("serviceType")??"STATE_HUMANITARIAN"),
-    incidentProtocol:String(d.get("incidentProtocol")??""),cobradeCode:String(d.get("cobradeCode")??""),
+    incidentProtocol,cobradeCode:String(d.get("cobradeCode")??""),
     title:String(d.get("title")??""),summary:String(d.get("summary")??""),externalSystem:String(d.get("externalSystem")??""),
     referenceUrl:String(d.get("referenceUrl")??""),requestedAmount:amount?Number(amount):undefined,
     deadlineAt:deadline?ubatubaLocalDateTimeToIso(deadline):undefined
    })});
-   form.reset();setMessage("Solicitação criada com checklist documental automático.");await open(body.id);
+   form.reset();setIncidentProtocol("");setMessage("Solicitação criada com checklist documental automático.");await open(body.id);
   });
  }
 
@@ -142,7 +144,7 @@ export default function ApoiosPage(){
     <div className="formGrid">
      <label>Âmbito<select name="scope">{scopes.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
      <label>Serviço<select name="serviceType">{services.map(x=><option key={x} value={x}>{serviceLabels[x]}</option>)}</select></label>
-     <label>Protocolo da ocorrência<input name="incidentProtocol" placeholder="Opcional"/></label>
+     <label>Protocolo da ocorrência<input name="incidentProtocol" value={incidentProtocol} onChange={e=>setIncidentProtocol(e.target.value)} placeholder="Opcional"/></label>
      <label>COBRADE<input name="cobradeCode"/></label>
      <label>Sistema externo<input name="externalSystem" placeholder="SIDEC, S2ID, Portal de Convênios..."/></label>
      <label>Prazo<input name="deadlineAt" type="datetime-local"/></label>
