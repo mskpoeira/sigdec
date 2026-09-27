@@ -25,9 +25,12 @@ A IA incorporada:
 O servidor pode tentar, em ordem configurável:
 - OpenAI;
 - Google Gemini API;
-- GroqCloud.
+- GroqCloud;
+- Ollama local (opcional).
 
-Somente provedores com chave configurada no ambiente seguro são utilizados. Chaves nunca são retornadas à interface.
+Somente provedores configurados no ambiente seguro são utilizados. Chaves nunca são retornadas à interface. Ollama não exige chave, mas sua URL deve apontar apenas para infraestrutura local/confiável controlada pela Prefeitura.
+
+A ordem pode variar por tarefa: respostas contextuais priorizam baixa latência; minutas técnicas priorizam provedores configurados para revisão estruturada.
 
 ## Ferramentas externas
 Atalhos disponíveis na Central de IA:
