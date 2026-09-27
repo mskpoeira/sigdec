@@ -1,5 +1,6 @@
 "use client";
 import {SIGDEC_VERSION_LABEL} from "../lib/release";
+import {ptBR} from "../lib/pt-br";
 import Link from "next/link";
 import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
@@ -45,7 +46,7 @@ export default function Page(){
     {message&&<p className="formMessage">{message}</p>}<button className="primaryButton" disabled={busy}>{busy?"Salvando...":"Cadastrar voluntário"}</button>
    </form>
    <section className="dataGrid">{status&&<div className="infoCard">{status}</div>}{items.length===0&&!status?<div className="infoCard">Nenhum registro cadastrado.</div>:items.map(x=><article className="card" key={x.id}>
-    <h2>{x.fullName}</h2><p><strong>{x.status}</strong>{x.profession?` · ${x.profession}`:""}{x.operationRegion?` · ${x.operationRegion}`:""}</p>
+    <h2>{x.fullName}</h2><p><strong>{ptBR(x.status)}</strong>{x.profession?` · ${x.profession}`:""}{x.operationRegion?` · ${x.operationRegion}`:""}</p>
     <p>{x.phone??"Sem telefone"}{x.email?` · ${x.email}`:""}</p>
     <p><strong>Vestuário:</strong> camiseta {x.shirtSize??"—"} · calça {x.pantsSize??"—"} · jaqueta {x.jacketSize??"—"} · capa {x.raincoatSize??"—"} · colete {x.vestSize??"—"} · luva {x.gloveSize??"—"} · calçado {x.shoeSize??"—"}</p>
     <p><strong>Competências:</strong> {(x.skills??[]).join(", ")||"não informadas"}{(x.validatedSkills??[]).length?` · validadas: ${x.validatedSkills?.join(", ")}`:""}</p>
