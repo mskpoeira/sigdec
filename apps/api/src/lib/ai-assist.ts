@@ -25,7 +25,7 @@ const providerOrder=(purpose:ProviderPurpose)=>{
 export function getAiProviderStatus(){
  return [
   {code:"OPENAI",label:"OpenAI",configured:Boolean((process.env.OPENAI_API_KEY??"").trim()),model:(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim(),purpose:"Minutas técnicas e análise contextual"},
-  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim(),purpose:"Análise contextual e segunda leitura multimodal quando habilitada"},
+  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim(),purpose:"Análise contextual, comparação de alternativas e segunda leitura textual"},
   {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Respostas rápidas, checklists e segunda opinião com modelo aberto"},
   {code:"OLLAMA",label:"Ollama local",configured:Boolean((process.env.SIGDEC_OLLAMA_URL??"").trim()),model:(process.env.SIGDEC_OLLAMA_MODEL??"gpt-oss:20b").trim(),purpose:"Análise local para reduzir envio de contexto a provedores externos"}
  ];
