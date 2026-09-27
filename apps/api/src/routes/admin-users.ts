@@ -6,13 +6,19 @@ import {authFrom,normalizeMatricula,requireAuth,requirePermission} from "../auth
 import {db} from "../db.js";
 
 const uuid=z.string().uuid();
+const personContactInput=z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("PHONE"),value:z.string().regex(/^\d{10,11}$/),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)}),
+ z.object({kind:z.literal("EMAIL"),value:z.string().trim().email().max(254),label:z.string().trim().max(80).optional(),isWhatsapp:z.literal(false).default(false),isPrimary:z.boolean().default(false)})
+]);
+
 const userInput=z.object({
  matricula:z.string().trim().min(1).max(32),displayName:z.string().trim().min(3).max(160),
  warName:z.string().trim().max(80).default(""),
  email:z.union([z.string().trim().email().max(254),z.literal("")]).default(""),
  phone:z.string().trim().max(40).default(""),jobTitle:z.string().trim().max(120).default(""),
  department:z.string().trim().max(120).default(""),roleIds:z.array(uuid).min(1).max(8),
- active:z.boolean().default(true)
+ active:z.boolean().default(true),
+ contacts:z.array(personContactInput).max(20).default([])
 });
 const roleInput=z.object({code:z.string().trim().regex(/^[A-Z][A-Z0-9_]{2,59}$/),
  name:z.string().trim().min(3).max(120),permissionCodes:z.array(z.string()).max(100)});
@@ -34,11 +40,18 @@ const userSelect=`SELECT u.id,u.matricula,u.display_name AS "displayName",u.war_
  COALESCE(array_agg(r.code) FILTER(WHERE r.code IS NOT NULL),'{}') AS roles
  FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id`;
 
+async function syncContacts(client:any,org:string,ownerId:string,contacts:Array<{kind:"PHONE"|"EMAIL";value:string;label?:string;phoneType?:"MOBILE"|"LANDLINE";extension?:string;isWhatsapp:boolean;isPrimary:boolean}>){
+ await client.query("UPDATE contact_points SET active=false,is_primary=false,updated_at=now() WHERE organization_id=$1 AND owner_type='USER' AND owner_id=$2 AND active",[org,ownerId]);
+ for(const x of contacts){await client.query("INSERT INTO contact_points(organization_id,owner_type,owner_id,kind,value,label,phone_type,extension,is_whatsapp,is_primary) VALUES($1,'USER',$2,$3,$4,$5,$6,$7,$8,$9)",[org,ownerId,x.kind,x.value,x.label??null,x.kind==="PHONE"?(x.phoneType??null):null,x.kind==="PHONE"?(x.extension??null):null,x.kind==="PHONE"?x.isWhatsapp:false,x.isPrimary]);}
+}
+
 export async function adminUserRoutes(app:FastifyInstance){
  app.get("/api/v1/admin/users",{preHandler:requirePermission("system.master")},async request=>{
   const org=organization(authFrom(request).organizationId);
   const users=await db.query(`${userSelect} WHERE u.organization_id=$1 GROUP BY u.id ORDER BY u.display_name,u.id LIMIT 500`,[org]);
-  return {items:users.rows};
+  const ids=users.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",extension,is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='USER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[org,ids]):{rows:[]};
+  const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
+  return {items:users.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
  });
  app.get("/api/v1/admin/roles",{preHandler:requirePermission("system.master")},async()=>{
   const [roles,permissions]=await Promise.all([
@@ -94,6 +107,7 @@ export async function adminUserRoutes(app:FastifyInstance){
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,matricula=normalizeMatricula(v.matricula);
   if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});
+  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
   const password=temporaryPassword(),hash=await argon2.hash(password,{type:argon2.argon2id});
   const client=await db.connect();try{await client.query("BEGIN");
    const roles=await validateRoles(client,v.roleIds);
@@ -102,9 +116,10 @@ export async function adminUserRoutes(app:FastifyInstance){
    const result=await client.query<{id:string}>(`INSERT INTO users(organization_id,matricula,display_name,war_name,email,phone,job_title,department,
     password_hash,active,must_change_password,mfa_required)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11) RETURNING id`,[
-    org,matricula,v.displayName,v.warName||null,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
+    org,matricula,v.displayName,v.warName||null,(primaryEmail?.value??v.email)||null,(primaryPhone?.value??v.phone)||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
    const id=result.rows[0]!.id;
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
+   if(v.contacts.length)await syncContacts(client,org,id,v.contacts);
    await audit(client,request,"ADMIN_USER_CREATED","user",id,null,{matricula,displayName:v.displayName,warName:v.warName||null,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
    await client.query("COMMIT");return reply.code(201).send({id,temporaryPassword:password});
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"MATRICULA_EXISTS"});throw error}finally{client.release()}
@@ -115,6 +130,7 @@ export async function adminUserRoutes(app:FastifyInstance){
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,matricula=normalizeMatricula(v.matricula);
   if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});
+  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
   const client=await db.connect();try{await client.query("BEGIN");
    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[org]);
    const before=await client.query("SELECT id,matricula,display_name,active FROM users WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
@@ -136,6 +152,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    await client.query(`UPDATE users SET matricula=$3,display_name=$4,war_name=$5,email=$6,phone=$7,job_title=$8,department=$9,
     active=$10,mfa_required=CASE WHEN $11 THEN true ELSE mfa_required END,updated_at=now()
     WHERE id=$1 AND organization_id=$2`,[id,org,matricula,v.displayName,v.warName||null,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,v.active,mfa]);
+   await syncContacts(client,org,id,v.contacts);
    await client.query("DELETE FROM user_roles WHERE user_id=$1",[id]);
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
    await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[id]);
