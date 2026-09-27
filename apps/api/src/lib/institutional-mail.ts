@@ -51,7 +51,7 @@ function decodeHeader(value:string){
   .replace(/=\?UTF-8\?Q\?([^?]+)\?=/gi,(_,v)=>String(v).replace(/_/g," ").replace(/=([0-9A-F]{2})/gi,(_m,h)=>String.fromCharCode(parseInt(h,16))));
 }
 function extractHeader(block:string,name:string){
- const m=block.match(new RegExp("^"+name+":\\s*(.+(?:\\r?\\n[ \\t].+)*)","im"));return m?decodeHeader(m[1].replace(/\r?\n[ \t]+/g," ").trim()):null;
+ const m=block.match(new RegExp("^"+name+":\\s*(.+(?:\\r?\\n[ \\t].+)*)","im")),value=m?.[1];return value?decodeHeader(value.replace(/\r?\n[ \t]+/g," ").trim()):null;
 }
 async function imapSession<T>(fn:(command:(value:string)=>Promise<string>)=>Promise<T>):Promise<T>{
  const c=cfg();if(!c.user||!c.password)throw new Error("E-mail institucional ainda não possui credenciais configuradas no servidor.");
