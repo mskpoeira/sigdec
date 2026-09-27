@@ -1334,3 +1334,34 @@ tbody tr:hover{background:#f7fafc!important}
     opacity:.48!important;
   }
 }
+
+
+/* v1.79.1 — abas coloridas conforme paleta do Painel */
+.globalModuleTabsScroll>a[data-tone="red"]{--tab-tone:#e7242c;--tab-soft:#fff0f1;--tab-line:#f4b7bb}
+.globalModuleTabsScroll>a[data-tone="blue"]{--tab-tone:#1265c1;--tab-soft:#eef6ff;--tab-line:#bdd6f1}
+.globalModuleTabsScroll>a[data-tone="green"]{--tab-tone:#169642;--tab-soft:#effaf2;--tab-line:#bfe2c9}
+.globalModuleTabsScroll>a[data-tone="orange"]{--tab-tone:#f26b21;--tab-soft:#fff4ed;--tab-line:#f5c7ac}
+.globalModuleTabsScroll>a[data-tone="purple"]{--tab-tone:#793fd1;--tab-soft:#f5f0fc;--tab-line:#d7c4f1}
+.globalModuleTabsScroll>a[data-tone="navy"]{--tab-tone:#173f70;--tab-soft:#eef3f8;--tab-line:#c3d0de}
+.globalModuleTabsScroll>a[data-tone="gray"]{--tab-tone:#607080;--tab-soft:#f3f5f7;--tab-line:#d5dbe0}
+
+.globalModuleTabsScroll>a[data-tone]{
+ border-color:var(--tab-line)!important;
+ background:var(--tab-soft)!important;
+ color:var(--tab-tone)!important;
+}
+.globalModuleTabsScroll>a[data-tone]:hover{
+ background:#fff!important;
+ border-color:var(--tab-tone)!important;
+ color:var(--tab-tone)!important;
+}
+.globalModuleTabsScroll>a[data-tone].active{
+ background:var(--tab-tone)!important;
+ border-color:var(--tab-tone)!important;
+ color:#fff!important;
+ box-shadow:0 -2px 12px rgba(8,47,85,.1)!important;
+}
+.globalModuleTabsScroll>a[data-tone].active::after{
+ background:rgba(255,255,255,.92)!important;
+ height:3px!important;
+}
