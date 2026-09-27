@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect,useState} from "react";
-import {groupForPath,navPathMatches,type SigdecNavItem} from "./lib/navigation-model";
+import {groupForPath,navPathMatches,sigdecDirectNav,sigdecNavGroups,type SigdecNavItem} from "./lib/navigation-model";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type User={permissions:string[]};
@@ -45,7 +45,8 @@ export default function GlobalModuleTabs(){
  if(!group)return null;
  const canAdmin=!!user&&["admin.features","integrations.manage","system.master","audit.read","users.manage"].some(p=>user.permissions.includes(p));
  const visible=(item:SigdecNavItem)=>(!item.feature||features[item.feature]!==false)&&(!item.admin||canAdmin);
- const items=group.items.filter(visible);
+ const sidebarHrefs=new Set<string>([...sigdecDirectNav.map(item=>item.href),...sigdecNavGroups.map(item=>item.href)]);
+ const items=group.items.filter(item=>visible(item)&&!sidebarHrefs.has(item.href));
  if(!items.length)return null;
  const activeHref=items.filter(item=>navPathMatches(pathname,item.href)).sort((a,b)=>b.href.length-a.href.length)[0]?.href;
  return <nav className="globalModuleTabs" aria-label={"Abas de "+group.label}>
