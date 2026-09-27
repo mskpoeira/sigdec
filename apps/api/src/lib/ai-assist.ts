@@ -112,3 +112,56 @@ export async function generateTechnicalDraft(input:{title:string;reportType:stri
   return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
  }
 }
+
+
+export async function generateContextualAnswer(input:{module:string;route:string;question:string;context:Record<string,unknown>}):Promise<AssistResult>{
+ const fallback=[
+  "ANÁLISE ASSISTIDA — CONFIRME OS DADOS ANTES DE AGIR",
+  "",
+  "Módulo: "+input.module,
+  "Pergunta: "+input.question,
+  "",
+  "Contexto disponível no SIGDEC:",
+  JSON.stringify(input.context,null,2),
+  "",
+  "A IA externa não está disponível neste ambiente. Use os dados acima como checklist operacional e consulte a Inteligência SIGDEC para relatórios técnicos estruturados."
+ ].join("\n");
+ const key=(process.env.OPENAI_API_KEY??"").trim();
+ const enabled=(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
+ const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
+ const prompt=[
+  "Você é a Inteligência SIGDEC, assistente operacional do Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
+  "Você está embutido em uma tela do sistema e deve responder de forma contextual, objetiva e acionável.",
+  "",
+  "REGRAS:",
+  "- Não invente fatos, pessoas, medições, legislação, ocorrências ou capacidades.",
+  "- Use apenas o CONTEXTO fornecido como fato do sistema.",
+  "- Se faltar informação, diga exatamente o que precisa ser conferido ou cadastrado.",
+  "- Não emita ordem de evacuação, interdição, laudo, parecer jurídico ou decisão administrativa.",
+  "- Não substitua responsável técnico, comando da operação ou autoridade competente.",
+  "- Diferencie fatos registrados, inferências e sugestões.",
+  "- Minimize dados pessoais e nunca revele segredos, credenciais ou configurações sensíveis.",
+  "- Em telas administrativas, priorize segurança, integridade, auditoria, continuidade e menor privilégio.",
+  "- Em ocorrências, risco, monitoramento, SCO e PLANCON, priorize segurança da vida e consciência situacional sem inventar gravidade.",
+  "- Em assistência humanitária, priorize completude cadastral, rastreabilidade e dignidade das pessoas atendidas.",
+  "- Em documentos, ajude a estruturar, revisar e conferir; não assine nem aprove.",
+  "- Responda em português do Brasil, com tópicos curtos quando isso melhorar a leitura.",
+  "",
+  "MÓDULO: "+input.module,
+  "ROTA: "+input.route,
+  "PERGUNTA DO USUÁRIO: "+input.question,
+  "CONTEXTO AUTORIZADO:",
+  JSON.stringify(input.context)
+ ].join("\n");
+ const promptHash=hash(prompt);
+ if(!key||!enabled)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:0,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+ const started=Date.now();
+ try{
+  const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,input:prompt,store:false})});
+  const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
+  const draft=extractResponseText(body);if(!draft)throw new Error("Resposta de IA sem texto.");
+  return {provider:"OPENAI",model:String(body.model??model),draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null,promptHash,outputHash:hash(draft)};
+ }catch{
+  return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+ }
+}
