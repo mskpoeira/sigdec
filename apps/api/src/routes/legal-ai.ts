@@ -1,9 +1,9 @@
 import type {FastifyInstance,FastifyRequest} from "fastify";
 import {createHash} from "node:crypto";
 import {z} from "zod";
-import {authFrom,requirePermission} from "../auth.js";
+import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
-import {generateTechnicalDraft} from "../lib/ai-assist.js";
+import {generateContextualAnswer,generateTechnicalDraft} from "../lib/ai-assist.js";
 
 const uuid=z.string().uuid();
 const normInput=z.object({
@@ -21,6 +21,18 @@ const generateInput=z.object({
  title:z.string().trim().min(3).max(500).optional(),additionalInstructions:z.string().trim().max(5000).optional().default("")
 });
 const reviewInput=z.object({status:z.enum(["IN_REVIEW","APPROVED","REJECTED","ARCHIVED"]),draftText:z.string().min(20).max(200000).optional(),reviewNotes:z.string().trim().max(8000).optional().default("")});
+const contextualAssistInput=z.object({route:z.string().trim().min(1).max(500).regex(/^\//),question:z.string().trim().min(2).max(4000)});
+function contextualModule(route:string){
+ if(route.startsWith("/ocorrencias"))return "Ocorrências";
+ if(route.startsWith("/monitoramento")||route.startsWith("/campo")||route.startsWith("/alertas"))return "Monitoramento e Alertas";
+ if(route.startsWith("/assistencia"))return "Assistência Humanitária";
+ if(route.startsWith("/planejamento")||route.startsWith("/gestao-riscos"))return "PLANCON e Gestão do Risco";
+ if(route.startsWith("/gestao")||route.startsWith("/sco"))return "Centro de Gestão / SCO";
+ if(route.startsWith("/documentos")||route.startsWith("/inteligencia"))return "Inteligência e Documentos";
+ if(route.startsWith("/administracao"))return "Administração";
+ if(route.startsWith("/resiliencia")||route.startsWith("/voluntarios")||route.startsWith("/capacitacao"))return "Resiliência e Preparação";
+ return "SIGDEC";
+}
 
 function organizationId(request:FastifyRequest){
  const value=authFrom(request).organizationId;if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});return value;
@@ -69,6 +81,39 @@ async function geoPixelContext(org:string,incident:any){
 }
 
 export async function legalAiRoutes(app:FastifyInstance){
+ app.post("/api/v1/ai/contextual-assist",{preHandler:requireAuth},async(request,reply)=>{
+  const auth=authFrom(request),org=organizationId(request),parsed=contextualAssistInput.safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",message:"Pergunta ou rota inválida."});
+  const {route,question}=parsed.data,module=contextualModule(route),permissions=new Set(auth.permissions);
+  const can=(...values:string[])=>permissions.has("system.master")||values.some(v=>permissions.has(v));
+  const context:Record<string,unknown>={module,route,generatedAt:new Date().toISOString()};
+  const tasks:Promise<void>[]=[];
+  const addCount=(key:string,sql:string,allowed:boolean)=>{if(!allowed)return;tasks.push(db.query(sql,[org]).then(r=>{context[key]=Number(r.rows[0]?.value??0)}).catch(()=>{}))};
+  addCount("ocorrenciasAbertas","SELECT count(*)::int AS value FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE')",can("incidents.read","incidents.manage"));
+  addCount("ocorrenciasPrioridadeP1P2","SELECT count(*)::int AS value FROM incidents WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','DUPLICATE') AND priority IN ('P1','P2')",can("incidents.read","incidents.manage"));
+  addCount("eventosMonitoramentoAbertos","SELECT count(*)::int AS value FROM monitoring_events WHERE organization_id=$1 AND status<>'CLOSED'",can("monitoring.read","monitoring.manage"));
+  addCount("familiasAcompanhadas","SELECT count(*)::int AS value FROM assisted_households WHERE organization_id=$1 AND departed_at IS NULL",can("humanitarian.read","humanitarian.manage"));
+  addCount("abrigosAbertos","SELECT count(*)::int AS value FROM shelters WHERE organization_id=$1 AND status IN ('OPEN','FULL')",can("humanitarian.read","humanitarian.manage"));
+  addCount("voluntariosAtivos","SELECT count(*)::int AS value FROM volunteers WHERE organization_id=$1 AND status='ACTIVE'",can("volunteers.read","volunteers.manage"));
+  addCount("documentosEmitidos","SELECT count(*)::int AS value FROM technical_documents WHERE organization_id=$1 AND status='ISSUED'",can("documents.read","documents.manage"));
+  addCount("planconAtivos","SELECT count(*)::int AS value FROM contingency_plans WHERE organization_id=$1 AND status='ACTIVE'",can("plancon.manage"));
+  await Promise.all(tasks);
+  const incidentMatch=route.match(/^\/ocorrencias\/([0-9a-f-]{36})(?:\/|$)/i);
+  if(incidentMatch&&can("incidents.read","incidents.manage")&&uuid.safeParse(incidentMatch[1]).success){
+   const incident=await loadIncident(org,incidentMatch[1]);if(incident)context.ocorrenciaAtual=incident;
+  }
+  if(route.startsWith("/administracao")&&can("system.master","admin.features","integrations.manage")){
+   const [features,integrations]=await Promise.all([
+    db.query("SELECT count(*)::int AS total,count(*) FILTER(WHERE enabled=false)::int AS disabled FROM feature_flags WHERE organization_id=$1",[org]),
+    db.query("SELECT count(*)::int AS total,count(*) FILTER(WHERE active)::int AS active FROM integration_endpoints WHERE organization_id=$1",[org])
+   ]);
+   context.administracao={featureFlags:features.rows[0],integracoes:integrations.rows[0]};
+  }
+  const result=await generateContextualAnswer({module,route,question,context});
+  await db.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata) VALUES($1,'AI_CONTEXTUAL_ASSIST','ai_assist',$2,$3,$4,$5::jsonb)",[auth.userId,route,request.ip,request.headers["user-agent"]??null,JSON.stringify({module,provider:result.provider,model:result.model,result:result.result,promptHash:result.promptHash,outputHash:result.outputHash,latencyMs:result.latencyMs})]).catch(()=>{});
+  return {answer:result.draft,provider:result.provider,model:result.model,result:result.result,module};
+ });
+
  app.get("/api/v1/legal/norms",{preHandler:requirePermission("legal.read")},async request=>{
   const o=organizationId(request),q=request.query as {q?:string;topic?:string;jurisdiction?:string;status?:string;limit?:string};
   const params:any[]=[o];let where="(organization_id IS NULL OR organization_id=$1)";
