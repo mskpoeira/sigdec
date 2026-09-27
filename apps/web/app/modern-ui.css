@@ -1288,3 +1288,49 @@ tbody tr:hover{background:#f7fafc!important}
  .card,.incidentForm,.detailSection,.dispatchCard,.inspectionCard,.documentCard{padding:15px!important}
  .globalModuleTabsScroll>a,.sectionTabs>a{font-size:.71rem!important;padding:7px 9px 8px!important}
 }
+
+
+/* v1.79.1 — restaura imagem e marca da Defesa Civil nos cabeçalhos */
+.moduleShell>.listHeader:first-child,
+.moduleShell>.panelHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  background:
+    linear-gradient(112deg,rgba(8,47,85,.93) 0%,rgba(7,95,174,.84) 58%,rgba(8,47,85,.72) 100%),
+    url("https://turismo.ubatuba.sp.gov.br/wp-content/uploads/sites/29/2014/11/DSC05810.jpg") center 45%/cover no-repeat!important;
+}
+.moduleShell>.listHeader:first-child>*,
+.moduleShell>.panelHeader:first-child>*,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>*,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>*{
+  position:relative;
+  z-index:2;
+}
+.moduleShell>.listHeader:first-child::before,
+.moduleShell>.panelHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::before{
+  content:""!important;
+  position:absolute!important;
+  right:24px!important;
+  top:14px!important;
+  width:92px!important;
+  height:92px!important;
+  z-index:1!important;
+  opacity:.62!important;
+  pointer-events:none!important;
+  background:url("/branding/defesa-civil-ubatuba.webp") center/contain no-repeat!important;
+  filter:drop-shadow(0 7px 16px rgba(0,0,0,.22))!important;
+}
+@media(max-width:640px){
+  .moduleShell>.listHeader:first-child::before,
+  .moduleShell>.panelHeader:first-child::before,
+  .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::before,
+  .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::before{
+    right:12px!important;
+    top:12px!important;
+    width:66px!important;
+    height:66px!important;
+    opacity:.48!important;
+  }
+}
