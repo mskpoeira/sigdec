@@ -49,6 +49,14 @@ Consulte `infra/homolog/README.md`. O ambiente inclui PostgreSQL/PostGIS, Redis,
 
 > Nunca coloque senhas, chaves, CPF, dados reais de cidadãos ou credenciais de produção no Git.
 
+## Documentação consolidada
+
+- [Manual completo do sistema](./docs/MANUAL-COMPLETO.md)
+- [Documentação técnica consolidada](./docs/DOCUMENTACAO-TECNICA-CONSOLIDADA.md)
+- [Arquitetura](./docs/ARQUITETURA.md)
+- [Requisitos mestre](./docs/REQUISITOS-MESTRE.md)
+- [Homologação](./infra/homolog/README.md)
+
 ## Licença
 
 GNU Affero General Public License v3.0 — consulte [LICENSE](./LICENSE).
