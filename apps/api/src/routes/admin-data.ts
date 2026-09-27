@@ -4,6 +4,7 @@ import {z} from "zod";
 import QRCode from "qrcode";
 import {authFrom,requirePermission} from "../auth.js";
 import {db} from "../db.js";
+import {realtimeBridgeStatus} from "../lib/realtime.js";
 import {currentAuditEd25519KeyId,signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
 
 const uuid=z.string().uuid();
@@ -443,7 +444,7 @@ export async function adminDataRoutes(app:FastifyInstance){
      count(*) FILTER(WHERE a.integrity_hash IS NOT NULL AND a.integrity_hash<>sigdec_calculate_audit_hash(a))::int AS invalid
      FROM audit_logs a JOIN users u ON u.id=a.actor_user_id WHERE u.organization_id=$1`,[o])
   ]);
-  const metrics=counts.rows[0],integrity=auditIntegrity.rows[0];
+  const metrics=counts.rows[0],integrity=auditIntegrity.rows[0],realtime=realtimeBridgeStatus();
   const checks=[
    {code:"MASTER",label:"Administrador Master ativo",ok:Number(metrics.activeMasters)>0,critical:true,link:"/administracao/usuarios"},
    {code:"AUDIT",label:"Auditoria sem divergências",ok:Number(integrity.invalid)===0&&Number(integrity.unsealed)===0,critical:true,link:"/administracao/auditoria"},
@@ -454,15 +455,16 @@ export async function adminDataRoutes(app:FastifyInstance){
    {code:"MONITORING",label:"Estação de monitoramento cadastrada",ok:Number(metrics.monitoringStations)>0,critical:false,link:"/monitoramento"},
    {code:"COMMUNICATIONS",label:"Ativo de comunicação cadastrado",ok:Number(metrics.communicationAssets)>0,critical:false,link:"/comunicacoes"},
    {code:"PLANCON",label:"PLANCON aprovado/ativo",ok:Number(metrics.approvedPlancon)>0,critical:false,link:"/planejamento"},
-   {code:"SHELTERS",label:"Abrigo cadastrado",ok:Number(metrics.shelters)>0,critical:false,link:"/assistencia#abrigos"}
+   {code:"SHELTERS",label:"Abrigo cadastrado",ok:Number(metrics.shelters)>0,critical:false,link:"/assistencia#abrigos"},
+   {code:"REALTIME",label:"Barramento de eventos em tempo real conectado",ok:Boolean(realtime.bridgeActive),critical:false,link:"/administracao/saude"}
   ];
   const criticalOk=checks.filter(x=>x.critical).every(x=>x.ok),recommendedOk=checks.every(x=>x.ok);
   return {
    status:criticalOk?(recommendedOk?"READY":"ATTENTION"):"BLOCKED",
    generatedAt:new Date().toISOString(),
    metrics:{...metrics,auditTotal:Number(integrity.total),auditInvalid:Number(integrity.invalid),auditUnsealed:Number(integrity.unsealed)},
-   migration:migration.rows[0]??null,checks,
-   architecture:{jsonApis:true,postgis:true,auditAppendOnly:true,ed25519Checkpoints:true,offlineFieldSupport:true}
+   migration:migration.rows[0]??null,checks,realtime,
+   architecture:{jsonApis:true,postgis:true,auditAppendOnly:true,ed25519Checkpoints:true,offlineFieldSupport:true,realtimeSse:true,distributedRealtime:true}
   };
  });
 
