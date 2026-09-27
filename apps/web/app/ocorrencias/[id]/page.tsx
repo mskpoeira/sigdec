@@ -462,6 +462,7 @@ export default function OcorrenciaDetalhePage() {
         </div>
         <div className="headerActions">
           <button className="primaryButton" type="button" onClick={beginEdit}>Editar chamado</button>
+          <Link className="secondaryLink" href={("/inteligencia?incidentId="+id) as Route}>Relatório assistido por IA</Link>
           <Link className="secondaryLink" href={`/ocorrencias/${id}/sidec`}>Pacotes SIDEC</Link>
           <Link className="secondaryLink" href={`/ocorrencias/${id}/extrato`}>Extrato operacional</Link>
           <Link className="secondaryLink" href="/ocorrencias">Voltar</Link>
