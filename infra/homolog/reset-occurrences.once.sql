@@ -18,7 +18,7 @@ DECLARE
 BEGIN
   IF EXISTS (
     SELECT 1 FROM maintenance_runs
-    WHERE maintenance_key='homolog_reset_incidents_dispatches_20260927_02'
+    WHERE maintenance_key='homolog_reset_incidents_dispatches_20260927_03'
   ) THEN
     RAISE NOTICE 'Limpeza de ocorrencias/despachos ja executada; nada a fazer.';
     RETURN;
@@ -39,6 +39,9 @@ BEGIN
   JOIN incidents i ON i.id=d.incident_id
   WHERE i.organization_id=target_org;
 
+  -- Resolve FKs RESTRICT/NO ACTION antes do DELETE principal.
+  -- Registros auxiliares anulaveis sao preservados, apenas perdem o vinculo
+  -- com a ocorrencia removida. Filhos obrigatorios sao removidos.
   FOR fk IN
     SELECT ns.nspname AS schema_name,
            cls.relname AS table_name,
@@ -78,20 +81,20 @@ BEGIN
   GET DIAGNOSTICS deleted_counters = ROW_COUNT;
 
   UPDATE teams
-     SET status='AVAILABLE', updated_at=now()
+     SET status='AVAILABLE'
    WHERE organization_id=target_org
      AND status IN ('DISPATCHED','EN_ROUTE','ON_SCENE','RETURNING');
   GET DIAGNOSTICS released_teams = ROW_COUNT;
 
   UPDATE vehicles
-     SET status='AVAILABLE', updated_at=now()
+     SET status='AVAILABLE'
    WHERE organization_id=target_org
      AND status IN ('DISPATCHED','EN_ROUTE','ON_SCENE','RETURNING');
   GET DIAGNOSTICS released_vehicles = ROW_COUNT;
 
   INSERT INTO maintenance_runs(maintenance_key,details)
   VALUES(
-    'homolog_reset_incidents_dispatches_20260927_02',
+    'homolog_reset_incidents_dispatches_20260927_03',
     jsonb_build_object(
       'organizationId',target_org,
       'deletedIncidents',deleted_incidents,
@@ -112,24 +115,19 @@ $$;
 COMMIT;
 
 SELECT
-  count(DISTINCT i.id) AS incidents_remaining
-FROM incidents i
-JOIN users u ON u.organization_id=i.organization_id
-WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789';
-
-SELECT
-  count(*) AS dispatches_remaining
-FROM dispatches d
-JOIN incidents i ON i.id=d.incident_id
-JOIN users u ON u.organization_id=i.organization_id
-WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789';
-
-SELECT
-  count(DISTINCT c.organization_id::text||':'||c.year::text) AS counters_remaining
-FROM incident_counters c
-JOIN users u ON u.organization_id=c.organization_id
-WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789';
-
-SELECT details AS cleanup_details
-FROM maintenance_runs
-WHERE maintenance_key='homolog_reset_incidents_dispatches_20260927_02';
+  (SELECT count(DISTINCT i.id)
+     FROM incidents i
+     JOIN users u ON u.organization_id=i.organization_id
+    WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789') AS incidents_remaining,
+  (SELECT count(DISTINCT d.id)
+     FROM dispatches d
+     JOIN incidents i ON i.id=d.incident_id
+     JOIN users u ON u.organization_id=i.organization_id
+    WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789') AS dispatches_remaining,
+  (SELECT count(*)
+     FROM incident_counters c
+     JOIN users u ON u.organization_id=c.organization_id
+    WHERE regexp_replace(u.matricula,'[^0-9]','','g')='915789') AS counters_remaining,
+  (SELECT details
+     FROM maintenance_runs
+    WHERE maintenance_key='homolog_reset_incidents_dispatches_20260927_03') AS cleanup_details;
