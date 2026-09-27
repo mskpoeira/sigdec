@@ -370,7 +370,33 @@ export async function responseRoutes(app:FastifyInstance){
  });
  app.get("/api/v1/humanitarian/shelters",{preHandler:requirePermission("humanitarian.read")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query('SELECT id,name,address_line AS "addressLine",neighborhood,capacity_people AS "capacityPeople",status,notes FROM shelters WHERE organization_id=$1 ORDER BY name',[o]);return {items:r.rows};});
  app.post("/api/v1/humanitarian/shelters",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=shelterSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO shelters(organization_id,name,address_line,neighborhood,capacity_people,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[o,v.name,v.addressLine??null,v.neighborhood??null,v.capacityPeople,v.status,v.notes??null]);return reply.code(201).send(r.rows[0]);});
- app.post("/api/v1/humanitarian/households",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=householdSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO assisted_households(organization_id,incident_id,shelter_id,responsible_name,phone,address_origin,neighborhood_origin,adults,children,elderly,persons_with_disability,condition,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id',[o,v.incidentId??null,v.shelterId??null,v.responsibleName,v.phone??null,v.addressOrigin??null,v.neighborhoodOrigin??null,v.adults,v.children,v.elderly,v.personsWithDisability,v.condition,v.notes??null]);return reply.code(201).send(r.rows[0]);});
+ app.post("/api/v1/humanitarian/households",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
+  const o=org(authFrom(req).organizationId),p=householdSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data;
+  const people=v.adults+v.children+v.elderly;
+  if(people<=0)return reply.code(400).send({error:"INVALID_HOUSEHOLD_SIZE",message:"Informe ao menos uma pessoa na família."});
+  const client=await db.connect();
+  try{
+   await client.query("BEGIN");
+   if(v.incidentId){const incident=await client.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[v.incidentId,o]);if(!incident.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"INCIDENT_NOT_FOUND"});}}
+   if(v.shelterId){
+    const shelter=await client.query("SELECT id,status,capacity_people FROM shelters WHERE id=$1 AND organization_id=$2 FOR UPDATE",[v.shelterId,o]);
+    if(!shelter.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"SHELTER_NOT_FOUND"});}
+    if(!["OPEN","STANDBY"].includes(shelter.rows[0].status)){await client.query("ROLLBACK");return reply.code(409).send({error:"SHELTER_UNAVAILABLE",message:"Abrigo não está disponível para novas admissões."});}
+    const occupancy=await client.query(`SELECT COALESCE(sum(adults+children+elderly),0)::int AS people FROM assisted_households WHERE shelter_id=$1 AND departed_at IS NULL`,[v.shelterId]);
+    if(shelter.rows[0].capacity_people>0&&Number(occupancy.rows[0]?.people??0)+people>shelter.rows[0].capacity_people){await client.query("ROLLBACK");return reply.code(409).send({error:"SHELTER_CAPACITY_EXCEEDED",capacity:shelter.rows[0].capacity_people,currentPeople:Number(occupancy.rows[0]?.people??0),requestedPeople:people});}
+   }
+   const r=await client.query('INSERT INTO assisted_households(organization_id,incident_id,shelter_id,responsible_name,phone,address_origin,neighborhood_origin,adults,children,elderly,persons_with_disability,condition,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id',[o,v.incidentId??null,v.shelterId??null,v.responsibleName,v.phone??null,v.addressOrigin??null,v.neighborhoodOrigin??null,v.adults,v.children,v.elderly,v.personsWithDisability,v.condition,v.notes??null]);
+   await client.query("COMMIT");return reply.code(201).send(r.rows[0]);
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release();}
+ });
+ app.patch("/api/v1/humanitarian/households/:id/departure",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
+  const o=org(authFrom(req).organizationId),{id}=req.params as {id:string};if(!z.string().uuid().safeParse(id).success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const r=await db.query("UPDATE assisted_households SET departed_at=now() WHERE id=$1 AND organization_id=$2 AND departed_at IS NULL RETURNING id,departed_at AS \"departedAt\"",[id,o]);
+  if(r.rows[0])return r.rows[0];
+  const exists=await db.query("SELECT departed_at FROM assisted_households WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!exists.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  return reply.code(409).send({error:"HOUSEHOLD_ALREADY_DEPARTED"});
+ });
  app.post("/api/v1/humanitarian/deliveries",{preHandler:requirePermission("humanitarian.manage")},async(req,reply)=>{
   const a=authFrom(req),o=org(a.organizationId),p=deliverySchema.safeParse(req.body);
   if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
