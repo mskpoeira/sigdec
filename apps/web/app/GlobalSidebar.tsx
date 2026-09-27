@@ -22,6 +22,7 @@ const direct:Item[]=[
 const groups:Group[]=[
  {icon:"✦",label:"Inteligência SIGDEC",items:[
   {icon:"✦",label:"Inteligência e IA",href:"/inteligencia"},
+  {icon:"◇",label:"Central de IA",href:"/inteligencia/provedores"},
   {icon:"▤",label:"Documentos",href:"/documentos",feature:"documents"}
  ]},
  {icon:"▥",label:"Centro de Gestão",items:[
