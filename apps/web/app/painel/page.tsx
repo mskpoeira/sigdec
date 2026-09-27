@@ -7,36 +7,20 @@ import Link from "next/link";
 import type { Route } from "next";
 import { useCallback, useEffect, useState } from "react";
 import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
-import type { MouseEvent } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 type SessionUser={id:string;matricula:string;displayName:string;warName:string|null;email:string|null;jobTitle:string|null;department:string|null;roles:string[];permissions:string[];mustChangePassword:boolean;mfaRequired:boolean;mfaEnabled:boolean};
 
-const nav: Array<[string,string,Route,string?]> =[
-["⌂","Início","/painel"],
-["⚠","Ocorrências","/ocorrencias","incidents"],
-["◉","Monitoramento Ambiental","/monitoramento","monitoring"],
-["△","Gestão do Risco","/gestao-riscos","risks"],
-["✦","Inteligência SIGDEC","/inteligencia"],
-["♥","Assistência Humanitária","/assistencia","humanitarian"],
-["▦","Planejamento e Contingência","/planejamento"],
-["▥","Centro de Gestão","/gestao"],
-["◎","SCO / Sala de Emergência","/sco"],
-["◆","Resiliência","/resiliencia"],
-["▤","Documentos","/documentos","documents"],
-["⚙","Administração","/administracao"]
-];
 const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","Operação PLANCON","/planejamento/operacao","purple"],["△","Gestão do Risco","/gestao-riscos","green","risks"],["✦","Inteligência SIGDEC","/inteligencia","navy"],["◆","Apoios Estado/União","/apoios","blue"],["▥","Centro de Gestão","/gestao","gray"],["▶","Apresentar SIGDEC","/apresentacao","navy"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
 type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;addressLine:string|null;neighborhood:string|null;latitude:number|null;longitude:number|null};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
 type Feature={code:string;enabled:boolean};
-type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
 
 export default function PainelPage(){
  const [user,setUser]=useState<SessionUser|null>(null);const [incidents,setIncidents]=useState<DashboardIncident[]>([]);
  const [summary,setSummary]=useState<DashboardSummary|null>(null);const [features,setFeatures]=useState<Record<string,boolean>>({});
- const [customNavigation,setCustomNavigation]=useState<CustomNavigation[]>([]);const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
+ const [mapIncidents,setMapIncidents]=useState<MapIncident[]>([]);
  const loadLive=useCallback(()=>{
   const parseCoordinate=(value:unknown)=>{
     if(value===null||value===undefined)return null;
@@ -54,7 +38,6 @@ export default function PainelPage(){
  useEffect(()=>{
   fetch(`${API_URL}/auth/me`,{credentials:"include"}).then(async r=>{if(!r.ok)throw 0;return r.json()}).then(b=>setUser(b.user)).catch(()=>location.href="/login");
   fetch(`${API_URL}/api/v1/features`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>{if(b)setFeatures(Object.fromEntries((b.items??[]).map((x:Feature)=>[x.code,x.enabled]))) }).catch(()=>{});
-  fetch(`${API_URL}/api/v1/navigation`,{credentials:"include"}).then(r=>r.ok?r.json():null).then(b=>b&&setCustomNavigation(b.items??[])).catch(()=>{});
   loadLive();
  },[loadLive]);
  useRealtimeRefresh(loadLive,true,250);
@@ -68,7 +51,6 @@ export default function PainelPage(){
   [String(summary?.upcomingTrainings??"—"),"Treinamentos Futuros","Programações ainda não iniciadas","purple"]
  ];
  const featureOn=(code?:string)=>!code||features[code]!==false;
- const builtInNavPaths=new Set(nav.map(([, ,href])=>String(href)));
  const locatedMapIncidents=mapIncidents.filter(x=>x.latitude!==null&&x.longitude!==null);
  const unlocatedMapIncidents=mapIncidents.length-locatedMapIncidents.length;
  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
@@ -89,14 +71,7 @@ export default function PainelPage(){
   }
  }
  const pinPosition=(incident:MapIncident)=>{const p=worldPoint(Number(incident.latitude),Number(incident.longitude));const left=Math.max(1.5,Math.min(98.5,((p.x-mapNorthWest.x)/mapPixelWidth)*100));const top=Math.max(1.5,Math.min(98.5,((p.y-mapNorthWest.y)/mapPixelHeight)*100));return {left:`${left}%`,top:`${top}%`}};
- const handleSideInteraction=(event:MouseEvent<HTMLElement>)=>{if(typeof window==="undefined"||!window.matchMedia("(max-width: 800px)").matches||mobileMenuOpen)return;const target=event.target as HTMLElement;if(!target.closest("a,button"))return;event.preventDefault();event.stopPropagation();setMobileMenuOpen(true)};
  return <main className="opsDashboard">
-  <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
-   <div className="opsSideBrand"><img className="opsMunicipalCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão da Prefeitura Municipal de Ubatuba"/><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master")||user.permissions.includes("audit.read"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{customNavigation.filter(item=>!builtInNavPaths.has(item.path)).map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
-   <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small className="opsWarName">{user.warName?.trim()||user.displayName.split(" ")[0]}</small><small className="opsUserRole">{user.roles?.[0]||"Usuário"}</small></div></div>
-   <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
-  </aside>
   <section className="opsMain">
    <header className="opsHero">
     <div className="opsMunicipal"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
@@ -113,13 +88,6 @@ export default function PainelPage(){
      <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap">{osmTiles.map(tile=><img key={tile.key} className="osmSituationTile" src={tile.src} style={tile.style} alt="" loading="lazy" referrerPolicy="strict-origin-when-cross-origin"/>)}<a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<a className="mapSource" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap · atualização em tempo real</a><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto no mapa{unlocatedMapIncidents>0&&<><br/><span className="mapPendingLocation">⚠ {unlocatedMapIncidents} sem coordenadas — localização pendente</span></>}<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
-   <nav className="opsMobileNav" aria-label="Navegação principal no celular">
-    <Link href="/painel" className="active"><span>⌂</span><small>Início</small></Link>
-    <Link href="/ocorrencias"><span>▤</span><small>Ocorrências</small></Link>
-    <Link href="/campo"><span>⌑</span><small>Mapa</small></Link>
-    <Link href="/alertas"><span>⚠</span><small>Alertas</small></Link>
-    <button type="button" onClick={()=>setMobileMenuOpen(true)}><span>☰</span><small>Menu</small></button>
-   </nav>
    <footer className="opsFooter"><span>SIGDEC {SIGDEC_VERSION_LABEL} · Prefeitura da Cidade de Ubatuba - SP | Defesa Civil</span><b>Prevenir é preservar vidas.</b><span>Ubatuba mais segura, hoje e sempre.</span></footer>
   </section>
  </main>
