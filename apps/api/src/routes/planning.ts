@@ -19,7 +19,7 @@ export async function planningRoutes(app:FastifyInstance){
  (SELECT count(*) FROM trainings WHERE organization_id=$1)::int AS trainings,
  (SELECT count(*) FROM recovery_actions WHERE organization_id=$1 AND status<>'DONE')::int AS "recoveryActions",
  (SELECT count(*) FROM civil_defense_actions WHERE organization_id=$1)::int AS "civilDefenseActions",
- (SELECT count(*) FROM operational_support_requests WHERE organization_id=$1 AND status IN ('DRAFT','SUBMITTED','IN_ANALYSIS','APPROVED'))::int AS "openSupportRequests",
+ (SELECT count(*) FROM external_support_requests WHERE organization_id=$1 AND status NOT IN ('CLOSED','CANCELLED','REJECTED'))::int AS "openSupportRequests",
  (SELECT count(*) FROM sidec_exports WHERE organization_id=$1 AND status IN ('READY','EXPORTED','SUBMITTED'))::int AS "openSidecExports"`,[o]);return r.rows[0];});
  app.get("/api/v1/risks",{preHandler:requirePermission("risks.manage")},async req=>{const o=org(authFrom(req).organizationId),r=await db.query('SELECT id,code,title,category,probability,impact,status,mitigation,created_at AS "createdAt" FROM risk_registers WHERE organization_id=$1 ORDER BY probability*impact DESC,created_at DESC',[o]);return {items:r.rows};});
  app.post("/api/v1/risks",{preHandler:requirePermission("risks.manage")},async(req,reply)=>{const o=org(authFrom(req).organizationId),p=risk.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});const v=p.data,r=await db.query('INSERT INTO risk_registers(organization_id,code,title,category,probability,impact,mitigation) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[o,v.code,v.title,v.category,v.probability,v.impact,v.mitigation??null]);return reply.code(201).send(r.rows[0]);});
