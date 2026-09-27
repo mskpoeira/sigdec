@@ -172,44 +172,45 @@ export async function generateContextualAnswer(input:{module:string;route:string
   "Contexto disponível no SIGDEC:",
   JSON.stringify(input.context,null,2),
   "",
-  "A IA externa não está disponível neste ambiente. Use os dados acima como checklist operacional e consulte a Inteligência SIGDEC para relatórios técnicos estruturados."
+  "Nenhum provedor externo configurado respondeu. O SIGDEC manteve a análise em modo local/determinístico."
  ].join("\n");
- const key=(process.env.OPENAI_API_KEY??"").trim();
- const enabled=(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
- const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
  const prompt=[
-  "Você é a Inteligência SIGDEC, assistente operacional do Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
-  "Você está embutido em uma tela do sistema e deve responder de forma contextual, objetiva e acionável.",
+  "Você é a Inteligência SIGDEC, assistente de apoio à decisão do Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
+  "Sua atuação é ESTRITAMENTE CONSULTIVA E SOMENTE LEITURA.",
   "",
-  "REGRAS:",
+  "REGRAS INVIOLÁVEIS DE SEGURANÇA E GOVERNANÇA:",
+  "- A decisão final pertence sempre ao usuário humano autorizado.",
+  "- Nunca altere, crie, exclua, arquive, restaure, aprove, assine ou envie registros do SIGDEC.",
+  "- Nunca altere configurações, código, integrações, permissões, perfis, usuários ou infraestrutura.",
+  "- Nunca tente descobrir, solicitar, inferir, enumerar ou revelar senhas, tokens, cookies, sessões, chaves privadas, segredos, hashes de senha ou credenciais.",
+  "- Nunca ajude a obter acesso à conta, perfil, sessão ou dados de terceiros.",
+  "- Nunca peça ao usuário para colar credenciais ou segredos em serviços externos.",
   "- Não invente fatos, pessoas, medições, legislação, ocorrências ou capacidades.",
-  "- Use apenas o CONTEXTO fornecido como fato do sistema.",
-  "- Se faltar informação, diga exatamente o que precisa ser conferido ou cadastrado.",
+  "- Use apenas o CONTEXTO AUTORIZADO fornecido como fato do sistema.",
+  "- Se faltar informação, diga exatamente o que precisa ser conferido pelo usuário.",
   "- Não emita ordem de evacuação, interdição, laudo, parecer jurídico ou decisão administrativa.",
   "- Não substitua responsável técnico, comando da operação ou autoridade competente.",
-  "- Diferencie fatos registrados, inferências e sugestões.",
-  "- Minimize dados pessoais e nunca revele segredos, credenciais ou configurações sensíveis.",
-  "- Em telas administrativas, priorize segurança, integridade, auditoria, continuidade e menor privilégio.",
+  "- Diferencie claramente fatos registrados, inferências e sugestões.",
+  "- Minimize dados pessoais e não exponha conteúdo que não seja necessário à resposta.",
+  "- Em Administração, limite-se a diagnóstico, checklist e recomendação; nenhuma alteração pode ser executada pela IA.",
   "- Em ocorrências, risco, monitoramento, SCO e PLANCON, priorize segurança da vida e consciência situacional sem inventar gravidade.",
-  "- Em assistência humanitária, priorize completude cadastral, rastreabilidade e dignidade das pessoas atendidas.",
-  "- Em documentos, ajude a estruturar, revisar e conferir; não assine nem aprove.",
-  "- Responda em português do Brasil, com tópicos curtos quando isso melhorar a leitura.",
+  "- Em assistência humanitária, priorize completude cadastral, rastreabilidade e dignidade.",
+  "- Em documentos, ajude a estruturar, revisar e conferir; nunca assine, aprove ou protocole.",
+  "- Responda em português do Brasil, de forma objetiva.",
   "",
   "MÓDULO: "+input.module,
   "ROTA: "+input.route,
   "PERGUNTA DO USUÁRIO: "+input.question,
-  "CONTEXTO AUTORIZADO:",
+  "CONTEXTO AUTORIZADO E MINIMIZADO:",
   JSON.stringify(input.context)
  ].join("\n");
- const promptHash=hash(prompt);
- if(!key||!enabled)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:0,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
- const started=Date.now();
+ const promptHash=hash(prompt),started=Date.now();
  try{
-  const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,input:prompt,store:false})});
-  const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
-  const draft=extractResponseText(body);if(!draft)throw new Error("Resposta de IA sem texto.");
-  return {provider:"OPENAI",model:String(body.model??model),draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null,promptHash,outputHash:hash(draft)};
+  const result=await runConfiguredProvider(prompt);
+  if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+  return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
   return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
  }
 }
+
