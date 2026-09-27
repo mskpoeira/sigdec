@@ -394,8 +394,8 @@ export async function riskManagementRoutes(app:FastifyInstance){
  });
  app.patch("/api/v1/damage-assessments/:id/validate",{preHandler:requirePermission("damages.manage")},async(request,reply)=>{
   const a=authFrom(request),o=org(request),{id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
-  const r=await db.query("UPDATE damage_assessments SET status='VALIDATED',validated_by=$3,updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING id,status",[id,o,a.userId]);
-  if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
+  const r=await db.query("UPDATE damage_assessments SET status='VALIDATED',validated_by=$3,updated_at=now() WHERE id=$1 AND organization_id=$2 AND status='DRAFT' RETURNING id,status",[id,o,a.userId]);
+  if(!r.rows[0]){const exists=await db.query("SELECT 1 FROM damage_assessments WHERE id=$1 AND organization_id=$2",[id,o]);return exists.rows[0]?reply.code(409).send({error:"ALREADY_VALIDATED"}):reply.code(404).send({error:"NOT_FOUND"});}return r.rows[0];
  });
 
  app.get("/api/v1/critical-infrastructures",{preHandler:requirePermission("infrastructure.read")},async request=>{
@@ -440,9 +440,15 @@ export async function riskManagementRoutes(app:FastifyInstance){
  });
  app.patch("/api/v1/animal-rescues/:id/status",{preHandler:requirePermission("animals.manage")},async(request,reply)=>{
   const o=org(request),{id}=request.params as {id:string},p=animalStatus.safeParse(request.body);if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
-  const r=await db.query(`UPDATE animal_rescues SET status=$3,destination=COALESCE($4,destination),returned_at=CASE WHEN $3='RETURNED' THEN now() ELSE returned_at END,updated_at=now()
+  const current=await db.query("SELECT status FROM animal_rescues WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!current.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const transitions:Record<string,string[]>={RESCUED:["SHELTERED","VETERINARY","RETURNED","TRANSFERRED","DECEASED"],SHELTERED:["VETERINARY","RETURNED","TRANSFERRED","DECEASED"],VETERINARY:["SHELTERED","RETURNED","TRANSFERRED","DECEASED"],RETURNED:[],TRANSFERRED:[],DECEASED:[]};
+  if(current.rows[0].status!==p.data.status&&!(transitions[current.rows[0].status]??[]).includes(p.data.status)){
+   return reply.code(409).send({error:"INVALID_TRANSITION",message:`Transição de resgate animal ${current.rows[0].status} → ${p.data.status} não permitida.`});
+  }
+  const r=await db.query(`UPDATE animal_rescues SET status=$3,destination=COALESCE($4,destination),returned_at=CASE WHEN $3='RETURNED' THEN COALESCE(returned_at,now()) ELSE returned_at END,updated_at=now()
    WHERE id=$1 AND organization_id=$2 RETURNING id,status,returned_at AS "returnedAt"`,[id,o,p.data.status,p.data.destination??null]);
-  if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
+  return r.rows[0];
  });
 
  app.get("/api/v1/disaster-costs",{preHandler:requirePermission("damages.read")},async request=>{
@@ -473,8 +479,14 @@ export async function riskManagementRoutes(app:FastifyInstance){
  });
  app.patch("/api/v1/incident-lessons/:id/status",{preHandler:requirePermission("damages.manage")},async(request,reply)=>{
   const o=org(request),{id}=request.params as {id:string},p=lessonStatus.safeParse(request.body);if(!uuid.safeParse(id).success||!p.success)return reply.code(400).send({error:"INVALID_INPUT"});
+  const current=await db.query("SELECT status FROM incident_lessons WHERE id=$1 AND organization_id=$2",[id,o]);
+  if(!current.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const transitions:Record<string,string[]>={OPEN:["IN_PROGRESS"],IN_PROGRESS:["VERIFIED"],VERIFIED:["CLOSED","IN_PROGRESS"],CLOSED:[]};
+  if(current.rows[0].status!==p.data.status&&!(transitions[current.rows[0].status]??[]).includes(p.data.status)){
+   return reply.code(409).send({error:"INVALID_TRANSITION",message:`Transição de lição aprendida ${current.rows[0].status} → ${p.data.status} não permitida.`});
+  }
   const r=await db.query("UPDATE incident_lessons SET status=$3,effectiveness_notes=$4,updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING id,status",[id,o,p.data.status,p.data.effectivenessNotes||null]);
-  if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
+  return r.rows[0];
  });
 
  app.get("/api/v1/resource-readiness",{preHandler:requirePermission("infrastructure.read")},async request=>{
