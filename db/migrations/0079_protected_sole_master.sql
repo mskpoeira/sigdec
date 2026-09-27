@@ -43,8 +43,9 @@ BEGIN
       RAISE EXCEPTION 'PROTECTED_MASTER_CANNOT_BE_DEACTIVATED_OR_RENAMED';
     END IF;
   END IF;
-  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
-END $$;
+  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END $;
 
 DROP TRIGGER IF EXISTS trg_sigdec_guard_protected_master_user ON users;
 CREATE TRIGGER trg_sigdec_guard_protected_master_user
@@ -72,10 +73,30 @@ BEGIN
       RAISE EXCEPTION 'MASTER_RESERVED_FOR_915789';
     END IF;
   END IF;
-  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
-END $$;
+  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END $;
 
 DROP TRIGGER IF EXISTS trg_sigdec_guard_master_role_assignment ON user_roles;
 CREATE TRIGGER trg_sigdec_guard_master_role_assignment
 BEFORE INSERT OR UPDATE OR DELETE ON user_roles
 FOR EACH ROW EXECUTE FUNCTION sigdec_guard_master_role_assignment();
+
+
+-- Permissões funcionais criadas futuramente também chegam ao Administrador,
+-- exceto a permissão interna e exclusiva do Master.
+CREATE OR REPLACE FUNCTION sigdec_grant_new_permission_to_administrator()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.code<>'system.master' THEN
+    INSERT INTO role_permissions(role_id,permission_id)
+    SELECT r.id,NEW.id FROM roles r WHERE r.code='ADMINISTRADOR'
+    ON CONFLICT DO NOTHING;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_sigdec_grant_new_permission_to_administrator ON permissions;
+CREATE TRIGGER trg_sigdec_grant_new_permission_to_administrator
+AFTER INSERT ON permissions
+FOR EACH ROW EXECUTE FUNCTION sigdec_grant_new_permission_to_administrator();
