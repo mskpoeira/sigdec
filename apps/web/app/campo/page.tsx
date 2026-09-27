@@ -4,6 +4,7 @@ import { formatDateTimeBR } from "../lib/datetime";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 const PENDING_LOCATION_KEY="sigdec.field.pending-location.v1";
@@ -215,15 +216,9 @@ export default function CampoPage() {
   }
 
   useEffect(() => {
-    const refresh=()=>void load().catch((error) => {
-      setMessage(error instanceof Error ? error.message : "Falha ao carregar.");
-    });
-    refresh();
-    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)refresh()},5000);
-    const onRealtime=()=>refresh();
-    window.addEventListener("sigdec:realtime-tick",onRealtime);
-    return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:realtime-tick",onRealtime)};
+    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Falha ao carregar."));
   }, []);
+  useRealtimeRefresh(()=>load().catch((error)=>setMessage(error instanceof Error ? error.message : "Falha ao carregar.")),true,250);
 
   useEffect(()=>{
     if(!monitorMode)return;
@@ -642,7 +637,7 @@ export default function CampoPage() {
                 </Link>)}
               </div>
               <small>
-                {monitorMode?`Tempo real · ${locatedIncidents.length} ocorrência(s) georreferenciada(s) · atualização a cada 5 s`:"Mapa © OpenStreetMap. Selecione um ponto ou ocorrência para centralizar."}
+                {monitorMode?`Tempo real · ${locatedIncidents.length} ocorrência(s) georreferenciada(s) · atualização em tempo real`:"Mapa © OpenStreetMap. Selecione um ponto ou ocorrência para centralizar."}
               </small>
             </>
           ) : (
