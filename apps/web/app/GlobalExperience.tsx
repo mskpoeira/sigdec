@@ -5,6 +5,7 @@ import {usePathname,useRouter} from "next/navigation";
 import {createPortal} from "react-dom";
 import {useEffect,useMemo,useRef,useState} from "react";
 import GlobalSidebar from "./GlobalSidebar";
+import GlobalModuleTabs from "./GlobalModuleTabs";
 import SigdecAiAssistant from "./SigdecAiAssistant";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -134,7 +135,7 @@ export default function GlobalExperience(){
 
  if(hidden)return null;
 
- const breadcrumb=header&&crumbs.length>0?createPortal(
+ const tabs=header?createPortal(<GlobalModuleTabs/>,header):null;\n\n const breadcrumb=header&&crumbs.length>0?createPortal(
   <nav className="contextBreadcrumb" aria-label="Navegação estrutural">
    {crumbs.map((item,index)=><span key={item.href}>
     {index>0&&<b aria-hidden="true">›</b>}
@@ -146,6 +147,7 @@ export default function GlobalExperience(){
  return <>
   <GlobalSidebar/>
   <SigdecAiAssistant/>
+  {tabs}
   {breadcrumb}
   <div className={`realtimeStatus ${realtimeTransport}`} title={lastRealtimeAt?`Última sincronização: ${lastRealtimeAt.toLocaleTimeString("pt-BR")}`:"Conectando..."}>
    <span aria-hidden="true">●</span><strong>{realtimeTransport==="sse"?"Tempo real":realtimeTransport==="polling"?"Atualização 5 s":realtimeTransport==="offline"?"Offline":"Conectando"}</strong>
