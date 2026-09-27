@@ -5,6 +5,7 @@ import { formatDateTimeBR } from "../../../lib/datetime";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent,useCallback,useEffect,useMemo,useState } from "react";
+import {useRealtimeRefresh} from "../../../lib/use-realtime-refresh";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
@@ -91,6 +92,7 @@ export default function SidecExportsPage(){
  },[incidentId,request]);
 
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,500);
 
  const failedRequired=useMemo(()=>readiness?.checks.filter(x=>x.required&&!x.ok)??[],[readiness]);
 
