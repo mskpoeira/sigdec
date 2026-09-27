@@ -4,11 +4,10 @@ import Link from "next/link";
 import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import { FormEvent,useCallback,useEffect,useState } from "react";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
-type Summary={activeRisks:number;openAlerts:number;openMonitoringEvents:number;s2idRecords:number;trainings:number;recoveryActions:number;civilDefenseActions:number;openSupportRequests:number;openSidecExports:number};
+type Summary={activeRisks:number;openAlerts:number;openMonitoringEvents:number;s2idRecords:number;trainings:number;recoveryActions:number;civilDefenseActions:number;openSidecExports:number};
 type Risk={id:string;code:string;title:string;category:string;probability:number;impact:number;status:string;mitigation?:string|null;createdAt?:string};
 type Alert={id:string;severity:"INFO"|"WATCH"|"WARNING"|"EMERGENCY";title:string;message:string;status:string;createdAt:string;createdByMatricula?:string|null;createdByName?:string|null;monitoringEventId?:string|null;stationCode?:string|null;stationName?:string|null};
 type CivilAction={id:string;incidentId?:string|null;protocol?:string|null;actionType:string;title:string;description?:string|null;startedAt:string;participantsCount:number;createdByName:string;createdByMatricula?:string|null};
-type SupportRequest={id:string;incidentId?:string|null;protocol?:string|null;requestType:string;status:string;destination?:string|null;justification:string;externalProtocol?:string|null;createdAt:string;createdByName:string;createdByMatricula?:string|null};
 type SidecPending={incidentId:string;protocol:string;summary:string;priority:string;typeCode?:string|null;cobradeCode?:string|null;pendingStatus:string;missing:string[];exportId?:string|null;revision?:number|null;exportStatus?:string|null;externalProtocol?:string|null;artifactSealed:boolean;dueAt?:string|null;severity?:string|null;overdue:boolean;updatedAt:string};
 type SidecDeadlinePolicy={pendingStatus:"PACKAGE_READY"|"AWAITING_PROTOCOL"|"AWAITING_RETURN"|"REJECTED";warningAfterHours:number;severity:"WATCH"|"WARNING"|"EMERGENCY";enabled:boolean};
 type SidecDeadlineAlert={id:string;incidentId:string;exportId:string;protocol:string;summary:string;revision:number;pendingStatus:string;severity:string;dueAt:string;detectedAt:string;acknowledgedAt?:string|null};
@@ -28,7 +27,6 @@ export default function GestaoPage(){
  useRealtimeRefresh(()=>{if(!busy)return load()},true);
  async function createRisk(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMessage("");const form=e.currentTarget,f=new FormData(form);try{await request("/api/v1/risks",{method:"POST",body:JSON.stringify({code:String(f.get("code")),title:String(f.get("title")),category:String(f.get("category")),probability:Number(f.get("probability")),impact:Number(f.get("impact")),mitigation:String(f.get("mitigation")||"")||undefined})});form.reset();setMessage("Risco registrado com sucesso.");await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha ao registrar risco.")}finally{setBusy(false)}}
  async function changeStatus(kind:"risks"|"alerts",id:string,status:string){setBusy(true);setMessage("");try{await request(`/api/v1/${kind}/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});setMessage("Situação atualizada com sucesso.");await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha ao atualizar situação.")}finally{setBusy(false)}}
- async function changeSupportStatus(id:string,status:string){setBusy(true);setMessage("");try{await request(`/api/v1/support-requests/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});setMessage("Solicitação operacional atualizada.");await load()}catch(e){setMessage(e instanceof Error?e.message:"Falha ao atualizar solicitação.")}finally{setBusy(false)}}
  async function acknowledgeSidecDeadline(id:string){
   setBusy(true);setMessage("");
   try{await request(`/api/v1/sidec/deadline-alerts/${id}/ack`,{method:"PATCH",body:"{}"});setMessage("Alerta de prazo SIDEC reconhecido.");await load()}
