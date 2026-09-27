@@ -1415,3 +1415,126 @@ tbody tr:hover{background:#f7fafc!important}
  .moduleShell>.listHeader:first-child>div:first-child,
  .moduleShell>.panelHeader:first-child>div:first-child{max-width:calc(100% - 80px)!important}
 }
+
+
+/* v1.79.2 — cabeçalho global travado e sem atalhos duplicados */
+.moduleShell>.listHeader:first-child,
+.moduleShell>.panelHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+ position:relative!important;
+ box-sizing:border-box!important;
+ height:280px!important;
+ min-height:280px!important;
+ max-height:280px!important;
+ padding:24px 126px 78px 24px!important;
+ display:flex!important;
+ flex-wrap:nowrap!important;
+ align-items:flex-start!important;
+ align-content:flex-start!important;
+ overflow:hidden!important;
+}
+
+/* Atalhos antigos em formato de caixas não pertencem mais ao cabeçalho.
+   A navegação fica somente na lateral e nas novas abas internas. */
+.moduleShell>.listHeader:first-child>.headerActions,
+.moduleShell>.panelHeader:first-child>.headerActions,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>.headerActions,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>.headerActions{
+ display:none!important;
+}
+
+/* Remove assinatura decorativa que competia com título e abas. */
+.moduleShell>.listHeader:first-child::after,
+.moduleShell>.panelHeader:first-child::after,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::after,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::after{
+ content:none!important;
+ display:none!important;
+}
+
+.moduleShell>.listHeader:first-child>div:first-child,
+.moduleShell>.panelHeader:first-child>div:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>div:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>div:first-child{
+ width:100%!important;
+ max-width:100%!important;
+ min-width:0!important;
+}
+
+.moduleShell>.listHeader:first-child h1,
+.moduleShell>.panelHeader:first-child h1,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child h1,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child h1{
+ max-width:100%!important;
+ margin-bottom:8px!important;
+}
+
+.moduleShell>.listHeader:first-child p,
+.moduleShell>.panelHeader:first-child p,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child p,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child p{
+ display:-webkit-box!important;
+ -webkit-box-orient:vertical!important;
+ -webkit-line-clamp:3!important;
+ overflow:hidden!important;
+}
+
+/* As novas abas ficam ancoradas na base do cabeçalho, sem alterar sua altura. */
+.moduleShell>.listHeader:first-child>.globalModuleTabs,
+.moduleShell>.panelHeader:first-child>.globalModuleTabs,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>.globalModuleTabs,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>.globalModuleTabs{
+ position:absolute!important;
+ left:24px!important;
+ right:24px!important;
+ bottom:0!important;
+ width:auto!important;
+ margin:0!important;
+ padding-top:10px!important;
+ z-index:7!important;
+}
+
+@media(max-width:900px){
+ .moduleShell>.listHeader:first-child,
+ .moduleShell>.panelHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  height:310px!important;
+  min-height:310px!important;
+  max-height:310px!important;
+  padding:22px 92px 68px 20px!important;
+ }
+ .moduleShell>.listHeader:first-child>.globalModuleTabs,
+ .moduleShell>.panelHeader:first-child>.globalModuleTabs,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>.globalModuleTabs,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>.globalModuleTabs{
+  left:20px!important;
+  right:20px!important;
+ }
+}
+
+@media(max-width:640px){
+ .moduleShell>.listHeader:first-child,
+ .moduleShell>.panelHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  height:340px!important;
+  min-height:340px!important;
+  max-height:340px!important;
+  padding:18px 78px 64px 16px!important;
+ }
+ .moduleShell>.listHeader:first-child>.globalModuleTabs,
+ .moduleShell>.panelHeader:first-child>.globalModuleTabs,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child>.globalModuleTabs,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child>.globalModuleTabs{
+  left:16px!important;
+  right:10px!important;
+ }
+ .moduleShell>.listHeader:first-child p,
+ .moduleShell>.panelHeader:first-child p,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child p,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child p{
+  -webkit-line-clamp:4!important;
+ }
+}
