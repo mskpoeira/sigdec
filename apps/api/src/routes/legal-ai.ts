@@ -21,6 +21,7 @@ const generateInput=z.object({
  title:z.string().trim().min(3).max(500).optional(),additionalInstructions:z.string().trim().max(5000).optional().default("")
 });
 const reviewInput=z.object({status:z.enum(["IN_REVIEW","APPROVED","REJECTED","ARCHIVED"]),draftText:z.string().min(20).max(200000).optional(),reviewNotes:z.string().trim().max(8000).optional().default("")});
+const saveReviewedDraftInput=z.object({interactionId:z.string().uuid(),incidentId:z.string().uuid(),reportType:z.enum(["FIELD_INSPECTION","RISK_ASSESSMENT","EMERGENCY","DAMAGE","INTERDICTION","SITREP","GENERAL"]),title:z.string().trim().min(3).max(500),draftText:z.string().min(20).max(200000)});
 const contextualAssistInput=z.object({route:z.string().trim().min(1).max(500).regex(/^\//),question:z.string().trim().min(2).max(4000)});
 function contextualModule(route:string){
  if(route.startsWith("/ocorrencias"))return "Ocorrências";
@@ -190,9 +191,22 @@ export async function legalAiRoutes(app:FastifyInstance){
   const title=p.data.title||("Relatório técnico assistido — "+incident.protocol);
   const input={title,reportType:p.data.reportType,incident,territorial,geopixel,legal:legal.items,additionalInstructions:p.data.additionalInstructions};
   const result=await generateTechnicalDraft(input);
-  const report=await db.query("INSERT INTO technical_report_drafts(organization_id,incident_id,report_type,title,context_snapshot,legal_context,draft_text,ai_assisted,ai_provider,ai_model,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11) RETURNING id,status,created_at AS \"createdAt\"",[o,p.data.incidentId,p.data.reportType,title,JSON.stringify({incident,territorial,geopixel,topics:legal.topics}),JSON.stringify(legal.items),result.draft,result.provider==="OPENAI",result.provider,result.model,a.userId]);
-  await db.query("INSERT INTO ai_interactions(organization_id,actor_user_id,report_id,incident_id,purpose,provider,model,prompt_hash,input_snapshot,output_hash,latency_ms,input_tokens,output_tokens,result) VALUES($1,$2,$3,$4,'TECHNICAL_REPORT',$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13)",[o,a.userId,report.rows[0].id,p.data.incidentId,result.provider,result.model,result.promptHash,JSON.stringify({reportType:p.data.reportType,legalNormCount:legal.items.length,riskAreaCount:territorial.riskAreas.length,geoPixelFeatureCount:geopixel.features.length}),result.outputHash,result.latencyMs,result.inputTokens,result.outputTokens,result.result]);
-  return reply.code(201).send({...report.rows[0],draftText:result.draft,aiProvider:result.provider,aiModel:result.model,result:result.result});
+  const interaction=await db.query("INSERT INTO ai_interactions(organization_id,actor_user_id,incident_id,purpose,provider,model,prompt_hash,input_snapshot,output_hash,latency_ms,input_tokens,output_tokens,result) VALUES($1,$2,$3,'TECHNICAL_REPORT_PREVIEW',$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12) RETURNING id",[o,a.userId,p.data.incidentId,result.provider,result.model,result.promptHash,JSON.stringify({reportType:p.data.reportType,legalNormCount:legal.items.length,riskAreaCount:territorial.riskAreas.length,geoPixelFeatureCount:geopixel.features.length}),result.outputHash,result.latencyMs,result.inputTokens,result.outputTokens,result.result]);
+  return {interactionId:interaction.rows[0].id,incidentId:p.data.incidentId,reportType:p.data.reportType,title,draftText:result.draft,aiProvider:result.provider,aiModel:result.model,result:result.result,notice:"Prévia gerada em modo somente leitura. Nada foi alterado no SIGDEC. Revise e salve manualmente se desejar."};
+ });
+
+ app.post("/api/v1/ai/reports/save-reviewed",{preHandler:requirePermission("ai.report.generate")},async(request,reply)=>{
+  const a=authFrom(request),o=organizationId(request),p=saveReviewedDraftInput.safeParse(request.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const interaction=await db.query("SELECT id,incident_id AS \"incidentId\",provider,model,output_hash AS \"outputHash\",report_id AS \"reportId\" FROM ai_interactions WHERE id=$1 AND organization_id=$2 AND actor_user_id=$3 AND purpose='TECHNICAL_REPORT_PREVIEW'",[p.data.interactionId,o,a.userId]);
+  const ai=interaction.rows[0];if(!ai)return reply.code(404).send({error:"AI_PREVIEW_NOT_FOUND"});if(ai.reportId)return reply.code(409).send({error:"AI_PREVIEW_ALREADY_SAVED"});
+  if(String(ai.incidentId)!==p.data.incidentId)return reply.code(409).send({error:"INCIDENT_MISMATCH"});
+  const incident=await loadIncident(o,p.data.incidentId);if(!incident)return reply.code(404).send({error:"INCIDENT_NOT_FOUND"});
+  const [legal,territorial,geopixel]=await Promise.all([legalContext(o,incident),territorialContext(o,incident),geoPixelContext(o,incident)]);
+  const saved=await db.query("INSERT INTO technical_report_drafts(organization_id,incident_id,report_type,title,context_snapshot,legal_context,draft_text,ai_assisted,ai_provider,ai_model,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,true,$8,$9,$10) RETURNING id,status,created_at AS \"createdAt\"",[o,p.data.incidentId,p.data.reportType,p.data.title,JSON.stringify({incident,territorial,geopixel,topics:legal.topics}),JSON.stringify(legal.items),p.data.draftText,ai.provider,ai.model,a.userId]);
+  const decision=sha(p.data.draftText)===ai.outputHash?"ACCEPTED":"CORRECTED";
+  await db.query("UPDATE ai_interactions SET report_id=$2,human_decision=$3,human_decision_at=now() WHERE id=$1",[p.data.interactionId,saved.rows[0].id,decision]);
+  await db.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,metadata) VALUES($1,'AI_DRAFT_HUMAN_SAVED','technical_report',$2,$3,$4,$5::jsonb)",[a.userId,saved.rows[0].id,request.ip,request.headers["user-agent"]??null,JSON.stringify({interactionId:p.data.interactionId,humanDecision:decision})]);
+  return reply.code(201).send({...saved.rows[0],humanDecision:decision});
  });
 
  app.patch("/api/v1/ai/reports/:id/review",{preHandler:requirePermission("ai.report.review")},async(request,reply)=>{
