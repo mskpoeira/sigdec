@@ -4,7 +4,7 @@ import { formatDateTimeBR } from "../../lib/datetime";
 import Link from "next/link";
 import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useState} from "react";
-import {PhoneListEditor,type ContactPhone} from "../../lib/phone-list-editor";
+import {PhoneListEditor,type ContactPhone,type PhonePersonMatch} from "../../lib/phone-list-editor";
 import {EmailListEditor,type ContactEmail} from "../../lib/email-list-editor";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -51,6 +51,10 @@ export default function UsersAdministrationPage(){
  useEffect(()=>{void load()},[load]);
  useRealtimeRefresh(()=>{if(!busy&&!userId)return load()},true,10000);
  async function perform(fn:()=>Promise<void>){setBusy(true);setMessage("");try{await fn();await load()}catch(error){setMessage(error instanceof Error?error.message:"Falha na operação.")}finally{setBusy(false)}}
+ function applyUserPhonePerson(p:PhonePersonMatch){
+  setUserDraft(v=>({...v,displayName:p.fullName||v.displayName,email:p.email??v.email,contacts:p.email&&!v.contacts.some(x=>x.kind==="EMAIL"&&x.value.toLowerCase()===p.email!.toLowerCase())?[...v.contacts,{kind:"EMAIL" as const,value:p.email,isWhatsapp:false as const,isPrimary:!v.contacts.some(x=>x.kind==="EMAIL")}]:v.contacts}));
+  setMessage(`Dados de ${p.fullName} preenchidos. Revise matrícula, perfis e demais campos antes de salvar.`);
+ }
  async function saveUser(e:FormEvent){e.preventDefault();await perform(async()=>{
   const result=await request(userId?`/api/v1/admin/users/${userId}`:"/api/v1/admin/users",{method:userId?"PUT":"POST",body:JSON.stringify(userDraft)});
   if(result.temporaryPassword)setTemporary(`Matrícula ${userDraft.matricula}: ${result.temporaryPassword}`);
@@ -85,6 +89,7 @@ export default function UsersAdministrationPage(){
    <div className="formGrid"><label>Matrícula<input required value={userDraft.matricula} onChange={e=>setUserDraft(v=>({...v,matricula:e.target.value}))}/></label><label>Nome completo<input required value={userDraft.displayName} onChange={e=>setUserDraft(v=>({...v,displayName:e.target.value}))}/></label>
    <label>Nome de guerra<input maxLength={80} value={userDraft.warName} onChange={e=>setUserDraft(v=>({...v,warName:e.target.value}))} placeholder="Ex.: Thiago"/></label>
    <label>Cargo<input value={userDraft.jobTitle} onChange={e=>setUserDraft(v=>({...v,jobTitle:e.target.value}))}/></label><label>Setor<input value={userDraft.department} onChange={e=>setUserDraft(v=>({...v,department:e.target.value}))}/></label></div>
+   <div className="formGrid"><PhoneListEditor value={userDraft.contacts.filter((x):x is ContactPhone=>x.kind==="PHONE")} onChange={phones=>setUserDraft(v=>({...v,contacts:[...phones,...v.contacts.filter((x):x is ContactEmail=>x.kind==="EMAIL")]}))} onPersonSelected={applyUserPhonePerson} excludeOwnerId={userId}/><EmailListEditor value={userDraft.contacts.filter((x):x is ContactEmail=>x.kind==="EMAIL")} onChange={emails=>setUserDraft(v=>({...v,contacts:[...v.contacts.filter((x):x is ContactPhone=>x.kind==="PHONE"),...emails]}))}/></div>
    <fieldset><legend>Perfis de acesso</legend><div className="adminChoices">{roles.map(r=><label key={r.id}><input type="checkbox" checked={userDraft.roleIds.includes(r.id)} onChange={e=>setUserDraft(v=>({...v,roleIds:e.target.checked?[...v.roleIds,r.id]:v.roleIds.filter(x=>x!==r.id)}))}/>{r.name} <small>({r.code})</small></label>)}</div></fieldset>
    <label className="checkLabel"><input type="checkbox" checked={userDraft.active} onChange={e=>setUserDraft(v=>({...v,active:e.target.checked}))}/>Ativo</label>
    <div className="headerActions"><button className="primaryButton" disabled={busy||userDraft.roleIds.length===0}>{userId?"Salvar alterações":"Cadastrar usuário"}</button>{userId&&<button type="button" className="secondaryLink" onClick={()=>{setUserId(null);setUserDraft(blankUser)}}>Cancelar</button>}</div></form>
