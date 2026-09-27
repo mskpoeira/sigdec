@@ -28,7 +28,7 @@ const nav: Array<[string,string,Route,string?]> =[
 ];
 const quick: Array<[string,string,Route,string,string?]> =[["🚨","Registrar Ocorrência","/ocorrencias/nova","red","incidents"],["♟","Cadastrar Família","/assistencia#familias" as Route,"blue","humanitarian"],["⌂","Cadastrar Abrigo","/assistencia#abrigos" as Route,"green","humanitarian"],["◇","Registrar Entrega","/assistencia#entregas" as Route,"orange","humanitarian"],["▦","Operação PLANCON","/planejamento/operacao","purple"],["△","Gestão do Risco","/gestao-riscos","green","risks"],["✦","Inteligência SIGDEC","/inteligencia","navy"],["◆","Apoios Estado/União","/apoios","blue"],["▥","Centro de Gestão","/gestao","gray"],["▶","Apresentar SIGDEC","/apresentacao","navy"]];
 type DashboardIncident={id:string;summary:string;neighborhood:string|null;status:string;priority:string};
-type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;neighborhood:string|null;latitude:number|null;longitude:number|null};
+type MapIncident={id:string;protocol:string;status:string;priority:string;summary:string;addressLine:string|null;neighborhood:string|null;latitude:number|null;longitude:number|null};
 type DashboardSummary={activeIncidents:number;incidents24h:number;activeHouseholds:number;stockBalance:number;activeVolunteers:number;upcomingTrainings:number};
 type Feature={code:string;enabled:boolean};
 type CustomNavigation={id:string;label:string;path:string;sortOrder:number};
@@ -48,7 +48,7 @@ export default function PainelPage(){
   fetch(`${API_URL}/api/v1/field/map`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(b=>{
     if(!b)return;
     const normalized=(b.incidents??[]).map((x:MapIncident)=>({...x,latitude:parseCoordinate(x.latitude),longitude:parseCoordinate(x.longitude)}));
-    setMapIncidents(normalized.filter((x:MapIncident)=>x.latitude!==null&&x.longitude!==null));
+    setMapIncidents(normalized);
   }).catch(()=>{});
  },[]);
  useEffect(()=>{
@@ -70,6 +70,7 @@ export default function PainelPage(){
  const featureOn=(code?:string)=>!code||features[code]!==false;
  const builtInNavPaths=new Set(nav.map(([, ,href])=>String(href)));
  const locatedMapIncidents=mapIncidents.filter(x=>x.latitude!==null&&x.longitude!==null);
+ const unlocatedMapIncidents=mapIncidents.length-locatedMapIncidents.length;
  const situationMapUrl="https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
  const pinPosition=(x:MapIncident)=>{const lat=Number(x.latitude),lon=Number(x.longitude);const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));return {left:`${left}%`,top:`${top}%`}};
@@ -94,7 +95,7 @@ export default function PainelPage(){
     <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
      <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {ptBR(x.priority)}</small></div><span>{ptBR(x.status)}</span></Link>)}</section>
-     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">OpenStreetMap · atualização em tempo real</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto georreferenciada(s)<br/>🔴 Ocorrência em aberto</div></div></section>
+     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">© OpenStreetMap · atualização em tempo real</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto no mapa{unlocatedMapIncidents>0&&<><br/><span className="mapPendingLocation">⚠ {unlocatedMapIncidents} sem coordenadas — localização pendente</span></>}<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
    <nav className="opsMobileNav" aria-label="Navegação principal no celular">
