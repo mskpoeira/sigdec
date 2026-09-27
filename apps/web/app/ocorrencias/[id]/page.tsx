@@ -86,6 +86,14 @@ type IncidentAttachment={
   createdAt:string;uploadedByName:string;uploadedByMatricula:string;
 };
 
+type RiskContext = {
+  georeferenced:boolean;
+  riskAreas:Array<{id:string;code:string;name:string;riskLevel:string;hazardType:string;status:string;exposedPeople:number;exposedBuildings:number;distanceMeters:number}>;
+  warningAssets:Array<{id:string;code:string;name:string;assetType:string;status:string;batteryPercent:number|null;distanceMeters:number}>;
+  criticalInfrastructures:Array<{id:string;code:string;name:string;category:string;operationalStatus:string;criticality:string;backupPower:boolean;autonomyHours:number|null;distanceMeters:number}>;
+  shelters:Array<{id:string;name:string;status:string;capacityPeople:number;currentPeople:number;accessible:boolean;generatorAvailable:boolean;petAreaAvailable:boolean;distanceMeters:number}>;
+};
+
 type DetailResponse = {
   incident: Incident;
   timeline: TimelineItem[];
@@ -162,6 +170,7 @@ export default function OcorrenciaDetalhePage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [detail, setDetail] = useState<DetailResponse | null>(null);
+  const [riskContext,setRiskContext]=useState<RiskContext|null>(null);
   const [teams, setTeams] = useState<Resource[]>([]);
   const [vehicles, setVehicles] = useState<Resource[]>([]);
   const [incidentTypes, setIncidentTypes] = useState<IncidentTypeOption[]>([]);
@@ -201,11 +210,12 @@ export default function OcorrenciaDetalhePage() {
 
   const load = useCallback(async () => {
     try {
-      const [detailResponse, teamsResponse, vehiclesResponse, typesResponse] = await Promise.all([
+      const [detailResponse, teamsResponse, vehiclesResponse, typesResponse, riskContextResponse] = await Promise.all([
         fetch(`${API_URL}/api/v1/incidents/${id}`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/teams`, { credentials: "include" }),
         fetch(`${API_URL}/api/v1/vehicles`, { credentials: "include" }),
-        fetch(`${API_URL}/api/v1/incident-types`, { credentials: "include" })
+        fetch(`${API_URL}/api/v1/incident-types`, { credentials: "include" }),
+        fetch(`${API_URL}/api/v1/incidents/${id}/risk-context`, { credentials: "include", cache:"no-store" })
       ]);
 
       if (!(await handleAuth(detailResponse))) return;
@@ -227,6 +237,8 @@ export default function OcorrenciaDetalhePage() {
         const typesBody = await typesResponse.json();
         setIncidentTypes(typesBody.items ?? []);
       }
+      if(riskContextResponse.ok)setRiskContext(await riskContextResponse.json());
+      else setRiskContext(null);
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao carregar dados.");
