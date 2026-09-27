@@ -730,24 +730,34 @@ export async function incidentRoutes(app: FastifyInstance) {
       }
 
       const team = await client.query(
-        `SELECT id FROM teams
-          WHERE id = $1 AND organization_id = $2 AND active = true`,
+        `SELECT id,status FROM teams
+          WHERE id = $1 AND organization_id = $2 AND active = true
+          FOR UPDATE`,
         [parsed.data.teamId, organizationId]
       );
       if (!team.rows[0]) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ error: "INVALID_TEAM" });
       }
+      if (team.rows[0].status !== "AVAILABLE") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ error: "TEAM_UNAVAILABLE", message: "Equipe já está comprometida em outro atendimento." });
+      }
 
       if (parsed.data.vehicleId) {
         const vehicle = await client.query(
-          `SELECT id FROM vehicles
-            WHERE id = $1 AND organization_id = $2 AND active = true`,
+          `SELECT id,status FROM vehicles
+            WHERE id = $1 AND organization_id = $2 AND active = true
+            FOR UPDATE`,
           [parsed.data.vehicleId, organizationId]
         );
         if (!vehicle.rows[0]) {
           await client.query("ROLLBACK");
           return reply.code(400).send({ error: "INVALID_VEHICLE" });
+        }
+        if (vehicle.rows[0].status !== "AVAILABLE") {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: "VEHICLE_UNAVAILABLE", message: "Viatura já está comprometida em outro atendimento." });
         }
       }
 
@@ -872,15 +882,32 @@ export async function incidentRoutes(app: FastifyInstance) {
         nextStatus === "RELEASED" || nextStatus === "CANCELLED" ? "AVAILABLE" :
         "DISPATCHED";
 
-      await client.query("UPDATE teams SET status = $2 WHERE id = $1", [
-        dispatch.team_id,
-        resourceStatus
-      ]);
-      if (dispatch.vehicle_id) {
-        await client.query("UPDATE vehicles SET status = $2 WHERE id = $1", [
-          dispatch.vehicle_id,
-          resourceStatus
-        ]);
+      if (resourceStatus === "AVAILABLE") {
+        const otherTeamDispatch = await client.query(
+          `SELECT 1 FROM dispatches
+            WHERE team_id=$1 AND id<>$2 AND status NOT IN ('RELEASED','CANCELLED')
+            LIMIT 1`,
+          [dispatch.team_id, dispatch.id]
+        );
+        if (!otherTeamDispatch.rows[0]) {
+          await client.query("UPDATE teams SET status='AVAILABLE' WHERE id=$1", [dispatch.team_id]);
+        }
+        if (dispatch.vehicle_id) {
+          const otherVehicleDispatch = await client.query(
+            `SELECT 1 FROM dispatches
+              WHERE vehicle_id=$1 AND id<>$2 AND status NOT IN ('RELEASED','CANCELLED')
+              LIMIT 1`,
+            [dispatch.vehicle_id, dispatch.id]
+          );
+          if (!otherVehicleDispatch.rows[0]) {
+            await client.query("UPDATE vehicles SET status='AVAILABLE' WHERE id=$1", [dispatch.vehicle_id]);
+          }
+        }
+      } else {
+        await client.query("UPDATE teams SET status = $2 WHERE id = $1", [dispatch.team_id, resourceStatus]);
+        if (dispatch.vehicle_id) {
+          await client.query("UPDATE vehicles SET status = $2 WHERE id = $1", [dispatch.vehicle_id, resourceStatus]);
+        }
       }
 
       const incidentStatus =
