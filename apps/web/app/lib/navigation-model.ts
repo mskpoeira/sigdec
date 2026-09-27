@@ -5,8 +5,7 @@ export const sigdecDirectNav:SigdecNavItem[]=[
  {icon:"⌂",label:"Início",href:"/painel"},
  {icon:"⚠",label:"Ocorrências",href:"/ocorrencias",feature:"incidents"},
  {icon:"♥",label:"Assistência Humanitária",href:"/assistencia",feature:"humanitarian"},
- {icon:"☂",label:"Voluntariado",href:"/voluntarios",feature:"volunteers"},
- {icon:"☊",label:"Comunicações",href:"/comunicacoes",feature:"communications"}
+ {icon:"☂",label:"Voluntariado",href:"/voluntarios",feature:"volunteers"}
 ];
 
 export const sigdecNavGroups:SigdecNavGroup[]=[
@@ -25,6 +24,10 @@ export const sigdecNavGroups:SigdecNavGroup[]=[
   {icon:"△",label:"Gestão do Risco",href:"/gestao-riscos",feature:"risks"},
   {icon:"◉",label:"Monitoramento Ambiental",href:"/monitoramento",feature:"monitoring"},
   {icon:"◆",label:"Resiliência",href:"/resiliencia"}
+ ]},
+ {icon:"☊",label:"Comunicações",href:"/comunicacoes",items:[
+  {icon:"☊",label:"Rádio / Log Operacional",href:"/comunicacoes",feature:"communications"},
+  {icon:"✉",label:"E-mail institucional",href:"/comunicacoes/email",feature:"communications"}
  ]},
  {icon:"⚙",label:"Administração",href:"/administracao",items:[
   {icon:"⚙",label:"Visão geral",href:"/administracao",admin:true},
