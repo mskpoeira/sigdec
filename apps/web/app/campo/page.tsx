@@ -302,6 +302,13 @@ export default function CampoPage() {
     return[];
   };
   const geoJsonSvgPoints=(value:any)=>geoJsonLine(value).filter(([lon,lat])=>Number.isFinite(lon)&&Number.isFinite(lat)).map(([lon,lat])=>{const p=mapPercent(lat,lon);return p.x+","+p.y}).join(" ");
+  const geoJsonPoint=(value:any):[number,number]|null=>{
+    if(!value||typeof value!=="object")return null;
+    const geometry=value.type==="Feature"?value.geometry:value;
+    if(!geometry)return null;
+    if(geometry.type==="Point"&&Array.isArray(geometry.coordinates)&&geometry.coordinates.length>=2)return [Number(geometry.coordinates[0]),Number(geometry.coordinates[1])];
+    const line=geoJsonLine(geometry);return line.length?line[Math.floor(line.length/2)]??line[0]??null:null;
+  };
   const toggleLayer=(key:keyof typeof mapLayers)=>setMapLayers(current=>({...current,[key]:!current[key]}));
   const pinPosition=(item:FieldIncident)=>mapPosition(item.latitude,item.longitude);
   const mapUrl = useMemo(() => {
