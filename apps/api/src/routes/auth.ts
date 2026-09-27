@@ -15,6 +15,7 @@ import {
 import { db } from "../db.js";
 import { isMailConfigured, sendPasswordResetEmail } from "../mail.js";
 import { challengeHash, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, newChallengeToken, recoveryCode, recoveryCodeHash, verifyTotp } from "../lib/mfa.js";
+import {TRUSTED_MFA_COOKIE,clearTrustedMfaCookie,issueTrustedMfaDevice,listTrustedMfaDevices,revokeTrustedMfaDevice,revokeTrustedMfaDevices,validateTrustedMfaDevice} from "../lib/trusted-mfa.js";
 
 const loginSchema = z.object({
   matricula: z.string().min(1).max(32),
@@ -107,7 +108,7 @@ async function failMfaChallenge(id:string){
   WHERE id=$1`,[id]);
 }
 
-async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recoveryCodes?:string[]}){
+async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recoveryCodes?:string[];trustDevice?:boolean}){
  const access=await loadAccess(String(input.challenge.userId));
  const session=await createSession({
   userId:String(input.challenge.userId),organizationId:input.challenge.organizationId??null,
@@ -115,10 +116,20 @@ async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recov
   userAgent:input.request.headers["user-agent"],mfaVerified:true
  });
  setSessionCookie(input.reply,session.token,session.expiresAt);
+ let trustedDevice:null|{id:string;expiresAt:Date;label:string;days:number}=null;
+ if(input.trustDevice!==false){
+  trustedDevice=await issueTrustedMfaDevice({
+   userId:String(input.challenge.userId),reply:input.reply,ip:input.request.ip,
+   userAgent:input.request.headers["user-agent"]
+  });
+ }
  await audit({
   userId:String(input.challenge.userId),action:"auth.login_success",entityId:String(input.challenge.userId),
   ip:input.request.ip,userAgent:input.request.headers["user-agent"],
-  metadata:{sessionId:session.sessionId,mfa:true}
+  metadata:{
+   sessionId:session.sessionId,mfa:true,
+   trustedDevice:trustedDevice?{id:trustedDevice.id,label:trustedDevice.label,expiresAt:trustedDevice.expiresAt}:null
+  }
  });
  return {
   user:{
@@ -127,6 +138,7 @@ async function finalizeMfaLogin(input:{challenge:any;request:any;reply:any;recov
    roles:access.roles,permissions:access.permissions,mustChangePassword:Boolean(input.challenge.mustChangePassword),
    mfaRequired:true,mfaEnabled:true
   },
+  trustedDevice:trustedDevice?{enabled:true,label:trustedDevice.label,expiresAt:trustedDevice.expiresAt,days:trustedDevice.days}:{enabled:false},
   recoveryCodes:input.recoveryCodes
  };
 }
@@ -329,7 +341,15 @@ export async function authRoutes(app: FastifyInstance) {
             AND revoked_at IS NULL`,
         [resetToken.user_id]
       );
+      await client.query(
+        `UPDATE trusted_mfa_devices
+            SET revoked_at=now()
+          WHERE user_id=$1
+            AND revoked_at IS NULL`,
+        [resetToken.user_id]
+      );
       await client.query("COMMIT");
+      clearTrustedMfaCookie(reply);
 
       await audit({
         userId: resetToken.user_id,
@@ -456,18 +476,49 @@ export async function authRoutes(app: FastifyInstance) {
     const mfaRequired=user.mfa_required||user.mfa_enabled||strategic.rowCount===1;
     if(mfaRequired){
       if(!user.mfa_required)await db.query("UPDATE users SET mfa_required=true,updated_at=now() WHERE id=$1",[user.id]);
+
+      if(user.mfa_enabled){
+        const trustedToken=request.cookies[TRUSTED_MFA_COOKIE];
+        const trusted=await validateTrustedMfaDevice({
+          userId:user.id,token:trustedToken,ip:request.ip,userAgent:request.headers["user-agent"]
+        });
+        if(trusted){
+          const trustedSession=await createSession({
+            userId:user.id,organizationId:user.organization_id,roles:access.roles,permissions:access.permissions,
+            ip:request.ip,userAgent:request.headers["user-agent"],mfaVerified:true
+          });
+          setSessionCookie(reply,trustedSession.token,trustedSession.expiresAt);
+          await audit({
+            userId:user.id,action:"auth.login_success",entityId:user.id,ip:request.ip,
+            userAgent:request.headers["user-agent"],
+            metadata:{sessionId:trustedSession.sessionId,mfa:"trusted_device",trustedDeviceId:trusted.id}
+          });
+          return {
+            user:{
+              id:user.id,matricula:user.matricula,displayName:user.display_name,warName:user.war_name,
+              email:user.email,jobTitle:user.job_title,department:user.department,
+              roles:access.roles,permissions:access.permissions,mustChangePassword:user.must_change_password,
+              mfaRequired:true,mfaEnabled:true
+            },
+            trustedDevice:{used:true,label:trusted.label,expiresAt:trusted.expiresAt}
+          };
+        }
+        if(trustedToken)clearTrustedMfaCookie(reply);
+      }
+
       const challenge=await issueMfaChallenge({
         userId:user.id,purpose:user.mfa_enabled?"LOGIN":"SETUP",
         ip:request.ip,userAgent:request.headers["user-agent"]
       });
       await audit({
         userId:user.id,action:"auth.mfa_challenge_issued",entityId:user.id,ip:request.ip,
-        userAgent:request.headers["user-agent"],metadata:{purpose:user.mfa_enabled?"LOGIN":"SETUP"}
+        userAgent:request.headers["user-agent"],metadata:{purpose:user.mfa_enabled?"LOGIN":"SETUP",reason:user.mfa_enabled?"new_or_untrusted_device":"setup_required"}
       });
       return reply.code(202).send({
         mfa:{
           required:true,setupRequired:!user.mfa_enabled,
-          challengeToken:challenge.token,expiresAt:challenge.expiresAt
+          challengeToken:challenge.token,expiresAt:challenge.expiresAt,
+          reason:user.mfa_enabled?"NEW_DEVICE":"SETUP_REQUIRED"
         },
         user:{
           id:user.id,matricula:user.matricula,displayName:user.display_name,warName:user.war_name,
@@ -565,7 +616,7 @@ export async function authRoutes(app: FastifyInstance) {
       await client.query("COMMIT");
     }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
     await audit({userId:String(challenge.userId),action:"auth.mfa_enabled",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
-    return finalizeMfaLogin({challenge:{...challenge,mfaEnabled:true},request,reply,recoveryCodes:codes});
+    return finalizeMfaLogin({challenge:{...challenge,mfaEnabled:true},request,reply,recoveryCodes:codes,trustDevice:true});
   });
 
   app.post("/auth/mfa/verify", {
@@ -596,7 +647,7 @@ export async function authRoutes(app: FastifyInstance) {
       await client.query("COMMIT");
     }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
     await audit({userId:String(challenge.userId),action:recoveryId?"auth.mfa_recovery_used":"auth.mfa_verified",entityId:String(challenge.userId),ip:request.ip,userAgent:request.headers["user-agent"]});
-    return finalizeMfaLogin({challenge,request,reply});
+    return finalizeMfaLogin({challenge,request,reply,trustDevice:!recoveryId});
   });
 
   app.post("/auth/change-password", { preHandler: requireAuth }, async (request, reply) => {
@@ -649,6 +700,8 @@ export async function authRoutes(app: FastifyInstance) {
           AND revoked_at IS NULL`,
       [auth.userId, auth.sessionId]
     );
+    await revokeTrustedMfaDevices(auth.userId);
+    clearTrustedMfaCookie(reply);
 
     await audit({
       userId: auth.userId,
@@ -705,6 +758,35 @@ export async function authRoutes(app: FastifyInstance) {
         mfaEnabled: user.mfa_enabled
       }
     };
+  });
+
+  app.get("/auth/trusted-devices", { preHandler: requireAuth }, async (request) => {
+    const auth=authFrom(request);
+    return {items:await listTrustedMfaDevices(auth.userId)};
+  });
+
+  app.delete("/auth/trusted-devices/:id", { preHandler: requireAuth }, async (request,reply) => {
+    const auth=authFrom(request);
+    const {id}=request.params as {id:string};
+    const revoked=await revokeTrustedMfaDevice(auth.userId,id);
+    if(!revoked)return reply.code(404).send({error:"NOT_FOUND",message:"Dispositivo confiável não encontrado."});
+    clearTrustedMfaCookie(reply);
+    await audit({
+      userId:auth.userId,action:"auth.trusted_device_revoked",entityId:auth.userId,
+      ip:request.ip,userAgent:request.headers["user-agent"],metadata:{trustedDeviceId:id}
+    });
+    return {ok:true};
+  });
+
+  app.delete("/auth/trusted-devices", { preHandler: requireAuth }, async (request,reply) => {
+    const auth=authFrom(request);
+    const revoked=await revokeTrustedMfaDevices(auth.userId);
+    clearTrustedMfaCookie(reply);
+    await audit({
+      userId:auth.userId,action:"auth.trusted_devices_revoked",entityId:auth.userId,
+      ip:request.ip,userAgent:request.headers["user-agent"],metadata:{revoked}
+    });
+    return {ok:true,revoked};
   });
 
   app.post("/auth/logout", { preHandler: requireAuth }, async (request, reply) => {
