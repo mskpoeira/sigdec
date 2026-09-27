@@ -58,6 +58,7 @@ type CriticalInfrastructureLayer={id:string;code:string;name:string;category:str
 type ShelterLayer={id:string;name:string;status:string;neighborhood:string|null;capacityPeople:number;currentPeople:number;latitude:number;longitude:number;accessible:boolean;generatorAvailable:boolean;petAreaAvailable:boolean};
 type EvacuationRouteLayer={id:string;code:string;name:string;status:string;accessible:boolean;routeGeojson:any;originText:string|null;destinationText:string;riskAreaCode:string|null;riskAreaName:string|null};
 type ActiveWarningLayer={id:string;severity:string;title:string;message:string;instruction:string|null;status:string;channels:string[];publishedAt:string|null;riskAreaCode:string|null;riskAreaName:string|null;latitude:number|null;longitude:number|null};
+type GeoPixelFeatureLayer={id:string;remoteId:string;layerCode:string;layerTitle:string;category:string;properties:Record<string,any>;geometry:any};
 
 export default function CampoPage() {
   const [monitorMode,setMonitorMode]=useState(false);
@@ -72,7 +73,8 @@ export default function CampoPage() {
   const [shelterLayers,setShelterLayers]=useState<ShelterLayer[]>([]);
   const [evacuationRoutes,setEvacuationRoutes]=useState<EvacuationRouteLayer[]>([]);
   const [activeWarnings,setActiveWarnings]=useState<ActiveWarningLayer[]>([]);
-  const [mapLayers,setMapLayers]=useState({incidents:true,teams:true,monitoring:true,risks:true,warnings:true,infrastructure:true,shelters:true,routes:true});
+  const [geopixelFeatures,setGeopixelFeatures]=useState<GeoPixelFeatureLayer[]>([]);
+  const [mapLayers,setMapLayers]=useState({incidents:true,teams:true,monitoring:true,risks:true,warnings:true,infrastructure:true,shelters:true,routes:true,geopixel:true});
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [historyHours, setHistoryHours] = useState(24);
   const [historyPositions, setHistoryPositions] = useState<FieldPosition[]>([]);
@@ -200,6 +202,7 @@ export default function CampoPage() {
     setShelterLayers(body.shelters ?? []);
     setEvacuationRoutes(body.evacuationRoutes ?? []);
     setActiveWarnings(body.activeWarnings ?? []);
+    setGeopixelFeatures(body.geopixelFeatures ?? []);
     const pointResponse=await fetch(`${API_URL}/api/v1/field/map-points`,{credentials:"include"});
     if(pointResponse.ok){const pointBody=await pointResponse.json();setPoints(pointBody.items??[]);}
     const firstLocated = (body.incidents ?? []).find(
