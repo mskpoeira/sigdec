@@ -13,6 +13,54 @@ function extractResponseText(body:any){
  return parts.join("\n").trim();
 }
 
+type ProviderRun={provider:string;model:string;draft:string;inputTokens:number|null;outputTokens:number|null};
+const aiEnabled=()=>String(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
+const providerOrder=()=>String(process.env.SIGDEC_AI_PROVIDER_ORDER??"OPENAI,GEMINI,GROQ").split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
+
+export function getAiProviderStatus(){
+ return [
+  {code:"OPENAI",label:"OpenAI",configured:Boolean((process.env.OPENAI_API_KEY??"").trim()),model:(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim(),purpose:"Minutas técnicas e análise contextual"},
+  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-2.5-flash-lite").trim(),purpose:"Análise contextual e segunda leitura multimodal quando habilitada"},
+  {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Análise rápida, checklists e segunda opinião com modelos abertos"}
+ ];
+}
+
+async function callOpenAi(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.OPENAI_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
+ const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,input:prompt,store:false})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
+ const draft=extractResponseText(body);if(!draft)throw new Error("Resposta OpenAI sem texto.");
+ return {provider:"OPENAI",model:String(body.model??model),draft,inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null};
+}
+async function callGemini(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.GEMINI_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_GEMINI_MODEL??"gemini-2.5-flash-lite").trim();
+ const endpoint="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
+ const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{temperature:0.2}})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("Gemini HTTP "+response.status));
+ const draft=(body?.candidates?.[0]?.content?.parts??[]).map((p:any)=>typeof p?.text==="string"?p.text:"").join("\n").trim();
+ if(!draft)throw new Error("Resposta Gemini sem texto.");
+ return {provider:"GEMINI",model,draft,inputTokens:Number.isFinite(Number(body?.usageMetadata?.promptTokenCount))?Number(body.usageMetadata.promptTokenCount):null,outputTokens:Number.isFinite(Number(body?.usageMetadata?.candidatesTokenCount))?Number(body.usageMetadata.candidatesTokenCount):null};
+}
+async function callGroq(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.GROQ_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim();
+ const response=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,messages:[{role:"user",content:prompt}],temperature:0.2})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("Groq HTTP "+response.status));
+ const draft=String(body?.choices?.[0]?.message?.content??"").trim();if(!draft)throw new Error("Resposta Groq sem texto.");
+ return {provider:"GROQ",model:String(body?.model??model),draft,inputTokens:Number.isFinite(Number(body?.usage?.prompt_tokens))?Number(body.usage.prompt_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.completion_tokens))?Number(body.usage.completion_tokens):null};
+}
+async function runConfiguredProvider(prompt:string):Promise<ProviderRun|null>{
+ if(!aiEnabled())return null;
+ const runners:Record<string,(prompt:string)=>Promise<ProviderRun|null>>={OPENAI:callOpenAi,GEMINI:callGemini,GROQ:callGroq};
+ for(const code of providerOrder()){
+  const runner=runners[code];if(!runner)continue;
+  try{const result=await runner(prompt);if(result)return result}catch{}
+ }
+ return null;
+}
+
 function fallbackDraft(input:{title:string;reportType:string;incident:any;territorial:any;geopixel:any;legal:any[];additionalInstructions?:string}){
  const incident=input.incident??{},risk=input.territorial??{},features=input.geopixel?.features??[];
  const norms=input.legal.length?input.legal.map((n:any)=>"- "+n.jurisdiction+" · "+n.normType+" "+n.normNumber+"/"+(n.normYear??"s/ano")+" — "+n.title+". Fonte oficial: "+n.sourceUrl):["- Nenhuma norma correlata foi recuperada automaticamente. [VERIFICAR BASE LEGAL]"];
