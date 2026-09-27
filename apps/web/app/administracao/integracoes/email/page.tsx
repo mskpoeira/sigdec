@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import {useEffect,useState} from "react";
+import {useCallback,useEffect,useState} from "react";
+import {useRealtimeRefresh} from "../../../lib/use-realtime-refresh";
 import {SIGDEC_VERSION_LABEL} from "../../../lib/release";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -8,8 +9,9 @@ type Status={configured:boolean;smtp:{host:string;port:number;secure:boolean;use
 
 export default function InstitutionalMailAdminPage(){
  const[status,setStatus]=useState<Status|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
- async function load(){setMessage("");try{const r=await fetch(API+"/api/v1/institutional-mail/status",{credentials:"include",cache:"no-store"});if(r.status===401){location.href="/login";return}const b=await r.json();if(!r.ok)throw new Error(b.message??"Falha.");setStatus(b)}catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar configuração.")}}
- useEffect(()=>{void load()},[]);
+ const load=useCallback(async()=>{setMessage("");try{const r=await fetch(API+"/api/v1/institutional-mail/status",{credentials:"include",cache:"no-store"});if(r.status===401){location.href="/login";return}const b=await r.json();if(!r.ok)throw new Error(b.message??"Falha.");setStatus(b)}catch(e){setMessage(e instanceof Error?e.message:"Falha ao carregar configuração.")}},[]);
+ useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,15000);
  async function test(){setBusy(true);setMessage("");try{const r=await fetch(API+"/api/v1/institutional-mail/test",{method:"POST",credentials:"include"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??"Teste falhou.");setMessage("SMTP e IMAP validados com sucesso.")}catch(e){setMessage(e instanceof Error?e.message:"Falha no teste.")}finally{setBusy(false)}}
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">ADMINISTRAÇÃO · INTEGRAÇÕES · E-MAIL · {SIGDEC_VERSION_LABEL}</span><h1>E-mail institucional</h1><p>Integração segura do SIGDEC com o Webmail da Prefeitura por SMTP e IMAP TLS.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao/integracoes">Integrações</Link><Link className="secondaryLink" href="/comunicacoes/email">Abrir caixa no SIGDEC</Link></div></header>
