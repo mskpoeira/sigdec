@@ -8,6 +8,31 @@ import {groupForPath,navPathMatches,type SigdecNavItem} from "./lib/navigation-m
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type User={permissions:string[]};
 type Feature={code:string;enabled:boolean};
+type TabTone="red"|"blue"|"green"|"orange"|"purple"|"navy"|"gray";
+
+function tabTone(item:SigdecNavItem):TabTone{
+ const href=item.href;
+ if(href==="/administracao/usuarios")return "blue";
+ if(href==="/administracao/cadastros")return "green";
+ if(href==="/administracao/integracoes")return "purple";
+ if(href==="/administracao/auditoria")return "orange";
+ if(href==="/administracao/saude")return "green";
+ if(href==="/administracao/base-legal")return "gray";
+ if(href==="/administracao/apresentacao")return "navy";
+ if(href.startsWith("/administracao"))return "navy";
+ if(href.startsWith("/planejamento"))return "purple";
+ if(href.startsWith("/gestao-riscos"))return "green";
+ if(href.startsWith("/monitoramento"))return "blue";
+ if(href.startsWith("/resiliencia"))return "green";
+ if(href.startsWith("/inteligencia/provedores"))return "purple";
+ if(href.startsWith("/inteligencia"))return "navy";
+ if(href.startsWith("/documentos"))return "blue";
+ if(href.startsWith("/sco"))return "red";
+ if(href.startsWith("/gestao"))return "gray";
+ if(href.includes("/email"))return "orange";
+ if(href.startsWith("/comunicacoes"))return "blue";
+ return "navy";
+}
 
 export default function GlobalModuleTabs(){
  const pathname=usePathname(),group=groupForPath(pathname);
@@ -26,7 +51,7 @@ export default function GlobalModuleTabs(){
  return <nav className="globalModuleTabs" aria-label={"Abas de "+group.label}>
   <div className="globalModuleTabsTitle"><span aria-hidden="true">{group.icon}</span><strong>{group.label}</strong></div>
   <div className="globalModuleTabsScroll">
-   {items.map(item=><Link key={item.href} href={item.href} className={item.href===activeHref?"active":""}>
+   {items.map(item=><Link key={item.href} href={item.href} data-tone={tabTone(item)} className={item.href===activeHref?"active":""}>
     <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
    </Link>)}
   </div>
