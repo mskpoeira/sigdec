@@ -17,7 +17,7 @@ export type GeoPixelLayer={
  sourceType:"REST_GEOJSON"|"WFS"|"WMS_REFERENCE";remoteLayerName:string|null;resourcePath:string|null;
  category:string;direction:"IMPORT"|"EXPORT"|"BIDIRECTIONAL"|"REFERENCE";localTarget:string;
  attributeMap:Record<string,string>;requestParams:Record<string,string|number|boolean>;exportMethod:"POST"|"PUT"|"PATCH";
- remoteIdProperty:string;
+ remoteIdProperty:string;createdBy:string;
 };
 
 function allowPrivate(){return process.env.GEOPIXEL_ALLOW_PRIVATE_NETWORK==="true"}
@@ -81,7 +81,7 @@ export async function loadLayer(id:string,organizationId:string){
  const r=await db.query(`SELECT id,organization_id AS "organizationId",connection_id AS "connectionId",code,title,
    source_type AS "sourceType",remote_layer_name AS "remoteLayerName",resource_path AS "resourcePath",category,direction,
    local_target AS "localTarget",attribute_map AS "attributeMap",request_params AS "requestParams",
-   export_method AS "exportMethod",remote_id_property AS "remoteIdProperty"
+   export_method AS "exportMethod",remote_id_property AS "remoteIdProperty",created_by AS "createdBy"
    FROM geopixel_layers WHERE id=$1 AND organization_id=$2 AND active=true`,[id,organizationId]);
  return r.rows[0] as GeoPixelLayer|undefined;
 }
@@ -232,4 +232,25 @@ export async function syncGeoPixelLayer(layer:GeoPixelLayer,connection:GeoPixelC
 
 export function connectionBaseUrls(connection:GeoPixelConnection){
  return [connection.apiBaseUrl,connection.wfsUrl,connection.wmsUrl,connection.portalUrl].filter(Boolean) as string[];
+}
+
+
+export async function syncDueGeoPixelLayers(){
+ const due=await db.query<{id:string;organization_id:string}>(`SELECT l.id,l.organization_id
+  FROM geopixel_layers l
+  JOIN geopixel_connections c ON c.id=l.connection_id
+  WHERE l.active=true AND c.active=true
+    AND l.source_type<>'WMS_REFERENCE'
+    AND l.direction IN('IMPORT','BIDIRECTIONAL')
+    AND (l.last_sync_at IS NULL OR l.last_sync_at<=now()-(c.sync_interval_minutes::text||' minutes')::interval)
+  ORDER BY COALESCE(l.last_sync_at,to_timestamp(0)),l.created_at
+  LIMIT 20`);
+ const results:any[]=[];
+ for(const row of due.rows){
+  const layer=await loadLayer(row.id,row.organization_id);if(!layer)continue;
+  const connection=await loadConnection(layer.connectionId,row.organization_id);if(!connection)continue;
+  try{results.push({layerId:layer.id,...await syncGeoPixelLayer(layer,connection,layer.createdBy)})}
+  catch(error){results.push({layerId:layer.id,status:"FAILED",message:error instanceof Error?error.message:String(error)})}
+ }
+ return results;
 }
