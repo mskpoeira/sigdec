@@ -101,38 +101,26 @@ export async function responseRoutes(app:FastifyInstance){
   return {items:r.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
  });
  app.post("/api/v1/volunteers",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
-  const a=authFrom(req),o=org(a.organizationId),p=volunteerSchema.safeParse(req.body); if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
-  const v=p.data,r=await db.query(`INSERT INTO volunteers(
-   organization_id,full_name,phone,email,availability,shirt_size,pants_size,jacket_size,raincoat_size,vest_size,glove_size,shoe_size,
-   profession,education,institution,cnh_category,languages,radioamateur_call_sign,operation_region,skills,validated_skills,certifications,history,notes
-  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23::jsonb,$24) RETURNING id`,[
-   o,v.fullName,v.phone??null,v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,
-   v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,
-   v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,
-   JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null
-  ]);
-  return reply.code(201).send({id:r.rows[0]?.id});
+  const a=authFrom(req),o=org(a.organizationId),p=volunteerSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const v=p.data,primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
+  const client=await db.connect();try{await client.query("BEGIN");
+   const r=await client.query(`INSERT INTO volunteers(organization_id,full_name,phone,email,availability,shirt_size,pants_size,jacket_size,raincoat_size,vest_size,glove_size,shoe_size,profession,education,institution,cnh_category,languages,radioamateur_call_sign,operation_region,skills,validated_skills,certifications,history,notes)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23::jsonb,$24) RETURNING id`,[
+   o,v.fullName,primaryPhone?.value??v.phone??null,primaryEmail?.value??v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null]);
+   const id=r.rows[0]?.id;if(v.contacts.length)await syncVolunteerContacts(client,o,id,v.contacts);await client.query("COMMIT");return reply.code(201).send({id});
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
  });
  app.put("/api/v1/volunteers/:id",{preHandler:requirePermission("volunteers.manage")},async(req,reply)=>{
-  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=volunteerSchema.safeParse(req.body);
-  if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
-  const v=p.data;const before=await db.query("SELECT * FROM volunteers WHERE id=$1 AND organization_id=$2",[id,o]);
-  if(!before.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
-  const r=await db.query(`UPDATE volunteers SET full_name=$1,phone=$2,email=$3,availability=$4,shirt_size=$5,pants_size=$6,jacket_size=$7,
-   raincoat_size=$8,vest_size=$9,glove_size=$10,shoe_size=$11,profession=$12,education=$13,institution=$14,cnh_category=$15,
-   languages=$16,radioamateur_call_sign=$17,operation_region=$18,skills=$19,validated_skills=$20,certifications=$21::jsonb,
-   history=$22::jsonb,notes=$23,updated_at=now()
-   WHERE id=$24 AND organization_id=$25 RETURNING id`,[
-   v.fullName,v.phone??null,v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,
-   v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,
-   v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,
-   JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null,id,o
-  ]);
-  await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
-   VALUES($1,'VOLUNTEER_UPDATED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)`,[
-   a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(v)
-  ]);
-  return r.rows[0];
+  const a=authFrom(req),o=org(a.organizationId),{id}=req.params as {id:string},p=volunteerSchema.safeParse(req.body);if(!p.success)return reply.code(400).send({error:"INVALID_INPUT",details:p.error.flatten()});
+  const v=p.data,primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
+  const client=await db.connect();try{await client.query("BEGIN");
+   const before=await client.query("SELECT * FROM volunteers WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,o]);if(!before.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
+   const r=await client.query(`UPDATE volunteers SET full_name=$1,phone=$2,email=$3,availability=$4,shirt_size=$5,pants_size=$6,jacket_size=$7,raincoat_size=$8,vest_size=$9,glove_size=$10,shoe_size=$11,profession=$12,education=$13,institution=$14,cnh_category=$15,languages=$16,radioamateur_call_sign=$17,operation_region=$18,skills=$19,validated_skills=$20,certifications=$21::jsonb,history=$22::jsonb,notes=$23,updated_at=now() WHERE id=$24 AND organization_id=$25 RETURNING id`,[
+   v.fullName,primaryPhone?.value??v.phone??null,primaryEmail?.value??v.email??null,v.availability??null,v.shirtSize??null,v.pantsSize??null,v.jacketSize??null,v.raincoatSize??null,v.vestSize??null,v.gloveSize??null,v.shoeSize??null,v.profession??null,v.education??null,v.institution??null,v.cnhCategory??null,v.languages,v.radioamateurCallSign??null,v.operationRegion??null,v.skills,v.validatedSkills,JSON.stringify(v.certifications),JSON.stringify(v.history),v.notes??null,id,o]);
+   await syncVolunteerContacts(client,o,id,v.contacts);
+   await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'VOLUNTEER_UPDATED','volunteer',$2,$3,$4,$5::jsonb,$6::jsonb)`,[a.userId,id,req.ip,req.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(v)]);
+   await client.query("COMMIT");return r.rows[0];
+  }catch(error){await client.query("ROLLBACK");throw error}finally{client.release()}
  });
  app.get("/api/v1/monitoring/stations",{preHandler:requirePermission("monitoring.read")},async req=>{
   const o=org(authFrom(req).organizationId),r=await db.query(`SELECT id,code,name,station_type AS "stationType",provider,external_id AS "externalId",latitude,longitude,active FROM monitoring_stations WHERE organization_id=$1 ORDER BY name`,[o]); return {items:r.rows};
