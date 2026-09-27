@@ -33,6 +33,12 @@ export default function Page(){
  const selected=useMemo(()=>connections.find(x=>x.id===selectedConnection),[connections,selectedConnection]);
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">SIGDEC · GEOPIXEL · {SIGDEC_VERSION_LABEL}</span><h1>Integração GeoPixel</h1><p>Integração territorial corporativa: REST/GeoJSON, WFS, WMS, PostGIS, sincronização, espelhamento em módulos do SIGDEC e contexto geográfico de ocorrências.</p></div><div className="headerActions"><Link className="secondaryLink" href="/campo?monitor=1">Mapa multicamadas</Link><Link className="secondaryLink" href="/administracao">Administração</Link></div></header>
+  <nav className="sectionTabs" aria-label="Integrações específicas">
+   <Link href="/administracao/integracoes">⇄ Visão geral</Link>
+   <Link href="/administracao/integracoes/email">✉ E-mail institucional</Link>
+   <Link className="active" href="/administracao/geopixel">⌖ GeoPixel</Link>
+   <Link href="/administracao/sei">▤ SEI Cidades</Link>
+  </nav>
   {msg&&<section className={failed24h?"warningCard":"infoCard"}>{msg}</section>}
   <section className="statsGrid"><article><strong>{status.connections?.active??0}</strong><span>Conexões ativas</span></article><article><strong>{status.layers?.active??0}</strong><span>Camadas ativas</span></article><article><strong>{activeFeatures}</strong><span>Feições sincronizadas</span></article><article className={failed24h?"warningCard":""}><strong>{failed24h}</strong><span>Falhas de sync em 24h</span></article></section>
 

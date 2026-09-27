@@ -74,10 +74,10 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <section className="opsMain">
    <header className="opsHero">
-    <div className="opsMunicipal"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
+    <div className="opsMunicipal"><span className="opsBrandMark"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/></span><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
     <div className="opsTitle"><b>SIGDEC</b><strong>Sistema Integrado de Gestão<br/>de Defesa Civil</strong><span>UBATUBA - SP</span></div>
     <div className="opsScenery"><span>Ubatuba</span><small>Nossa gente. Nossa natureza.<br/>Mais segura sempre.</small></div>
-    <div className="dcBadge"><img className="dcOfficialLogo" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2019/02/logo_defesa_civil_edit-770x416.jpg" alt="Logo da Defesa Civil de Ubatuba"/></div>
+    <div className="dcBadge"><span className="opsBrandMark"><img className="dcOfficialLogo" src="/branding/defesa-civil-ubatuba.webp" alt="Logo da Defesa Civil de Ubatuba"/></span></div>
    </header>
    <div className="opsContent">
     <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.warName?.trim()||user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{formatDateBR(new Date())}<br/><small>Ubatuba - SP</small></div></div>

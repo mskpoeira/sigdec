@@ -5,6 +5,7 @@ import {usePathname,useRouter} from "next/navigation";
 import {createPortal} from "react-dom";
 import {useEffect,useMemo,useRef,useState} from "react";
 import GlobalSidebar from "./GlobalSidebar";
+import GlobalModuleTabs from "./GlobalModuleTabs";
 import SigdecAiAssistant from "./SigdecAiAssistant";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -16,12 +17,12 @@ type Result={
 const publicPrefixes=["/login","/esqueci-senha","/redefinir-senha","/alterar-senha","/integridade","/verificar-integridade","/offline"];
 const labels:Record<string,string>={
  painel:"Painel",ocorrencias:"Ocorrências",nova:"Nova ocorrência",extrato:"Extrato",sidec:"SIDEC",
- campo:"Riscos e Mapas",monitoramento:"Monitoramento",vistorias:"Vistorias",assistencia:"Assistência Humanitária",
+ campo:"Riscos e Mapas",monitoramento:"Monitoramento Ambiental",vistorias:"Vistorias",assistencia:"Assistência Humanitária",
  voluntarios:"Voluntariado",planejamento:"Planejamento e Contingência",operacao:"Operação PLANCON",gestao:"Centro de Gestão",
  sco:"SCO",comunicacoes:"Comunicações",resiliencia:"Resiliência",apoios:"Apoios Estado/União",capacitacao:"Capacitação",
  "ajuda-mutua":"Ajuda Mútua","operacoes-sazonais":"Operações Sazonais",simulados:"Simulados e AAR/IP",
  documentos:"Documentos",continuidade:"Continuidade",administracao:"Administração",usuarios:"Usuários",
- cadastros:"Cadastros Operacionais",auditoria:"Auditoria",saude:"Saúde do Sistema",apresentacao:"Apresentação"
+ cadastros:"Cadastros Operacionais",integracoes:"Integrações",email:"E-mail institucional",provedores:"Central de IA","gestao-riscos":"Gestão do Risco",auditoria:"Auditoria",saude:"Saúde do Sistema",apresentacao:"Apresentação"
 };
 const kindLabels:Record<string,string>={
  INCIDENT:"Ocorrência",HOUSEHOLD:"Família",SHELTER:"Abrigo",ITEM:"Item",VOLUNTEER:"Voluntário",TEAM:"Equipe",
@@ -134,6 +135,8 @@ export default function GlobalExperience(){
 
  if(hidden)return null;
 
+ const tabs=header?createPortal(<GlobalModuleTabs/>,header):null;
+
  const breadcrumb=header&&crumbs.length>0?createPortal(
   <nav className="contextBreadcrumb" aria-label="Navegação estrutural">
    {crumbs.map((item,index)=><span key={item.href}>
@@ -146,6 +149,7 @@ export default function GlobalExperience(){
  return <>
   <GlobalSidebar/>
   <SigdecAiAssistant/>
+  {tabs}
   {breadcrumb}
   <div className={`realtimeStatus ${realtimeTransport}`} title={lastRealtimeAt?`Última sincronização: ${lastRealtimeAt.toLocaleTimeString("pt-BR")}`:"Conectando..."}>
    <span aria-hidden="true">●</span><strong>{realtimeTransport==="sse"?"Tempo real":realtimeTransport==="polling"?"Atualização 5 s":realtimeTransport==="offline"?"Offline":"Conectando"}</strong>
@@ -174,8 +178,8 @@ export default function GlobalExperience(){
      <nav className="commandQuick" aria-label="Acessos rápidos">
       <button onClick={()=>go("/ocorrencias")}>⚠ Ocorrências</button>
       <button onClick={()=>go("/assistencia")}>♥ Assistência</button>
-      <button onClick={()=>go("/planejamento")}>▦ Planejamento</button>
-      <button onClick={()=>go("/resiliencia")}>◆ Resiliência</button>
+      <button onClick={()=>go("/planejamento")}>▦ PLANCON</button>
+      <button onClick={()=>go("/monitoramento")}>◉ Monitoramento</button>
       <button onClick={()=>go("/apresentacao")}>▶ Apresentar SIGDEC</button>
      </nav>
     </div>:loading?<div className="commandState"><span className="commandSpinner"/>Pesquisando em módulos autorizados...</div>

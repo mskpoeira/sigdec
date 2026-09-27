@@ -13,6 +13,71 @@ function extractResponseText(body:any){
  return parts.join("\n").trim();
 }
 
+type ProviderRun={provider:string;model:string;draft:string;inputTokens:number|null;outputTokens:number|null};
+type ProviderPurpose="CONTEXTUAL"|"TECHNICAL_REPORT";
+const aiEnabled=()=>String(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
+const providerOrder=(purpose:ProviderPurpose)=>{
+ const key=purpose==="TECHNICAL_REPORT"?"SIGDEC_AI_REPORT_PROVIDER_ORDER":"SIGDEC_AI_CONTEXT_PROVIDER_ORDER";
+ const fallback=purpose==="TECHNICAL_REPORT"?"OPENAI,GEMINI,OLLAMA,GROQ":"GROQ,GEMINI,OPENAI,OLLAMA";
+ return String(process.env[key]??process.env.SIGDEC_AI_PROVIDER_ORDER??fallback).split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
+};
+
+export function getAiProviderStatus(){
+ return [
+  {code:"OPENAI",label:"OpenAI",configured:Boolean((process.env.OPENAI_API_KEY??"").trim()),model:(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim(),purpose:"Minutas técnicas e análise contextual"},
+  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim(),purpose:"Análise contextual, comparação de alternativas e segunda leitura textual"},
+  {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Respostas rápidas, checklists e segunda opinião com modelo aberto"},
+  {code:"OLLAMA",label:"Ollama local",configured:Boolean((process.env.SIGDEC_OLLAMA_URL??"").trim()),model:(process.env.SIGDEC_OLLAMA_MODEL??"gpt-oss:20b").trim(),purpose:"Análise local para reduzir envio de contexto a provedores externos"}
+ ];
+}
+
+async function callOpenAi(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.OPENAI_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
+ const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,input:prompt,store:false})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
+ const draft=extractResponseText(body);if(!draft)throw new Error("Resposta OpenAI sem texto.");
+ return {provider:"OPENAI",model:String(body.model??model),draft,inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null};
+}
+async function callGemini(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.GEMINI_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim();
+ const endpoint="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
+ const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{temperature:0.2}})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("Gemini HTTP "+response.status));
+ const draft=(body?.candidates?.[0]?.content?.parts??[]).map((p:any)=>typeof p?.text==="string"?p.text:"").join("\n").trim();
+ if(!draft)throw new Error("Resposta Gemini sem texto.");
+ return {provider:"GEMINI",model,draft,inputTokens:Number.isFinite(Number(body?.usageMetadata?.promptTokenCount))?Number(body.usageMetadata.promptTokenCount):null,outputTokens:Number.isFinite(Number(body?.usageMetadata?.candidatesTokenCount))?Number(body.usageMetadata.candidatesTokenCount):null};
+}
+async function callGroq(prompt:string):Promise<ProviderRun|null>{
+ const key=(process.env.GROQ_API_KEY??"").trim();if(!key)return null;
+ const model=(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim();
+ const response=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,messages:[{role:"user",content:prompt}],temperature:0.2})});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("Groq HTTP "+response.status));
+ const draft=String(body?.choices?.[0]?.message?.content??"").trim();if(!draft)throw new Error("Resposta Groq sem texto.");
+ return {provider:"GROQ",model:String(body?.model??model),draft,inputTokens:Number.isFinite(Number(body?.usage?.prompt_tokens))?Number(body.usage.prompt_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.completion_tokens))?Number(body.usage.completion_tokens):null};
+}
+
+async function callOllama(prompt:string):Promise<ProviderRun|null>{
+ const base=(process.env.SIGDEC_OLLAMA_URL??"").trim();if(!base)return null;
+ const model=(process.env.SIGDEC_OLLAMA_MODEL??"gpt-oss:20b").trim();
+ let endpoint:URL;try{endpoint=new URL("/api/chat",base.endsWith("/")?base:base+"/")}catch{return null}
+ if(!["http:","https:"].includes(endpoint.protocol))return null;
+ const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model,messages:[{role:"user",content:prompt}],stream:false,options:{temperature:0.2}}),signal:AbortSignal.timeout(60000)});
+ const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error??("Ollama HTTP "+response.status));
+ const draft=String(body?.message?.content??"").trim();if(!draft)throw new Error("Resposta Ollama sem texto.");
+ return {provider:"OLLAMA",model:String(body?.model??model),draft,inputTokens:Number.isFinite(Number(body?.prompt_eval_count))?Number(body.prompt_eval_count):null,outputTokens:Number.isFinite(Number(body?.eval_count))?Number(body.eval_count):null};
+}
+async function runConfiguredProvider(prompt:string,purpose:ProviderPurpose):Promise<ProviderRun|null>{
+ if(!aiEnabled())return null;
+ const runners:Record<string,(prompt:string)=>Promise<ProviderRun|null>>={OPENAI:callOpenAi,GEMINI:callGemini,GROQ:callGroq,OLLAMA:callOllama};
+ for(const code of providerOrder(purpose)){
+  const runner=runners[code];if(!runner)continue;
+  try{const result=await runner(prompt);if(result)return result}catch{}
+ }
+ return null;
+}
+
 function fallbackDraft(input:{title:string;reportType:string;incident:any;territorial:any;geopixel:any;legal:any[];additionalInstructions?:string}){
  const incident=input.incident??{},risk=input.territorial??{},features=input.geopixel?.features??[];
  const norms=input.legal.length?input.legal.map((n:any)=>"- "+n.jurisdiction+" · "+n.normType+" "+n.normNumber+"/"+(n.normYear??"s/ano")+" — "+n.title+". Fonte oficial: "+n.sourceUrl):["- Nenhuma norma correlata foi recuperada automaticamente. [VERIFICAR BASE LEGAL]"];
@@ -63,9 +128,6 @@ function fallbackDraft(input:{title:string;reportType:string;incident:any;territ
 
 export async function generateTechnicalDraft(input:{title:string;reportType:string;incident:any;territorial:any;geopixel:any;legal:any[];additionalInstructions?:string}):Promise<AssistResult>{
  const fallback=fallbackDraft(input);
- const key=(process.env.OPENAI_API_KEY??"").trim();
- const enabled=(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
- const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
  const prompt=[
   "Você é o módulo assistivo do SIGDEC — Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
   "",
@@ -87,32 +149,15 @@ export async function generateTechnicalDraft(input:{title:string;reportType:stri
   "DADOS:",
   JSON.stringify(input)
  ].join("\n");
- const promptHash=hash(prompt);
- if(!key||!enabled){
-  return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:0,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
- }
- const started=Date.now();
+ const promptHash=hash(prompt),started=Date.now();
  try{
-  const response=await fetch("https://api.openai.com/v1/responses",{
-   method:"POST",
-   headers:{"authorization":"Bearer "+key,"content-type":"application/json"},
-   body:JSON.stringify({model,input:prompt,store:false})
-  });
-  const body=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
-  const draft=extractResponseText(body);
-  if(!draft)throw new Error("Resposta de IA sem texto.");
-  return {
-   provider:"OPENAI",model:String(body.model??model),draft,result:"SUCCEEDED",latencyMs:Date.now()-started,
-   inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,
-   outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null,
-   promptHash,outputHash:hash(draft)
-  };
+  const result=await runConfiguredProvider(prompt,"TECHNICAL_REPORT");
+  if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+  return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
   return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
  }
 }
-
 
 export async function generateContextualAnswer(input:{module:string;route:string;question:string;context:Record<string,unknown>}):Promise<AssistResult>{
  const fallback=[
@@ -124,44 +169,45 @@ export async function generateContextualAnswer(input:{module:string;route:string
   "Contexto disponível no SIGDEC:",
   JSON.stringify(input.context,null,2),
   "",
-  "A IA externa não está disponível neste ambiente. Use os dados acima como checklist operacional e consulte a Inteligência SIGDEC para relatórios técnicos estruturados."
+  "Nenhum provedor externo configurado respondeu. O SIGDEC manteve a análise em modo local/determinístico."
  ].join("\n");
- const key=(process.env.OPENAI_API_KEY??"").trim();
- const enabled=(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false";
- const model=(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim();
  const prompt=[
-  "Você é a Inteligência SIGDEC, assistente operacional do Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
-  "Você está embutido em uma tela do sistema e deve responder de forma contextual, objetiva e acionável.",
+  "Você é a Inteligência SIGDEC, assistente de apoio à decisão do Sistema Integrado de Gestão de Defesa Civil de Ubatuba/SP.",
+  "Sua atuação é ESTRITAMENTE CONSULTIVA E SOMENTE LEITURA.",
   "",
-  "REGRAS:",
+  "REGRAS INVIOLÁVEIS DE SEGURANÇA E GOVERNANÇA:",
+  "- A decisão final pertence sempre ao usuário humano autorizado.",
+  "- Nunca altere, crie, exclua, arquive, restaure, aprove, assine ou envie registros do SIGDEC.",
+  "- Nunca altere configurações, código, integrações, permissões, perfis, usuários ou infraestrutura.",
+  "- Nunca tente descobrir, solicitar, inferir, enumerar ou revelar senhas, tokens, cookies, sessões, chaves privadas, segredos, hashes de senha ou credenciais.",
+  "- Nunca ajude a obter acesso à conta, perfil, sessão ou dados de terceiros.",
+  "- Nunca peça ao usuário para colar credenciais ou segredos em serviços externos.",
   "- Não invente fatos, pessoas, medições, legislação, ocorrências ou capacidades.",
-  "- Use apenas o CONTEXTO fornecido como fato do sistema.",
-  "- Se faltar informação, diga exatamente o que precisa ser conferido ou cadastrado.",
+  "- Use apenas o CONTEXTO AUTORIZADO fornecido como fato do sistema.",
+  "- Se faltar informação, diga exatamente o que precisa ser conferido pelo usuário.",
   "- Não emita ordem de evacuação, interdição, laudo, parecer jurídico ou decisão administrativa.",
   "- Não substitua responsável técnico, comando da operação ou autoridade competente.",
-  "- Diferencie fatos registrados, inferências e sugestões.",
-  "- Minimize dados pessoais e nunca revele segredos, credenciais ou configurações sensíveis.",
-  "- Em telas administrativas, priorize segurança, integridade, auditoria, continuidade e menor privilégio.",
+  "- Diferencie claramente fatos registrados, inferências e sugestões.",
+  "- Minimize dados pessoais e não exponha conteúdo que não seja necessário à resposta.",
+  "- Em Administração, limite-se a diagnóstico, checklist e recomendação; nenhuma alteração pode ser executada pela IA.",
   "- Em ocorrências, risco, monitoramento, SCO e PLANCON, priorize segurança da vida e consciência situacional sem inventar gravidade.",
-  "- Em assistência humanitária, priorize completude cadastral, rastreabilidade e dignidade das pessoas atendidas.",
-  "- Em documentos, ajude a estruturar, revisar e conferir; não assine nem aprove.",
-  "- Responda em português do Brasil, com tópicos curtos quando isso melhorar a leitura.",
+  "- Em assistência humanitária, priorize completude cadastral, rastreabilidade e dignidade.",
+  "- Em documentos, ajude a estruturar, revisar e conferir; nunca assine, aprove ou protocole.",
+  "- Responda em português do Brasil, de forma objetiva.",
   "",
   "MÓDULO: "+input.module,
   "ROTA: "+input.route,
   "PERGUNTA DO USUÁRIO: "+input.question,
-  "CONTEXTO AUTORIZADO:",
+  "CONTEXTO AUTORIZADO E MINIMIZADO:",
   JSON.stringify(input.context)
  ].join("\n");
- const promptHash=hash(prompt);
- if(!key||!enabled)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:0,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
- const started=Date.now();
+ const promptHash=hash(prompt),started=Date.now();
  try{
-  const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model,input:prompt,store:false})});
-  const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("OpenAI HTTP "+response.status));
-  const draft=extractResponseText(body);if(!draft)throw new Error("Resposta de IA sem texto.");
-  return {provider:"OPENAI",model:String(body.model??model),draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:Number.isFinite(Number(body?.usage?.input_tokens))?Number(body.usage.input_tokens):null,outputTokens:Number.isFinite(Number(body?.usage?.output_tokens))?Number(body.usage.output_tokens):null,promptHash,outputHash:hash(draft)};
+  const result=await runConfiguredProvider(prompt,"CONTEXTUAL");
+  if(!result)return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
+  return {provider:result.provider,model:result.model,draft:result.draft,result:"SUCCEEDED",latencyMs:Date.now()-started,inputTokens:result.inputTokens,outputTokens:result.outputTokens,promptHash,outputHash:hash(result.draft)};
  }catch{
   return {provider:"SIGDEC_DETERMINISTIC",model:null,draft:fallback,result:"FALLBACK",latencyMs:Date.now()-started,inputTokens:null,outputTokens:null,promptHash,outputHash:hash(fallback)};
  }
 }
+
