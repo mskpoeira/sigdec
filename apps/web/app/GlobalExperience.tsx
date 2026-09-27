@@ -135,7 +135,9 @@ export default function GlobalExperience(){
 
  if(hidden)return null;
 
- const tabs=header?createPortal(<GlobalModuleTabs/>,header):null;\n\n const breadcrumb=header&&crumbs.length>0?createPortal(
+ const tabs=header?createPortal(<GlobalModuleTabs/>,header):null;
+
+ const breadcrumb=header&&crumbs.length>0?createPortal(
   <nav className="contextBreadcrumb" aria-label="Navegação estrutural">
    {crumbs.map((item,index)=><span key={item.href}>
     {index>0&&<b aria-hidden="true">›</b>}
@@ -176,7 +178,8 @@ export default function GlobalExperience(){
      <nav className="commandQuick" aria-label="Acessos rápidos">
       <button onClick={()=>go("/ocorrencias")}>⚠ Ocorrências</button>
       <button onClick={()=>go("/assistencia")}>♥ Assistência</button>
-      <button onClick={()=>go("/planejamento")}>▦ PLANCON</button>\n      <button onClick={()=>go("/monitoramento")}>◉ Monitoramento</button>
+      <button onClick={()=>go("/planejamento")}>▦ PLANCON</button>
+      <button onClick={()=>go("/monitoramento")}>◉ Monitoramento</button>
       <button onClick={()=>go("/apresentacao")}>▶ Apresentar SIGDEC</button>
      </nav>
     </div>:loading?<div className="commandState"><span className="commandSpinner"/>Pesquisando em módulos autorizados...</div>
