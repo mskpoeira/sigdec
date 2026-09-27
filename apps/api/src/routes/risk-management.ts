@@ -9,6 +9,7 @@ function org(request:FastifyRequest){
  return value;
 }
 const uuid=z.string().uuid();
+function xmlEscape(value:unknown){return String(value??"").replace(/[&<>"\']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","\'":"&apos;"}[ch]??ch));}
 const optionalUuid=z.string().uuid().optional().or(z.literal(""));
 const coords=z.object({
  latitude:z.number().min(-90).max(90).optional(),
@@ -482,4 +483,49 @@ export async function riskManagementRoutes(app:FastifyInstance){
    [id,o,v.responsibleName||null,v.contactPhone||null,v.accessible,v.kitchenAvailable,v.generatorAvailable,v.petAreaAvailable,v.latitude??null,v.longitude??null,v.readinessNotes||null]);
   if(!r.rows[0])return reply.code(404).send({error:"NOT_FOUND"});return r.rows[0];
  });
+ app.get("/api/v1/warnings/:id/cap",{preHandler:requirePermission("risk_management.read")},async(request,reply)=>{
+  const o=org(request),{id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const r=await db.query(`SELECT w.id,w.severity,w.title,w.message,w.instruction,w.cap_identifier,w.status,w.created_at,w.published_at,w.ended_at,
+   w.channels,a.code AS risk_area_code,a.name AS risk_area_name,a.neighborhood
+   FROM warning_activations w LEFT JOIN territorial_risk_areas a ON a.id=w.risk_area_id WHERE w.id=$1 AND w.organization_id=$2`,[id,o]);
+  const w=r.rows[0];if(!w)return reply.code(404).send({error:"NOT_FOUND"});
+  const identifier=w.cap_identifier||("SIGDEC-UBATUBA-"+w.id);
+  const severity=w.severity==="EMERGENCY"?"Extreme":w.severity==="WARNING"?"Severe":w.severity==="WATCH"?"Moderate":"Minor";
+  const sent=new Date(w.published_at??w.created_at).toISOString();
+  const msgType=w.status==="ENDED"||w.status==="CANCELLED"?"Cancel":"Alert";
+  const area=[w.risk_area_code,w.risk_area_name,w.neighborhood].filter(Boolean).join(" · ")||"Município de Ubatuba/SP";
+  const xml='<?xml version="1.0" encoding="UTF-8"?>\n'+
+   '<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">'+
+   '<identifier>'+xmlEscape(identifier)+'</identifier><sender>SIGDEC-Ubatuba</sender><sent>'+xmlEscape(sent)+'</sent>'+
+   '<status>Actual</status><msgType>'+msgType+'</msgType><scope>Public</scope><info><category>Safety</category>'+
+   '<event>'+xmlEscape(w.title)+'</event><urgency>Immediate</urgency><severity>'+severity+'</severity><certainty>Observed</certainty>'+
+   '<headline>'+xmlEscape(w.title)+'</headline><description>'+xmlEscape(w.message)+'</description>'+
+   (w.instruction?'<instruction>'+xmlEscape(w.instruction)+'</instruction>':'')+
+   '<area><areaDesc>'+xmlEscape(area)+'</areaDesc></area></info></alert>';
+  return reply.type("application/xml; charset=utf-8").header("Content-Disposition",'attachment; filename="alerta-'+id+'.xml"').send(xml);
+ });
+
+ app.get("/api/v1/damage-assessments/:id/export",{preHandler:requirePermission("damages.read")},async(request,reply)=>{
+  const o=org(request),{id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
+  const [assessment,items]=await Promise.all([
+   db.query(`SELECT d.*,i.protocol,i.summary AS incident_summary,i.description AS incident_description,i.address_line,i.neighborhood,i.created_at AS incident_created_at
+    FROM damage_assessments d JOIN incidents i ON i.id=d.incident_id WHERE d.id=$1 AND d.organization_id=$2`,[id,o]),
+   db.query(`SELECT category,description,quantity::float8,unit,estimated_value::float8 AS estimated_value,latitude,longitude,incident_attachment_id
+    FROM damage_items WHERE assessment_id=$1 AND organization_id=$2 ORDER BY created_at`,[id,o])
+  ]);
+  const a=assessment.rows[0];if(!a)return reply.code(404).send({error:"NOT_FOUND"});
+  const payload={
+   exportVersion:"SIGDEC-DAMAGE-1.0",generatedAt:new Date().toISOString(),
+   incident:{protocol:a.protocol,summary:a.incident_summary,description:a.incident_description,addressLine:a.address_line,neighborhood:a.neighborhood,createdAt:a.incident_created_at},
+   assessment:{id:a.id,type:a.assessment_type,status:a.status,assessedAt:a.assessed_at,
+    humanDamage:{affected:a.affected_people,displaced:a.displaced_people,homeless:a.homeless_people,injured:a.injured_people,deaths:a.deaths,missing:a.missing_people},
+    housingDamage:{damaged:a.houses_damaged,destroyed:a.houses_destroyed},
+    economic:{publicDamage:Number(a.public_damage),privateDamage:Number(a.private_damage),publicLoss:Number(a.public_loss),privateLoss:Number(a.private_loss)},
+    environmentalDamage:a.environmental_damage,summary:a.summary},
+   items:items.rows,
+   s2idDraft:{fide:a.assessment_type==="FIDE"||a.assessment_type==="FINAL",dmate:a.assessment_type==="DMATE"||a.assessment_type==="FINAL",requiresOfficialReview:true}
+  };
+  return reply.type("application/json; charset=utf-8").header("Content-Disposition",'attachment; filename="'+a.protocol+'-'+a.assessment_type+'.json"').send(payload);
+ });
+
 }
