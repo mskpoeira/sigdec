@@ -436,3 +436,50 @@ legend{font-weight:900;color:var(--ui-navy)!important}
   .friendlyLogin .loginCard{padding:20px!important}
   .loginAccess{padding:28px 18px!important}
 }
+
+
+/* v1.71 — Sala de Situação multicamadas / GeoPixel */
+.territorialOverlay{z-index:4!important}
+.territorialOverlay .vehicleTrail{stroke:rgba(18,101,193,.72)}
+.territorialOverlay .riskBoundary{fill:rgba(243,107,43,.04);stroke-width:.52;vector-effect:non-scaling-stroke}
+.territorialOverlay .risk-r1{stroke:#59a678}.territorialOverlay .risk-r2{stroke:#d6b332}.territorialOverlay .risk-r3{stroke:#f28a2d}.territorialOverlay .risk-r4{stroke:#d92f3b}
+.territorialOverlay .evacuationRouteLine{fill:none;stroke:#10a67b;stroke-width:.72;stroke-dasharray:2 1;vector-effect:non-scaling-stroke}
+.territorialOverlay .geopixelGeometry{fill:rgba(7,95,174,.035);stroke:rgba(41,106,157,.62);stroke-width:.42;vector-effect:non-scaling-stroke}
+.territorialOverlay .geopixel-environment,.territorialOverlay .geopixel-app,.territorialOverlay .geopixel-vegetation{stroke:#2d8c66;fill:rgba(45,140,102,.05)}
+.territorialOverlay .geopixel-zoning,.territorialOverlay .geopixel-urbanism,.territorialOverlay .geopixel-land_use{stroke:#7658a8;fill:rgba(118,88,168,.05)}
+.territorialOverlay .geopixel-hydrography,.territorialOverlay .geopixel-drainage{stroke:#1687ca;fill:rgba(22,135,202,.05)}
+
+.mapLayerControls{
+ position:absolute;left:10px;top:10px;z-index:30;display:flex;flex-wrap:wrap;gap:5px;max-width:min(78%,720px);
+ padding:7px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(8,47,85,.88);
+ backdrop-filter:blur(8px);box-shadow:0 7px 22px rgba(0,0,0,.22)
+}
+.mapLayerControls button{
+ border:1px solid rgba(255,255,255,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#dceafa;
+ padding:5px 8px;font-size:.61rem;font-weight:900;cursor:pointer
+}
+.mapLayerControls button.active{background:#fff;color:#075fae;border-color:#fff}
+.mapLayerControls button:hover{transform:none;background:rgba(255,255,255,.16)}
+.mapLayerControls button.active:hover{background:#fff}
+
+.territorialPin{
+ position:absolute;z-index:12;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;
+ width:24px;height:24px;border-radius:50%;border:2px solid #fff;text-decoration:none;font-size:.63rem;font-weight:950;
+ box-shadow:0 3px 10px rgba(0,0,0,.3);color:#fff;background:#476276
+}
+.territorialPin:hover{z-index:40;transform:translate(-50%,-50%) scale(1.18)}
+.riskPin.risk-r1{background:#39855a}.riskPin.risk-r2{background:#c49a16}.riskPin.risk-r3{background:#e3731d}.riskPin.risk-r4{background:#c91e2c}
+.warningAssetPin{background:#d77717}.warningAssetPin.degraded{background:#8d5b23;animation:stalePositionPulse 1.8s ease-in-out infinite}
+.activeWarningPin{background:#c91e2c;animation:criticalBannerPulse 1s ease-in-out infinite}
+.activeWarningPin.severity-watch{background:#c49a16}.activeWarningPin.severity-info{background:#1976a8}
+.infrastructurePin{background:#495968}.infrastructurePin.degraded{background:#b1363c}
+.shelterPin{background:#2d8c66}.shelterPin.status-closed{background:#788b99}
+.geopixelPin{background:#6948a0}.geopixelPin span{font-size:.66rem}
+.legendRisk,.legendGeoPixel{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.legendRisk{background:#e3731d}.legendGeoPixel{background:#6948a0}
+
+@media(max-width:760px){
+ .mapLayerControls{left:6px;top:6px;max-width:calc(100% - 12px);gap:3px;padding:5px}
+ .mapLayerControls button{font-size:.56rem;padding:4px 6px}
+ .territorialPin{width:22px;height:22px}
+}
