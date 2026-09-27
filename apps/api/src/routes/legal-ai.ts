@@ -98,9 +98,9 @@ export async function legalAiRoutes(app:FastifyInstance){
   addCount("documentosEmitidos","SELECT count(*)::int AS value FROM technical_documents WHERE organization_id=$1 AND status='ISSUED'",can("documents.read","documents.manage"));
   addCount("planconAtivos","SELECT count(*)::int AS value FROM contingency_plans WHERE organization_id=$1 AND status='ACTIVE'",can("plancon.manage"));
   await Promise.all(tasks);
-  const incidentMatch=route.match(/^\/ocorrencias\/([0-9a-f-]{36})(?:\/|$)/i);
-  if(incidentMatch&&can("incidents.read","incidents.manage")&&uuid.safeParse(incidentMatch[1]).success){
-   const incident=await loadIncident(org,incidentMatch[1]);if(incident)context.ocorrenciaAtual=incident;
+  const incidentMatch=route.match(/^\/ocorrencias\/([0-9a-f-]{36})(?:\/|$)/i),incidentId=incidentMatch?.[1];
+  if(incidentId&&can("incidents.read","incidents.manage")&&uuid.safeParse(incidentId).success){
+   const incident=await loadIncident(org,incidentId);if(incident)context.ocorrenciaAtual=incident;
   }
   if(route.startsWith("/administracao")&&can("system.master","admin.features","integrations.manage")){
    const [features,integrations]=await Promise.all([
