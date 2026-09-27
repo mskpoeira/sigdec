@@ -3,7 +3,9 @@ import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 import { formatDateTimeBR } from "../../lib/datetime";
 import Link from "next/link";
 import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
-import {FormEvent,useCallback,useEffect,useState} from "react";\nimport {PhoneListEditor,type ContactPhone} from "../../lib/phone-list-editor";\nimport {EmailListEditor,type ContactEmail} from "../../lib/email-list-editor";
+import {FormEvent,useCallback,useEffect,useState} from "react";
+import {PhoneListEditor,type ContactPhone} from "../../lib/phone-list-editor";
+import {EmailListEditor,type ContactEmail} from "../../lib/email-list-editor";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type User={id:string;matricula:string;displayName:string;warName:string|null;email:string|null;phone:string|null;contacts:(ContactPhone|ContactEmail)[];jobTitle:string|null;department:string|null;active:boolean;mustChangePassword:boolean;mfaEnabled:boolean;roleIds:string[];roles:string[];lastLoginAt:string|null};
