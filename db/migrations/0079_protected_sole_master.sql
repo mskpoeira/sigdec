@@ -45,7 +45,7 @@ BEGIN
   END IF;
   IF TG_OP='DELETE' THEN RETURN OLD; END IF;
   RETURN NEW;
-END $;
+END $$;
 
 DROP TRIGGER IF EXISTS trg_sigdec_guard_protected_master_user ON users;
 CREATE TRIGGER trg_sigdec_guard_protected_master_user
@@ -75,7 +75,7 @@ BEGIN
   END IF;
   IF TG_OP='DELETE' THEN RETURN OLD; END IF;
   RETURN NEW;
-END $;
+END $$;
 
 DROP TRIGGER IF EXISTS trg_sigdec_guard_master_role_assignment ON user_roles;
 CREATE TRIGGER trg_sigdec_guard_master_role_assignment
