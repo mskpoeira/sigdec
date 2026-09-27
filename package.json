@@ -14,6 +14,7 @@
     "lint": "pnpm -r lint",
     "test": "node scripts/verify-architecture.mjs && node scripts/verify-realtime.mjs && pnpm -r test",
     "verify:architecture": "node scripts/verify-architecture.mjs",
-    "verify:realtime": "node scripts/verify-realtime.mjs"
+    "verify:realtime": "node scripts/verify-realtime.mjs",
+    "audit:links": "node scripts/audit-links.mjs"
   }
 }
