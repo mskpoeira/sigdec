@@ -4,7 +4,7 @@ import {ptBR} from "../lib/pt-br";
 import Link from "next/link";
 import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useRef,useState} from "react";
-import {PhoneListEditor,type ContactPhone} from "../lib/phone-list-editor";
+import {PhoneListEditor,type ContactPhone,type PhonePersonMatch} from "../lib/phone-list-editor";
 import {EmailListEditor,type ContactEmail} from "../lib/email-list-editor";
 import {RecordActions} from "../lib/record-actions";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
@@ -44,6 +44,13 @@ export default function Page(){
   setMessage(action==="archive"?"Voluntário arquivado.":action==="restore"?"Voluntário restaurado.":"Voluntário excluído.");
   await load();
  }
+ function applyPhonePerson(p:PhonePersonMatch){
+  const form=formRef.current;if(!form)return;
+  const values:Record<string,string|undefined>={fullName:p.fullName,profession:p.profession??undefined,education:p.education??undefined,institution:p.institution??undefined,cnhCategory:p.cnhCategory??undefined,languages:p.languages?.join(", "),operationRegion:p.operationRegion??undefined,availability:p.availability??undefined,notes:p.notes??undefined};
+  for(const[name,value]of Object.entries(values)){if(value===undefined)continue;const el=form.elements.namedItem(name) as HTMLInputElement|HTMLTextAreaElement|null;if(el)el.value=value}
+  if(p.email&&!emails.some(x=>x.value.toLowerCase()===p.email!.toLowerCase()))setEmails(v=>[...v,{kind:"EMAIL",value:p.email!,isWhatsapp:false,isPrimary:v.length===0}]);
+  setMessage(`Dados de ${p.fullName} preenchidos. Revise antes de salvar.`);
+ }
  function beginEdit(x:Volunteer){setEditId(x.id);const cs=x.contacts?.length?x.contacts:[...(x.phone?[{kind:"PHONE" as const,value:x.phone,phoneType:(x.phone.replace(/\\D/g,"").length===11?"MOBILE":"LANDLINE") as "MOBILE"|"LANDLINE",isWhatsapp:false,isPrimary:true}]:[]),...(x.email?[{kind:"EMAIL" as const,value:x.email,isWhatsapp:false as const,isPrimary:true}]:[])];setPhones(cs.filter((v):v is ContactPhone=>v.kind==="PHONE"));setEmails(cs.filter((v):v is ContactEmail=>v.kind==="EMAIL"));const form=formRef.current;if(!form)return;const values:Record<string,string>={fullName:x.fullName,profession:x.profession??"",education:x.education??"",institution:x.institution??"",cnhCategory:x.cnhCategory??"",languages:(x.languages??[]).join(", "),radioamateurCallSign:x.radioamateurCallSign??"",operationRegion:x.operationRegion??"",availability:x.availability??"",shirtSize:x.shirtSize??"",pantsSize:x.pantsSize??"",jacketSize:x.jacketSize??"",raincoatSize:x.raincoatSize??"",vestSize:x.vestSize??"",gloveSize:x.gloveSize??"",shoeSize:x.shoeSize??"",skills:(x.skills??[]).join(", "),notes:x.notes??""};for(const[name,value]of Object.entries(values)){const el=form.elements.namedItem(name) as HTMLInputElement|HTMLTextAreaElement|null;if(el)el.value=value}window.scrollTo({top:0,behavior:"smooth"})}
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">SIGDEC · VOLUNTARIADO · {SIGDEC_VERSION_LABEL}</span><h1>Voluntariado</h1><p>Cadastro operacional, competências, disponibilidade, vestuário e EPI para mobilização.</p></div><div className="headerActions"><Link className="secondaryLink" href="/painel">Painel</Link></div></header>
@@ -51,7 +58,7 @@ export default function Page(){
    <form ref={formRef} className="incidentForm compactForm" onSubmit={submit}>
     <h2>{editId?"Editar voluntário":"Cadastrar voluntário"}</h2>
     <label>Nome completo<input name="fullName" required/></label>
-    <PhoneListEditor value={phones} onChange={setPhones}/><EmailListEditor value={emails} onChange={setEmails}/>
+    <PhoneListEditor value={phones} onChange={setPhones} onPersonSelected={applyPhonePerson} excludeOwnerId={editId}/><EmailListEditor value={emails} onChange={setEmails}/>
     <div className="formGrid"><label>Profissão<input name="profession"/></label><label>Formação<input name="education"/></label><label>Instituição<input name="institution"/></label><label>CNH<input name="cnhCategory"/></label></div>
     <div className="formGrid"><label>Idiomas, separados por vírgula<input name="languages"/></label><label>Indicativo de radioamador<input name="radioamateurCallSign"/></label><label>Região de atuação<input name="operationRegion"/></label><label>Disponibilidade<input name="availability"/></label></div>
     <h3>Vestuário e mobilização</h3>
