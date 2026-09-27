@@ -499,6 +499,29 @@ export default function OcorrenciaDetalhePage() {
         </article>
       </section>
 
+      <section className="detailSection">
+        <div className="mediaSectionHeader">
+          <div><span className="eyebrow">CONTEXTO TERRITORIAL AUTOMÁTICO</span><h2>Risco e recursos próximos</h2><p>Leitura geoespacial PostGIS calculada a partir das coordenadas desta ocorrência.</p></div>
+          <Link className="secondaryLink" href="/campo?monitor=1" target="_blank">Abrir mapa multicamadas ↗</Link>
+        </div>
+        {!riskContext?.georeferenced?<section className="infoCard">Informe latitude e longitude na ocorrência para o SIGDEC calcular automaticamente áreas de risco, sirenes, abrigos e infraestruturas próximas.</section>:
+        <div className="dataGrid">
+          <article className={riskContext.riskAreas.some(x=>x.riskLevel==="R4")?"warningCard":"card"}>
+            <h3>Áreas de risco próximas</h3>
+            {riskContext.riskAreas.length===0?<p>Nenhuma área cadastrada em até 5 km.</p>:riskContext.riskAreas.slice(0,5).map(x=><p key={x.id}><strong>{x.code} · {x.riskLevel}</strong> · {x.name}<br/><small>{x.hazardType} · {x.distanceMeters.toLocaleString("pt-BR")} m · {x.exposedPeople} pessoa(s) exposta(s)</small></p>)}
+          </article>
+          <article className="card"><h3>Sirenes e ativos de alerta</h3>
+            {riskContext.warningAssets.length===0?<p>Nenhum ativo georreferenciado em até 8 km.</p>:riskContext.warningAssets.slice(0,5).map(x=><p key={x.id}><strong>{x.code}</strong> · {x.name}<br/><small>{x.assetType} · {x.status} · {x.distanceMeters.toLocaleString("pt-BR")} m{x.batteryPercent!=null?" · bateria "+x.batteryPercent+"%":""}</small></p>)}
+          </article>
+          <article className={riskContext.criticalInfrastructures.some(x=>x.operationalStatus!=="OPERATIONAL")?"warningCard":"card"}><h3>Infraestruturas críticas</h3>
+            {riskContext.criticalInfrastructures.length===0?<p>Nenhuma infraestrutura cadastrada em até 10 km.</p>:riskContext.criticalInfrastructures.slice(0,6).map(x=><p key={x.id}><strong>{x.code} · {x.name}</strong><br/><small>{x.category} · {x.criticality} · {x.operationalStatus} · {x.distanceMeters.toLocaleString("pt-BR")} m</small></p>)}
+          </article>
+          <article className="card"><h3>Abrigos mais próximos</h3>
+            {riskContext.shelters.length===0?<p>Nenhum abrigo georreferenciado em até 15 km.</p>:riskContext.shelters.slice(0,5).map(x=><p key={x.id}><strong>{x.name}</strong><br/><small>{x.status} · {x.currentPeople}/{x.capacityPeople} pessoa(s) · {x.distanceMeters.toLocaleString("pt-BR")} m{x.accessible?" · ♿":""}{x.generatorAvailable?" · gerador":""}</small></p>)}
+          </article>
+        </div>}
+      </section>
+
       <section className="detailSection incidentMediaSection">
         <div className="mediaSectionHeader">
           <div><span className="eyebrow">REGISTRO VISUAL</span><h2>Fotos e vídeos da ocorrência</h2><p>Imagens e vídeos ficam vinculados ao protocolo, com autoria, data/hora e integridade SHA-256.</p></div>
