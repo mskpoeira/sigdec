@@ -1365,3 +1365,53 @@ tbody tr:hover{background:#f7fafc!important}
  background:rgba(255,255,255,.92)!important;
  height:3px!important;
 }
+
+
+/* logo Defesa Civil garantido no cabeçalho */
+.moduleShell>.listHeader:first-child::before,
+.moduleShell>.panelHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child::before,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child::before{
+ content:none!important;
+ background:none!important;
+}
+.moduleHeaderDefenseMark{
+ position:absolute!important;
+ z-index:8!important;
+ right:20px!important;
+ top:14px!important;
+ width:92px!important;
+ height:92px!important;
+ display:grid!important;
+ place-items:center!important;
+ padding:7px!important;
+ border:1px solid rgba(255,255,255,.42)!important;
+ border-radius:17px!important;
+ background:rgba(255,255,255,.96)!important;
+ box-shadow:0 10px 26px rgba(3,30,54,.24)!important;
+ pointer-events:none!important;
+}
+.moduleHeaderDefenseMark img{
+ display:block!important;
+ width:100%!important;
+ height:100%!important;
+ object-fit:contain!important;
+ opacity:1!important;
+ visibility:visible!important;
+ filter:none!important;
+}
+.moduleShell>.listHeader:first-child>div:first-child,
+.moduleShell>.panelHeader:first-child>div:first-child{
+ max-width:calc(100% - 116px)!important;
+}
+.loginInstitutionalMarks .institutionalMark img{
+ opacity:1!important;
+ visibility:visible!important;
+ display:block!important;
+ object-fit:contain!important;
+}
+@media(max-width:640px){
+ .moduleHeaderDefenseMark{right:10px!important;top:10px!important;width:66px!important;height:66px!important;padding:5px!important}
+ .moduleShell>.listHeader:first-child>div:first-child,
+ .moduleShell>.panelHeader:first-child>div:first-child{max-width:calc(100% - 80px)!important}
+}
