@@ -157,11 +157,21 @@ export async function adminUserRoutes(app:FastifyInstance){
    const mfa=roles.rows.some((r:any)=>r.code==="MASTER"||r.level>=80);
    await client.query(`UPDATE users SET matricula=$3,display_name=$4,war_name=$5,email=$6,phone=$7,job_title=$8,department=$9,
     active=$10,mfa_required=CASE WHEN $11 THEN true ELSE mfa_required END,updated_at=now()
-    WHERE id=$1 AND organization_id=$2`,[id,org,matricula,v.displayName,v.warName||null,v.email||null,v.phone||null,v.jobTitle||null,v.department||null,v.active,mfa]);
+    WHERE id=$1 AND organization_id=$2`,[id,org,matricula,v.displayName,v.warName||null,(primaryEmail?.value??v.email)||null,(primaryPhone?.value??v.phone)||null,v.jobTitle||null,v.department||null,v.active,mfa]);
    await syncContacts(client,org,id,v.contacts);
    await client.query("DELETE FROM user_roles WHERE user_id=$1",[id]);
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
-   await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[id]);
+   const beforeRoleCodes=original.rows.map((r:any)=>r.code).sort();
+   const afterRoleCodes=roles.rows.map((r:any)=>r.code).sort();
+   const accessChanged=v.active!==before.rows[0].active||JSON.stringify(beforeRoleCodes)!==JSON.stringify(afterRoleCodes);
+   if(accessChanged){
+    const auth=authFrom(request);
+    if(id===auth.userId){
+     await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL",[id,auth.sessionId]);
+    }else{
+     await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[id]);
+    }
+   }
    await audit(client,request,"ADMIN_USER_UPDATED","user",id,{...before.rows[0],roles:original.rows.map((r:any)=>r.code)},
     {matricula,displayName:v.displayName,warName:v.warName||null,active:v.active,roles:roles.rows.map((r:any)=>r.code)});
    await client.query("COMMIT");return {id};
