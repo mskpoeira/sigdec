@@ -180,6 +180,8 @@ export async function adminUserRoutes(app:FastifyInstance){
  app.post("/api/v1/admin/navigation",{preHandler:requirePermission("system.master")},async(request,reply)=>{
   const org=organization(authFrom(request).organizationId),parsed=navigationInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});const v=parsed.data;
+  const duplicate=await db.query("SELECT id FROM navigation_items WHERE organization_id=$1 AND path=$2 LIMIT 1",[org,v.path]);
+  if(duplicate.rows[0])return reply.code(409).send({error:"NAVIGATION_PATH_EXISTS",message:"Já existe um item de menu para esta página."});
   const result=await db.query(`INSERT INTO navigation_items(organization_id,label,path,permission_code,sort_order,active)
     VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[org,v.label,v.path,v.permissionCode||null,v.sortOrder,v.active]);
   await audit(db,request,"ADMIN_NAVIGATION_CREATED","navigation_item",result.rows[0].id,null,v);
@@ -190,6 +192,8 @@ export async function adminUserRoutes(app:FastifyInstance){
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});const v=parsed.data;
   const prior=await db.query("SELECT label,path,active FROM navigation_items WHERE id=$1 AND organization_id=$2",[id,org]);
   if(!prior.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
+  const duplicate=await db.query("SELECT id FROM navigation_items WHERE organization_id=$1 AND path=$2 AND id<>$3 LIMIT 1",[org,v.path,id]);
+  if(duplicate.rows[0])return reply.code(409).send({error:"NAVIGATION_PATH_EXISTS",message:"Já existe outro item de menu para esta página."});
   await db.query(`UPDATE navigation_items SET label=$3,path=$4,permission_code=$5,sort_order=$6,active=$7,updated_at=now()
     WHERE id=$1 AND organization_id=$2`,[id,org,v.label,v.path,v.permissionCode||null,v.sortOrder,v.active]);
   await audit(db,request,"ADMIN_NAVIGATION_UPDATED","navigation_item",id,prior.rows[0],v);return {id};
