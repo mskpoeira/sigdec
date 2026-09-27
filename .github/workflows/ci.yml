@@ -39,6 +39,7 @@ jobs:
           docker compose --env-file infra/homolog/.env.example -f infra/homolog/docker-compose.yml config >/dev/null
       - run: pnpm typecheck
       - run: pnpm audit:links
+      - run: pnpm audit:ui
       - run: pnpm test
       - run: pnpm --filter @sigdec/api db:migrate
       - run: pnpm --filter @sigdec/api test:integration
