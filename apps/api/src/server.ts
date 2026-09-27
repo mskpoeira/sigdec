@@ -84,7 +84,7 @@ app.get("/api/v1",async()=>({
 }));
 app.get("/api/v1/capabilities",async()=>({
  product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",release,format:"application/json",
- architecture:{apiFirst:true,postgis:true,appendOnlyAudit:true,ed25519Integrity:true,offlineField:true,multiModule:true},
+ architecture:{apiFirst:true,postgis:true,appendOnlyAudit:true,ed25519Integrity:true,offlineField:true,multiModule:true,realtimeSse:true,distributedRealtime:true},
  modules:[
   {code:"incidents",label:"Ocorrências e Monitoramento",pages:["/ocorrencias","/campo","/monitoramento","/vistorias"]},
   {code:"humanitarian",label:"Assistência Humanitária",pages:["/assistencia"]},
