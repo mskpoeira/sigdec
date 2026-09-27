@@ -20,7 +20,10 @@ export default function GlobalModuleTabs(){
  if(!group)return null;
  const canAdmin=!!user&&["admin.features","integrations.manage","system.master","audit.read","users.manage"].some(p=>user.permissions.includes(p));
  const visible=(item:SigdecNavItem)=>(!item.feature||features[item.feature]!==false)&&(!item.admin||canAdmin);
- const items=group.items.filter(visible);\n if(!items.length)return null;\n const activeHref=items.filter(item=>navPathMatches(pathname,item.href)).sort((a,b)=>b.href.length-a.href.length)[0]?.href;\n return <nav className="globalModuleTabs" aria-label={"Abas de "+group.label}>
+ const items=group.items.filter(visible);
+ if(!items.length)return null;
+ const activeHref=items.filter(item=>navPathMatches(pathname,item.href)).sort((a,b)=>b.href.length-a.href.length)[0]?.href;
+ return <nav className="globalModuleTabs" aria-label={"Abas de "+group.label}>
   <div className="globalModuleTabsTitle"><span aria-hidden="true">{group.icon}</span><strong>{group.label}</strong></div>
   <div className="globalModuleTabsScroll">
    {items.map(item=><Link key={item.href} href={item.href} className={item.href===activeHref?"active":""}>
