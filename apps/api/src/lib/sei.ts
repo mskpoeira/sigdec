@@ -77,7 +77,7 @@ export async function seiSoapCall(connection:SeiConnection,operation:string,para
 }
 export function xmlTag(xml:string,name:string){
  const escaped=name.replace(/[-/\\^$*+?.()|[\]{}]/g,"\\$&");
- const match=xml.match(new RegExp("<(?:\\\\w+:)?"+escaped+"(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)<\\\\/(?:\\\\w+:)?"+escaped+">","i"));
+ const match=xml.match(new RegExp("<(?:\\w+:)?"+escaped+"(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:\\w+:)?"+escaped+">","i"));
  return match?match[1]!.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1").replace(/<[^>]+>/g,"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"").replace(/&apos;/g,"'").trim():null;
 }
 export async function consultSeiProcess(connection:SeiConnection,protocol:string){
