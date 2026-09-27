@@ -39,3 +39,20 @@ Nenhum novo cadastro é considerado completo sem:
 - auditoria;
 - confirmação para ações destrutivas;
 - teste do ciclo de vida.
+
+
+## Reaproveitamento de cadastro por telefone
+Todo cadastro de pessoa que possua telefone deve, quando houver fonte interna autorizada, consultar o SIGDEC pelo número normalizado após DDD+número completo.
+
+Regras:
+- a busca é interna ao SIGDEC; não realizar reverse lookup externo de pessoa;
+- ignorar máscara e pontuação do telefone;
+- respeitar organização e permissões do usuário;
+- exibir a pessoa encontrada antes de preencher;
+- exigir ação afirmativa do operador ("Usar dados") e confirmação;
+- nunca sobrescrever silenciosamente dados digitados;
+- se houver múltiplas correspondências, permitir escolher;
+- preencher apenas campos compatíveis e autorizados;
+- o operador deve revisar os dados antes de salvar;
+- não retornar registros logicamente excluídos;
+- a ausência de correspondência não pode impedir um novo cadastro.
