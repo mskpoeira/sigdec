@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { authFrom, requirePermission } from "../auth.js";
+import { authFrom, hasLivePermission, requireAuth, requirePermission } from "../auth.js";
 import { db } from "../db.js";
 import { parseCobradeCatalogCsv } from "../lib/cobrade-catalog.js";
 import { normalizeMonitoringPayload } from "../lib/monitoring-adapters.js";
@@ -91,6 +91,36 @@ async function syncVolunteerContacts(client:any,organizationId:string,ownerId:st
 }
 
 export async function responseRoutes(app:FastifyInstance){
+ app.get("/api/v1/people/lookup-by-phone",{preHandler:requireAuth},async(req,reply)=>{
+  const a=authFrom(req),o=org(a.organizationId),{phone}=req.query as {phone?:string};
+  const digits=String(phone??"").replace(/\D/g,"");if(!/^\d{10,11}$/.test(digits))return reply.code(400).send({error:"INVALID_PHONE"});
+  const items:any[]=[];
+  if(await hasLivePermission(a.userId,"volunteers.read")){
+   const r=await db.query(`SELECT DISTINCT v.id,'VOLUNTEER' AS "sourceType",v.full_name AS "fullName",v.email,v.phone,
+    v.profession,v.education,v.institution,v.cnh_category AS "cnhCategory",v.languages,v.operation_region AS "operationRegion",
+    v.availability,v.notes
+    FROM volunteers v LEFT JOIN contact_points cp ON cp.organization_id=v.organization_id AND cp.owner_type='VOLUNTEER' AND cp.owner_id=v.id AND cp.active
+    WHERE v.organization_id=$1 AND v.deleted_at IS NULL AND (regexp_replace(COALESCE(cp.value,''),'[^0-9]','','g')=$2 OR regexp_replace(COALESCE(v.phone,''),'[^0-9]','','g')=$2)`,[o,digits]);
+   items.push(...r.rows);
+  }
+  if(await hasLivePermission(a.userId,"humanitarian.read")){
+   const r=await db.query(`SELECT DISTINCT sr.id,'SHELTER_RESPONSIBLE' AS "sourceType",sr.full_name AS "fullName",
+    sr.address_line AS "addressLine",sr.neighborhood,cp.value AS phone
+    FROM shelter_responsibles sr JOIN contact_points cp ON cp.organization_id=sr.organization_id AND cp.owner_type='SHELTER_RESPONSIBLE' AND cp.owner_id=sr.id AND cp.active AND cp.kind='PHONE'
+    WHERE sr.organization_id=$1 AND sr.active AND regexp_replace(cp.value,'[^0-9]','','g')=$2`,[o,digits]);
+   items.push(...r.rows);
+   const h=await db.query(`SELECT id,'HOUSEHOLD_RESPONSIBLE' AS "sourceType",responsible_name AS "fullName",phone,address_origin AS "addressLine",neighborhood_origin AS neighborhood,notes
+    FROM assisted_households WHERE organization_id=$1 AND regexp_replace(COALESCE(phone,''),'[^0-9]','','g')=$2`,[o,digits]).catch(()=>({rows:[]}));
+   items.push(...h.rows);
+  }
+  if(await hasLivePermission(a.userId,"system.master")){
+   const r=await db.query(`SELECT DISTINCT u.id,'USER' AS "sourceType",u.full_name AS "fullName",u.email,u.phone
+    FROM users u LEFT JOIN contact_points cp ON cp.organization_id=u.organization_id AND cp.owner_type='USER' AND cp.owner_id=u.id AND cp.active
+    WHERE u.organization_id=$1 AND u.active AND (regexp_replace(COALESCE(cp.value,''),'[^0-9]','','g')=$2 OR regexp_replace(COALESCE(u.phone,''),'[^0-9]','','g')=$2)`,[o,digits]);
+   items.push(...r.rows);
+  }
+  return {items:items.slice(0,20)};
+ });
  app.get("/api/v1/volunteers",{preHandler:requirePermission("volunteers.read")},async req=>{
   const o=org(authFrom(req).organizationId),{includeArchived}=req.query as {includeArchived?:string};
   const r=await db.query(`SELECT id,full_name AS "fullName",phone,email,status,availability,
