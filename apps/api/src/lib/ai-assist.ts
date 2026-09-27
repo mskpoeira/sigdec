@@ -20,7 +20,7 @@ const providerOrder=()=>String(process.env.SIGDEC_AI_PROVIDER_ORDER??"OPENAI,GEM
 export function getAiProviderStatus(){
  return [
   {code:"OPENAI",label:"OpenAI",configured:Boolean((process.env.OPENAI_API_KEY??"").trim()),model:(process.env.SIGDEC_AI_MODEL??"gpt-5.6-luna").trim(),purpose:"Minutas técnicas e análise contextual"},
-  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-2.5-flash-lite").trim(),purpose:"Análise contextual e segunda leitura multimodal quando habilitada"},
+  {code:"GEMINI",label:"Google Gemini API",configured:Boolean((process.env.GEMINI_API_KEY??"").trim()),model:(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim(),purpose:"Análise contextual e segunda leitura multimodal quando habilitada"},
   {code:"GROQ",label:"GroqCloud",configured:Boolean((process.env.GROQ_API_KEY??"").trim()),model:(process.env.SIGDEC_GROQ_MODEL??"openai/gpt-oss-20b").trim(),purpose:"Análise rápida, checklists e segunda opinião com modelos abertos"}
  ];
 }
@@ -35,7 +35,7 @@ async function callOpenAi(prompt:string):Promise<ProviderRun|null>{
 }
 async function callGemini(prompt:string):Promise<ProviderRun|null>{
  const key=(process.env.GEMINI_API_KEY??"").trim();if(!key)return null;
- const model=(process.env.SIGDEC_GEMINI_MODEL??"gemini-2.5-flash-lite").trim();
+ const model=(process.env.SIGDEC_GEMINI_MODEL??"gemini-3.5-flash-lite").trim();
  const endpoint="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
  const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{temperature:0.2}})});
  const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error?.message??("Gemini HTTP "+response.status));
