@@ -84,32 +84,6 @@ jobs:
               infra/homolog/deploy.sh
           REMOTE
 
-      - name: Limpar ocorrencias e despachos de homologacao
-        shell: bash
-        env:
-          SSH_HOST: ${{ secrets.HOMOLOG_SSH_HOST }}
-          SSH_USER: ${{ secrets.HOMOLOG_SSH_USER }}
-          SSH_PORT: ${{ secrets.HOMOLOG_SSH_PORT }}
-        run: |
-          set -euo pipefail
-          PORT="${SSH_PORT:-22}"
-          ssh -p "$PORT" \
-            -i "$HOME/.ssh/id_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
-              set -euo pipefail
-              cd /opt/sigdec/infra/homolog
-              set -a
-              source .env
-              set +a
-              docker compose --env-file .env exec -T postgres \
-                psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-                < reset-occurrences.once.sql
-          REMOTE
-
       - name: Verificar aplicacao
         shell: bash
         env:
