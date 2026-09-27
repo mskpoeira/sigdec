@@ -1538,3 +1538,86 @@ tbody tr:hover{background:#f7fafc!important}
   -webkit-line-clamp:4!important;
  }
 }
+
+
+/* v1.79.2 — identidade PMU + Defesa Civil no cabeçalho */
+.moduleHeaderDefenseMark{display:none!important}
+.moduleHeaderInstitutionalMarks{
+ position:absolute!important;
+ z-index:9!important;
+ right:20px!important;
+ top:14px!important;
+ display:flex!important;
+ align-items:center!important;
+ gap:10px!important;
+ pointer-events:none!important;
+}
+.moduleHeaderMark{
+ width:82px!important;
+ height:82px!important;
+ display:grid!important;
+ place-items:center!important;
+ padding:7px!important;
+ border:1px solid rgba(255,255,255,.42)!important;
+ border-radius:16px!important;
+ background:rgba(255,255,255,.96)!important;
+ box-shadow:0 10px 26px rgba(3,30,54,.24)!important;
+ overflow:hidden!important;
+}
+.moduleHeaderMark img{
+ display:block!important;
+ width:100%!important;
+ height:100%!important;
+ object-fit:contain!important;
+ object-position:center!important;
+ opacity:1!important;
+ visibility:visible!important;
+ filter:none!important;
+}
+.moduleShell>.listHeader:first-child,
+.moduleShell>.panelHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+.shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+ padding-right:210px!important;
+ background:
+  linear-gradient(112deg,rgba(8,47,85,.88) 0%,rgba(7,95,174,.78) 58%,rgba(8,47,85,.68) 100%),
+  url("https://turismo.ubatuba.sp.gov.br/wp-content/uploads/sites/29/2014/11/DSC05810.jpg") center 45%/cover no-repeat!important;
+}
+@media(max-width:900px){
+ .moduleHeaderInstitutionalMarks{
+  right:12px!important;
+  top:12px!important;
+  gap:7px!important;
+ }
+ .moduleHeaderMark{
+  width:64px!important;
+  height:64px!important;
+  padding:5px!important;
+  border-radius:13px!important;
+ }
+ .moduleShell>.listHeader:first-child,
+ .moduleShell>.panelHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  padding-right:154px!important;
+ }
+}
+@media(max-width:640px){
+ .moduleHeaderInstitutionalMarks{
+  right:10px!important;
+  top:10px!important;
+  gap:5px!important;
+ }
+ .moduleHeaderMark{
+  width:54px!important;
+  height:54px!important;
+  padding:4px!important;
+  border-radius:11px!important;
+ }
+ .moduleShell>.listHeader:first-child,
+ .moduleShell>.panelHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.listHeader:first-child,
+ .shell:not(.moduleShell):not(.loginShell)>.panelHeader:first-child{
+  padding-right:128px!important;
+ }
+}
