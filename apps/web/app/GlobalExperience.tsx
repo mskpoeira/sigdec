@@ -50,17 +50,18 @@ export default function GlobalExperience(){
 
  useEffect(()=>{
   if(hidden)return;
-  const emit=()=>{
+  const emit=(detail:Record<string,unknown>={})=>{
    const at=Date.now();
    setLastRealtimeAt(new Date(at));
-   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at}}));
+   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at,...detail}}));
    router.refresh();
   };
   const tick=()=>{
    if(document.visibilityState!=="visible")return;
    if(!navigator.onLine){setRealtimeTransport("offline");return}
-   if(realtimeTransport!=="sse")setRealtimeTransport("polling");
-   emit();
+   if(realtimeTransport==="sse")return;
+   setRealtimeTransport("polling");
+   emit({transport:"polling",reason:"fallback"});
   };
   const timer=window.setInterval(tick,5000);
   const onOnline=()=>{setRealtimeTransport("connecting");tick()};
@@ -75,10 +76,12 @@ export default function GlobalExperience(){
   setRealtimeTransport("connecting");
   const source=new EventSource(API+"/api/v1/realtime",{withCredentials:true});
   source.addEventListener("ready",()=>setRealtimeTransport("sse"));
-  source.addEventListener("change",()=>{
+  source.addEventListener("change",(event)=>{
+   let change:Record<string,unknown>={};
+   try{change=JSON.parse((event as MessageEvent).data??"{}") as Record<string,unknown>}catch{}
    const at=Date.now();
    setRealtimeTransport("sse");setLastRealtimeAt(new Date(at));
-   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at,transport:"sse"}}));
+   window.dispatchEvent(new CustomEvent("sigdec:realtime-tick",{detail:{at,transport:"sse",...change}}));
    router.refresh();
   });
   source.onerror=()=>{if(navigator.onLine)setRealtimeTransport("polling")};
