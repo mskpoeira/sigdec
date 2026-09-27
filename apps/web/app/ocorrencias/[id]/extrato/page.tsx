@@ -4,6 +4,7 @@ import { formatDateTimeBR } from "../../../lib/datetime";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback,useEffect,useState } from "react";
+import {useRealtimeRefresh} from "../../../lib/use-realtime-refresh";
 
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
