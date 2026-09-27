@@ -6,6 +6,7 @@ import {authFrom,normalizeMatricula,requireAuth,requirePermission} from "../auth
 import {db} from "../db.js";
 
 const uuid=z.string().uuid();
+const PROTECTED_MASTER_MATRICULA="915789";
 const personContactInput=z.discriminatedUnion("kind",[
  z.object({kind:z.literal("PHONE"),value:z.string().regex(/^\d{10,11}$/),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)}),
  z.object({kind:z.literal("EMAIL"),value:z.string().trim().email().max(254),label:z.string().trim().max(80).optional(),isWhatsapp:z.literal(false).default(false),isPrimary:z.boolean().default(false)})
@@ -46,24 +47,24 @@ async function syncContacts(client:any,org:string,ownerId:string,contacts:Array<
 }
 
 export async function adminUserRoutes(app:FastifyInstance){
- app.get("/api/v1/admin/users",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/users",{preHandler:requirePermission("users.manage")},async request=>{
   const org=organization(authFrom(request).organizationId);
   const users=await db.query(`${userSelect} WHERE u.organization_id=$1 GROUP BY u.id ORDER BY u.display_name,u.id LIMIT 500`,[org]);
   const ids=users.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",extension,is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='USER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[org,ids]):{rows:[]};
   const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
   return {items:users.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
  });
- app.get("/api/v1/admin/roles",{preHandler:requirePermission("system.master")},async()=>{
+ app.get("/api/v1/admin/roles",{preHandler:requirePermission("users.manage")},async()=>{
   const [roles,permissions]=await Promise.all([
    db.query(`SELECT r.id,r.code,r.name,r.level,r.system_role AS "systemRole",
     COALESCE(array_agg(p.code ORDER BY p.code) FILTER(WHERE p.code IS NOT NULL),'{}') AS "permissionCodes"
     FROM roles r LEFT JOIN role_permissions rp ON rp.role_id=r.id LEFT JOIN permissions p ON p.id=rp.permission_id
-    GROUP BY r.id ORDER BY r.level DESC,r.name`),
+    WHERE r.code<>'MASTER' GROUP BY r.id ORDER BY r.level DESC,r.name`),
    db.query("SELECT code,description FROM permissions ORDER BY code")
   ]);
   return {items:roles.rows,permissions:permissions.rows};
  });
- app.post("/api/v1/admin/roles",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/roles",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const parsed=roleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const v=parsed.data,code=v.code;
   if(code==="MASTER"||v.permissionCodes.includes("system.master"))return reply.code(403).send({error:"RESERVED_ROLE"});
@@ -79,7 +80,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    await client.query("COMMIT");return reply.code(201).send({id});
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"ROLE_EXISTS"});throw error}finally{client.release()}
  });
- app.put("/api/v1/admin/roles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/roles/:id",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const parsed=roleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const v=parsed.data;if(v.code==="MASTER"||v.permissionCodes.includes("system.master"))return reply.code(403).send({error:"RESERVED_ROLE"});
@@ -102,7 +103,7 @@ export async function adminUserRoutes(app:FastifyInstance){
   const found=await client.query("SELECT id,code,level FROM roles WHERE id=ANY($1::uuid[])",[unique]);
   return found.rowCount===unique.length?{unique,rows:found.rows}:null;
  }
- app.post("/api/v1/admin/users",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/users",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const org=organization(authFrom(request).organizationId),parsed=userInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,matricula=normalizeMatricula(v.matricula);
@@ -112,6 +113,7 @@ export async function adminUserRoutes(app:FastifyInstance){
   const client=await db.connect();try{await client.query("BEGIN");
    const roles=await validateRoles(client,v.roleIds);
    if(!roles){await client.query("ROLLBACK");return reply.code(400).send({error:"INVALID_ROLES"});}
+   if(roles.rows.some((r:any)=>r.code==="MASTER")&&matricula!==PROTECTED_MASTER_MATRICULA){await client.query("ROLLBACK");return reply.code(403).send({error:"MASTER_RESERVED"});}
    const mfa=roles.rows.some((r:any)=>r.code==="MASTER"||r.level>=80);
    const result=await client.query<{id:string}>(`INSERT INTO users(organization_id,matricula,display_name,war_name,email,phone,job_title,department,
     password_hash,active,must_change_password,mfa_required)
@@ -124,7 +126,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    await client.query("COMMIT");return reply.code(201).send({id,temporaryPassword:password});
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"MATRICULA_EXISTS"});throw error}finally{client.release()}
  });
- app.put("/api/v1/admin/users/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/users/:id",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const org=organization(authFrom(request).organizationId),parsed=userInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
@@ -135,8 +137,12 @@ export async function adminUserRoutes(app:FastifyInstance){
    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[org]);
    const before=await client.query("SELECT id,matricula,display_name,active FROM users WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
    if(!before.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
+   const protectedMaster=before.rows[0].matricula===PROTECTED_MASTER_MATRICULA;
+   if(protectedMaster&&(matricula!==PROTECTED_MASTER_MATRICULA||!v.active)){await client.query("ROLLBACK");return reply.code(409).send({error:"PROTECTED_MASTER"});}
    const roles=await validateRoles(client,v.roleIds);
    if(!roles){await client.query("ROLLBACK");return reply.code(400).send({error:"INVALID_ROLES"});}
+   if(roles.rows.some((r:any)=>r.code==="MASTER")&&!protectedMaster){await client.query("ROLLBACK");return reply.code(403).send({error:"MASTER_RESERVED"});}
+   if(protectedMaster&&!roles.rows.some((r:any)=>r.code==="MASTER")){await client.query("ROLLBACK");return reply.code(409).send({error:"PROTECTED_MASTER_ROLE"});}
    const original=await client.query("SELECT r.code FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1",[id]);
    const hadMaster=original.rows.some((r:any)=>r.code==="MASTER");
    const hasMaster=roles.rows.some((r:any)=>r.code==="MASTER");
@@ -161,7 +167,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    await client.query("COMMIT");return {id};
   }catch(error:any){await client.query("ROLLBACK");if(error.code==="23505")return reply.code(409).send({error:"MATRICULA_EXISTS"});throw error}finally{client.release()}
  });
- app.post("/api/v1/admin/users/:id/reset-password",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/users/:id/reset-password",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const org=organization(authFrom(request).organizationId),password=temporaryPassword();
   const hash=await argon2.hash(password,{type:argon2.argon2id});
@@ -182,19 +188,19 @@ export async function adminUserRoutes(app:FastifyInstance){
     AND (n.path<>'/administracao' OR EXISTS(
      SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id
      JOIN role_permissions rp ON rp.role_id=ur.role_id JOIN permissions p ON p.id=rp.permission_id
-     WHERE u.id=$2 AND u.active=true AND p.code='system.master'))
+     WHERE u.id=$2 AND u.active=true AND p.code IN ('system.master','users.manage'))
     AND (n.permission_code IS NULL OR EXISTS(
      SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id
      JOIN role_permissions rp ON rp.role_id=ur.role_id JOIN permissions p ON p.id=rp.permission_id
      WHERE u.id=$2 AND u.active=true AND p.code=n.permission_code)) ORDER BY n.sort_order,n.label`,[org,auth.userId]);
   return {items:result.rows};
  });
- app.get("/api/v1/admin/navigation",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/navigation",{preHandler:requirePermission("users.manage")},async request=>{
   const org=organization(authFrom(request).organizationId);
   const result=await db.query(`SELECT id,label,path,permission_code AS "permissionCode",sort_order AS "sortOrder",active
     FROM navigation_items WHERE organization_id=$1 ORDER BY sort_order,label`,[org]);return {items:result.rows};
  });
- app.post("/api/v1/admin/navigation",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/navigation",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const org=organization(authFrom(request).organizationId),parsed=navigationInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});const v=parsed.data;
   const duplicate=await db.query("SELECT id FROM navigation_items WHERE organization_id=$1 AND path=$2 LIMIT 1",[org,v.path]);
@@ -204,7 +210,7 @@ export async function adminUserRoutes(app:FastifyInstance){
   await audit(db,request,"ADMIN_NAVIGATION_CREATED","navigation_item",result.rows[0].id,null,v);
   return reply.code(201).send(result.rows[0]);
  });
- app.put("/api/v1/admin/navigation/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/navigation/:id",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const org=organization(authFrom(request).organizationId),{id}=request.params as {id:string},parsed=navigationInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});const v=parsed.data;
   const prior=await db.query("SELECT label,path,active FROM navigation_items WHERE id=$1 AND organization_id=$2",[id,org]);
@@ -215,7 +221,7 @@ export async function adminUserRoutes(app:FastifyInstance){
     WHERE id=$1 AND organization_id=$2`,[id,org,v.label,v.path,v.permissionCode||null,v.sortOrder,v.active]);
   await audit(db,request,"ADMIN_NAVIGATION_UPDATED","navigation_item",id,prior.rows[0],v);return {id};
  });
- app.delete("/api/v1/admin/navigation/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/navigation/:id",{preHandler:requirePermission("users.manage")},async(request,reply)=>{
   const org=organization(authFrom(request).organizationId),{id}=request.params as {id:string};
   if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const result=await db.query("DELETE FROM navigation_items WHERE id=$1 AND organization_id=$2 RETURNING label,path",[id,org]);
