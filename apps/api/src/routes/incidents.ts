@@ -89,21 +89,6 @@ const civilActionSchema = z.object({
   participantsCount: z.number().int().min(0).max(100000).default(0)
 }).refine(v=>(v.latitude===undefined)===(v.longitude===undefined),{message:"Latitude e longitude devem ser informadas em conjunto."});
 
-const supportRequestSchema = z.object({
-  incidentId: z.string().uuid().optional(),
-  requestType: z.enum(["HUMANITARIAN_AID","EMERGENCY_INSPECTION","STATE_SUPPORT","LOGISTICS","EQUIPMENT","OTHER"]),
-  destination: z.string().trim().max(160).optional(),
-  justification: z.string().trim().min(5).max(12000),
-  requestedItems: z.array(z.object({name:z.string().trim().min(2).max(160),quantity:z.number().positive().optional(),unit:z.string().trim().max(40).optional()})).max(100).default([]),
-  externalProtocol: z.string().trim().max(160).optional()
-});
-
-const supportStatusSchema = z.object({
-  status: z.enum(["SUBMITTED","IN_ANALYSIS","APPROVED","REJECTED","COMPLETED","CANCELLED"]),
-  externalProtocol: z.string().trim().max(160).optional(),
-  resolutionNotes: z.string().trim().max(8000).optional()
-});
-
 const dispatchTransitions: Record<string, string[]> = {
   DISPATCHED: ["ACKNOWLEDGED", "CANCELLED"],
   ACKNOWLEDGED: ["EN_ROUTE", "CANCELLED"],
@@ -549,51 +534,6 @@ export async function incidentRoutes(app: FastifyInstance) {
     if(v.incidentId)await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata) VALUES($1,'civil_action.created',$2,$3,$4::jsonb)`,[v.incidentId,auth.userId,v.title,JSON.stringify({actionId,actionType:v.actionType})]);
     await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,'civil_action.create','civil_defense_action',$2,$3,$4,$5::jsonb)`,[auth.userId,actionId,request.ip,request.headers["user-agent"]??null,JSON.stringify({actionType:v.actionType,title:v.title,incidentId:v.incidentId??null})]);
     return reply.code(201).send({id:actionId});
-  });
-
-  app.get("/api/v1/support-requests", {
-    preHandler: requirePermission("support_requests.read")
-  }, async (request) => {
-    const organizationId=requireOrganization(authFrom(request).organizationId);
-    const r=await db.query(`SELECT s.id,s.incident_id AS "incidentId",i.protocol,s.request_type AS "requestType",s.status,s.destination,s.justification,
-      s.requested_items AS "requestedItems",s.external_protocol AS "externalProtocol",s.submitted_at AS "submittedAt",s.resolved_at AS "resolvedAt",
-      s.resolution_notes AS "resolutionNotes",s.created_at AS "createdAt",u.display_name AS "createdByName",u.matricula AS "createdByMatricula"
-      FROM operational_support_requests s
-      LEFT JOIN incidents i ON i.id=s.incident_id JOIN users u ON u.id=s.created_by
-      WHERE s.organization_id=$1 ORDER BY CASE s.status WHEN 'SUBMITTED' THEN 1 WHEN 'IN_ANALYSIS' THEN 2 WHEN 'DRAFT' THEN 3 ELSE 4 END,s.created_at DESC LIMIT 300`,[organizationId]);
-    return {items:r.rows};
-  });
-
-  app.post("/api/v1/support-requests", {
-    preHandler: requirePermission("support_requests.manage")
-  }, async (request, reply) => {
-    const auth=authFrom(request),organizationId=requireOrganization(auth.organizationId);
-    const parsed=supportRequestSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
-    const v=parsed.data;
-    if(v.incidentId){const incident=await db.query("SELECT 1 FROM incidents WHERE id=$1 AND organization_id=$2",[v.incidentId,organizationId]);if(!incident.rows[0])return reply.code(400).send({error:"INVALID_INCIDENT"});}
-    const r=await db.query(`INSERT INTO operational_support_requests(organization_id,incident_id,request_type,destination,justification,requested_items,external_protocol,created_by)
-      VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8) RETURNING id,status`,[organizationId,v.incidentId??null,v.requestType,v.destination??null,v.justification,JSON.stringify(v.requestedItems),v.externalProtocol??null,auth.userId]);
-    const requestId=r.rows[0]?.id;
-    if(v.incidentId)await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata) VALUES($1,'support_request.created',$2,$3,$4::jsonb)`,[v.incidentId,auth.userId,`Solicitação operacional: ${v.requestType}`,JSON.stringify({requestId})]);
-    await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,after_data) VALUES($1,'support_request.create','operational_support_request',$2,$3,$4,$5::jsonb)`,[auth.userId,requestId,request.ip,request.headers["user-agent"]??null,JSON.stringify({requestType:v.requestType,incidentId:v.incidentId??null,status:"DRAFT"})]);
-    return reply.code(201).send({id:requestId,status:r.rows[0]?.status});
-  });
-
-  app.patch("/api/v1/support-requests/:id/status", {
-    preHandler: requirePermission("support_requests.manage")
-  }, async (request, reply) => {
-    const auth=authFrom(request),organizationId=requireOrganization(auth.organizationId),{id}=request.params as {id:string};
-    const parsed=supportStatusSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
-    const before=await db.query(`SELECT id,status,incident_id AS "incidentId" FROM operational_support_requests WHERE id=$1 AND organization_id=$2`,[id,organizationId]);
-    const current=before.rows[0] as {status:string;incidentId?:string|null}|undefined;if(!current)return reply.code(404).send({error:"NOT_FOUND"});
-    const v=parsed.data;
-    const r=await db.query(`UPDATE operational_support_requests SET status=$1::varchar,external_protocol=COALESCE($2,external_protocol),resolution_notes=COALESCE($3,resolution_notes),
-      submitted_at=CASE WHEN $1::varchar='SUBMITTED' THEN COALESCE(submitted_at,now()) ELSE submitted_at END,
-      resolved_at=CASE WHEN $1::varchar IN ('APPROVED','REJECTED','COMPLETED','CANCELLED') THEN now() ELSE resolved_at END,updated_at=now()
-      WHERE id=$4 AND organization_id=$5 RETURNING id,status,external_protocol AS "externalProtocol",resolved_at AS "resolvedAt"`,[v.status,v.externalProtocol??null,v.resolutionNotes??null,id,organizationId]);
-    if(current.incidentId)await db.query(`INSERT INTO incident_timeline(incident_id,event_type,actor_user_id,note,metadata) VALUES($1,'support_request.status_changed',$2,$3,$4::jsonb)`,[current.incidentId,auth.userId,`Solicitação operacional atualizada para ${v.status}.`,JSON.stringify({requestId:id,from:current.status,to:v.status})]);
-    await db.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data) VALUES($1,'support_request.status','operational_support_request',$2,$3,$4,$5::jsonb,$6::jsonb)`,[auth.userId,id,request.ip,request.headers["user-agent"]??null,JSON.stringify(before.rows[0]),JSON.stringify(r.rows[0])]);
-    return r.rows[0];
   });
 
   app.put("/api/v1/incidents/:id", {
