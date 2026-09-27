@@ -3,6 +3,7 @@ import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 import {formatDateTimeBR} from "../../lib/datetime";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type Row=Record<string,any>;
 const ops=["consultarProcedimento","gerarProcedimento","incluirDocumento","enviarProcesso","reabrirProcesso","concluirProcesso","consultarDocumento","listarSeries","listarTiposProcedimento","listarUnidades"];
@@ -11,6 +12,7 @@ export default function Page(){
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(API+path,{credentials:"include",cache:"no-store",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";throw new Error("Sessão expirada.")}const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??b.error??"Falha na operação.");return b},[]);
  const load=useCallback(async()=>{try{const[c,p,l]=await Promise.all([request("/api/v1/sei/connections"),request("/api/v1/sei/process-links"),request("/api/v1/sei/operation-logs")]);setConnections(c.items??[]);setLinks(p.items??[]);setLogs(l.items??[]);setMsg("")}catch(e){setMsg(e instanceof Error?e.message:"Falha ao carregar SEI Cidades.")}},[request]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,1000);
  async function perform(fn:()=>Promise<any>,success?:string){setBusy(true);setMsg("");try{const r=await fn();if(success)setMsg(success);await load();return r}catch(e){setMsg(e instanceof Error?e.message:"Falha na operação.")}finally{setBusy(false)}}
  async function addConnection(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=e.currentTarget,d=new FormData(f),allowed=ops.filter(x=>d.get("op_"+x)==="on");await perform(()=>request("/api/v1/sei/connections",{method:"POST",body:JSON.stringify({name:String(d.get("name")),baseUrl:String(d.get("baseUrl")),wsdlUrl:String(d.get("wsdlUrl")),systemCode:String(d.get("systemCode")),serviceIdentification:String(d.get("serviceIdentification")||""),unitId:String(d.get("unitId")),active:true,allowedOperations:allowed,config:{processTypeId:String(d.get("processTypeId")||""),documentTypeId:String(d.get("documentTypeId")||""),subjectId:String(d.get("subjectId")||""),accessLevel:String(d.get("accessLevel")||"0"),legalHypothesisId:String(d.get("legalHypothesisId")||"")}})}),"Conexão SEI cadastrada.");f.reset()}
  async function test(id:string){const r=await perform(()=>request("/api/v1/sei/connections/"+id+"/test",{method:"POST",body:"{}"}),"WSDL consultado.");if(r?.operations)setDiscovered(r.operations)}
