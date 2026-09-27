@@ -505,8 +505,10 @@ export async function incidentRoutes(app: FastifyInstance) {
         FROM inspections WHERE incident_id=$1 AND organization_id=$2 ORDER BY created_at ASC`,[id,organizationId]),
       db.query(`SELECT id,action_type AS "actionType",title,description,started_at AS "startedAt",ended_at AS "endedAt",address_line AS "addressLine",neighborhood,latitude,longitude,participants_count AS "participantsCount"
         FROM civil_defense_actions WHERE incident_id=$1 AND organization_id=$2 ORDER BY started_at ASC`,[id,organizationId]),
-      db.query(`SELECT id,request_type AS "requestType",status,destination,justification,requested_items AS "requestedItems",external_protocol AS "externalProtocol",submitted_at AS "submittedAt",resolved_at AS "resolvedAt",resolution_notes AS "resolutionNotes",created_at AS "createdAt"
-        FROM operational_support_requests WHERE incident_id=$1 AND organization_id=$2 ORDER BY created_at ASC`,[id,organizationId]),
+      db.query(`SELECT id,service_type AS "requestType",status,COALESCE(external_system,scope) AS destination,
+        summary AS justification,'[]'::json AS "requestedItems",external_protocol AS "externalProtocol",
+        submitted_at AS "submittedAt",approved_at AS "resolvedAt",NULL::text AS "resolutionNotes",created_at AS "createdAt"
+        FROM external_support_requests WHERE incident_id=$1 AND organization_id=$2 ORDER BY created_at ASC`,[id,organizationId]),
       db.query(`SELECT d.delivered_at AS "deliveredAt",d.recipient_name AS "recipientName",d.notes,
         COALESCE(json_agg(json_build_object('item',hi.name,'quantity',di.quantity,'unit',hi.unit)) FILTER (WHERE hi.id IS NOT NULL),'[]'::json) AS items
         FROM humanitarian_deliveries d
