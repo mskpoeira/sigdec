@@ -52,6 +52,12 @@ type FieldPosition = {
 type TrailPoint={userId:string;displayName:string;matricula:string;teamCode:string|null;latitude:number;longitude:number;speedMps?:number|null;headingDegrees?:number|null;trackingSessionId?:string|null;recordedAt:string};
 type MapPoint={id:string;title:string;description:string;latitude:number;longitude:number;createdAt:string;createdBy:string};
 type MonitoringReading={id:number;stationId:string;stationCode:string;stationName:string;stationType:string;latitude:number|null;longitude:number|null;metric:string;value:number;unit:string;measuredAt:string};
+type RiskAreaLayer={id:string;code:string;name:string;neighborhood:string|null;hazardType:string;riskLevel:string;status:string;exposedBuildings:number;exposedPeople:number;latitude:number|null;longitude:number|null;boundaryGeojson:any};
+type WarningAssetLayer={id:string;code:string;name:string;assetType:string;status:string;neighborhood:string|null;latitude:number;longitude:number;batteryPercent:number|null;lastTestedAt:string|null};
+type CriticalInfrastructureLayer={id:string;code:string;name:string;category:string;operationalStatus:string;criticality:string;neighborhood:string|null;latitude:number;longitude:number;backupPower:boolean;autonomyHours:number|null};
+type ShelterLayer={id:string;name:string;status:string;neighborhood:string|null;capacityPeople:number;currentPeople:number;latitude:number;longitude:number;accessible:boolean;generatorAvailable:boolean;petAreaAvailable:boolean};
+type EvacuationRouteLayer={id:string;code:string;name:string;status:string;accessible:boolean;routeGeojson:any;originText:string|null;destinationText:string;riskAreaCode:string|null;riskAreaName:string|null};
+type ActiveWarningLayer={id:string;severity:string;title:string;message:string;instruction:string|null;status:string;channels:string[];publishedAt:string|null;riskAreaCode:string|null;riskAreaName:string|null;latitude:number|null;longitude:number|null};
 
 export default function CampoPage() {
   const [monitorMode,setMonitorMode]=useState(false);
@@ -60,6 +66,13 @@ export default function CampoPage() {
   const [positionTrail,setPositionTrail]=useState<TrailPoint[]>([]);
   const [monitoringEvents, setMonitoringEvents] = useState<MonitoringSignal[]>([]);
   const [latestReadings,setLatestReadings]=useState<MonitoringReading[]>([]);
+  const [riskAreas,setRiskAreas]=useState<RiskAreaLayer[]>([]);
+  const [warningAssets,setWarningAssets]=useState<WarningAssetLayer[]>([]);
+  const [criticalInfrastructures,setCriticalInfrastructures]=useState<CriticalInfrastructureLayer[]>([]);
+  const [shelterLayers,setShelterLayers]=useState<ShelterLayer[]>([]);
+  const [evacuationRoutes,setEvacuationRoutes]=useState<EvacuationRouteLayer[]>([]);
+  const [activeWarnings,setActiveWarnings]=useState<ActiveWarningLayer[]>([]);
+  const [mapLayers,setMapLayers]=useState({incidents:true,teams:true,monitoring:true,risks:true,warnings:true,infrastructure:true,shelters:true,routes:true});
   const [sitrep, setSitrep] = useState<Sitrep | null>(null);
   const [historyHours, setHistoryHours] = useState(24);
   const [historyPositions, setHistoryPositions] = useState<FieldPosition[]>([]);
@@ -181,6 +194,12 @@ export default function CampoPage() {
     setPositionTrail(body.positionTrail ?? []);
     setMonitoringEvents(body.monitoringEvents ?? []);
     setLatestReadings(body.latestReadings ?? []);
+    setRiskAreas(body.riskAreas ?? []);
+    setWarningAssets(body.warningAssets ?? []);
+    setCriticalInfrastructures(body.criticalInfrastructures ?? []);
+    setShelterLayers(body.shelters ?? []);
+    setEvacuationRoutes(body.evacuationRoutes ?? []);
+    setActiveWarnings(body.activeWarnings ?? []);
     const pointResponse=await fetch(`${API_URL}/api/v1/field/map-points`,{credentials:"include"});
     if(pointResponse.ok){const pointBody=await pointResponse.json();setPoints(pointBody.items??[]);}
     const firstLocated = (body.incidents ?? []).find(
