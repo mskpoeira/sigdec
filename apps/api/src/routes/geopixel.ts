@@ -247,7 +247,7 @@ export async function geoPixelRoutes(app:FastifyInstance){
   return {type:"FeatureCollection",features:r.rows.map(x=>({type:"Feature",id:x.id,geometry:x.geometry,properties:{...x.properties,_sigdec:{remoteId:x.remoteId,layerId:x.layerId,layerCode:x.layerCode,layerTitle:x.layerTitle,category:x.category,localTarget:x.localTarget,syncedAt:x.syncedAt}}}))};
  });
 
- app.get("/api/v1/geopixel/context/incident/:id",{preHandler:requirePermission("geopixel.read")},async(request,reply)=>{
+ app.get("/api/v1/geopixel/context/incident/:id",{preHandler:requirePermission("incidents.read")},async(request,reply)=>{
   const o=org(request),{id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const incident=await db.query("SELECT id,protocol,latitude,longitude FROM incidents WHERE id=$1 AND organization_id=$2",[id,o]);
   const item=incident.rows[0];if(!item)return reply.code(404).send({error:"NOT_FOUND"});
