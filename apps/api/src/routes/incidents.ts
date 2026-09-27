@@ -11,6 +11,24 @@ const sourceSchema = z.enum([
 ]);
 const phoneTypeSchema = z.enum(["LANDLINE","MOBILE"]);
 
+async function geocodeUbatubaAddress(addressLine:string,neighborhood?:string){
+  if(process.env.SIGDEC_GEOCODING_ENABLED==="false")return null;
+  const query=[addressLine,neighborhood,"Ubatuba","SP","Brasil"].filter(Boolean).join(", ");
+  const url=new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format","jsonv2");url.searchParams.set("limit","1");url.searchParams.set("countrycodes","br");
+  url.searchParams.set("accept-language","pt-BR");url.searchParams.set("viewbox","-45.38,-23.18,-44.68,-23.68");
+  url.searchParams.set("bounded","1");url.searchParams.set("q",query);
+  try{
+    const response=await fetch(url,{headers:{accept:"application/json","user-agent":"SIGDEC-Ubatuba/1.75 (+https://sigdec.mskpoeira.com.br)"},signal:AbortSignal.timeout(4500)});
+    if(!response.ok)return null;
+    const body=await response.json() as Array<{lat?:string;lon?:string}>;
+    const latitude=Number(body[0]?.lat),longitude=Number(body[0]?.lon);
+    if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return null;
+    if(latitude < -23.68 || latitude > -23.18 || longitude < -45.38 || longitude > -44.68)return null;
+    return {latitude,longitude};
+  }catch{return null}
+}
+
 const createIncidentSchema = z.object({
   typeId: z.string().uuid(),
   source: sourceSchema,
@@ -200,6 +218,12 @@ export async function incidentRoutes(app: FastifyInstance) {
     }
 
     const input = parsed.data;
+    let incidentLatitude=input.latitude;
+    let incidentLongitude=input.longitude;
+    if(incidentLatitude===undefined&&incidentLongitude===undefined&&input.addressLine){
+      const geocoded=await geocodeUbatubaAddress(input.addressLine,input.neighborhood);
+      if(geocoded){incidentLatitude=geocoded.latitude;incidentLongitude=geocoded.longitude}
+    }
     const client = await db.connect();
 
     try {
@@ -259,7 +283,7 @@ export async function incidentRoutes(app: FastifyInstance) {
           input.callerName ?? null, input.callerPhone ?? null, input.callerPhone ? input.callerPhoneType ?? null : null,
           input.callerPhone ? input.callerPhoneWhatsapp : false,
           input.addressLine ?? null, input.neighborhood ?? null, input.referencePoint ?? null,
-          input.latitude ?? null, input.longitude ?? null, auth.userId
+          incidentLatitude ?? null, incidentLongitude ?? null, auth.userId
         ]
       );
 
