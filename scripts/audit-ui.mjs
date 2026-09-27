@@ -31,8 +31,9 @@ for(const [file,content] of texts){
 if(obsolete.length)fail("Referência obsoleta ao logo remoto da Defesa Civil.",obsolete);
 
 const required=[
- ["app/login/page.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/login/page.tsx","data:image/webp;base64,"],
  ["app/painel/page.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/GlobalExperience.tsx","moduleHeaderDefenseMark"],
  ["app/login/page.tsx","institutionalMark"],
  ["app/painel/page.tsx","opsBrandMark"],
  ["app/GlobalSidebar.tsx","globalBrandMark"]
@@ -58,8 +59,8 @@ for(const [file,content] of texts){
 if(missingAlt.length)fail("Imagem sem texto alternativo.",missingAlt);
 
 const css=fs.readFileSync(path.join(app,"modern-ui.css"),"utf8");
-for(const selector of [".institutionalMark",".opsBrandMark",".globalBrandMark",":focus-visible"]){
+for(const selector of [".institutionalMark",".opsBrandMark",".globalBrandMark",".moduleHeaderDefenseMark",":focus-visible"]){
  if(!css.includes(selector))fail("Design system incompleto: "+selector);
 }
 
-console.log("Auditoria visual: logo local OK, marcas padronizadas, sem accordion +/−, imagens com alt e foco acessível.");
+console.log("Auditoria visual: logo da Defesa Civil garantido no login/cabeçalhos, marcas padronizadas, sem accordion +/−, imagens com alt e foco acessível.");
