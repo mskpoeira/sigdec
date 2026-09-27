@@ -1,0 +1,10 @@
+ALTER TABLE shelters ADD COLUMN IF NOT EXISTS postal_code text;
+ALTER TABLE shelters ADD COLUMN IF NOT EXISTS address_number text;
+ALTER TABLE shelters ADD COLUMN IF NOT EXISTS address_complement text;
+ALTER TABLE shelters ADD COLUMN IF NOT EXISTS city text;
+ALTER TABLE shelters ADD COLUMN IF NOT EXISTS state char(2);
+ALTER TABLE shelter_responsibles ADD COLUMN IF NOT EXISTS postal_code text;
+ALTER TABLE shelter_responsibles ADD COLUMN IF NOT EXISTS address_number text;
+ALTER TABLE shelter_responsibles ADD COLUMN IF NOT EXISTS address_complement text;
+ALTER TABLE shelter_responsibles ADD COLUMN IF NOT EXISTS city text;
+ALTER TABLE shelter_responsibles ADD COLUMN IF NOT EXISTS state char(2);
