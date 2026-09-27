@@ -290,6 +290,16 @@ export default function CampoPage() {
     const {x,y}=mapPercent(latitude,longitude);
     return {left:x+"%",top:y+"%"};
   };
+  const geoJsonLine=(value:any):Array<[number,number]>=>{
+    if(!value||typeof value!=="object")return[];
+    const geometry=value.type==="Feature"?value.geometry:value;
+    if(!geometry||!Array.isArray(geometry.coordinates))return[];
+    if(geometry.type==="LineString")return geometry.coordinates.filter((p:any)=>Array.isArray(p)&&p.length>=2).map((p:any)=>[Number(p[0]),Number(p[1])]);
+    if(geometry.type==="Polygon")return (geometry.coordinates[0]??[]).filter((p:any)=>Array.isArray(p)&&p.length>=2).map((p:any)=>[Number(p[0]),Number(p[1])]);
+    return[];
+  };
+  const geoJsonSvgPoints=(value:any)=>geoJsonLine(value).filter(([lon,lat])=>Number.isFinite(lon)&&Number.isFinite(lat)).map(([lon,lat])=>{const p=mapPercent(lat,lon);return p.x+","+p.y}).join(" ");
+  const toggleLayer=(key:keyof typeof mapLayers)=>setMapLayers(current=>({...current,[key]:!current[key]}));
   const pinPosition=(item:FieldIncident)=>mapPosition(item.latitude,item.longitude);
   const mapUrl = useMemo(() => {
     if(monitorMode)return "https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
