@@ -1,5 +1,6 @@
 import {randomUUID} from "node:crypto";
 import type {FastifyReply} from "fastify";
+import type {PoolClient} from "pg";
 import {db} from "../db.js";
 
 type RealtimeClient={
@@ -21,7 +22,7 @@ type RealtimeEnvelope={source:string;event:RealtimeEvent};
 const clients=new Set<RealtimeClient>();
 const instanceId=randomUUID();
 const channel="sigdec_realtime";
-let bridgeClient:Awaited<ReturnType<typeof db.connect>>|null=null;
+let bridgeClient:PoolClient|null=null;
 let bridgeActive=false;
 let reconnectTimer:NodeJS.Timeout|null=null;
 let bridgeLastError:string|null=null;
