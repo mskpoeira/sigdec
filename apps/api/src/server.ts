@@ -26,6 +26,8 @@ import { evaluateSidecArchiveVerifications, evaluateSidecDeadlineAlerts, evaluat
 import { continuityRoutes, evaluateContinuityActionAlerts, evaluateContinuityChangeReportArchives, evaluateContinuityChangeReportResilience } from "./routes/continuity.js";
 import { riskManagementRoutes } from "./routes/risk-management.js";
 import { geoPixelRoutes } from "./routes/geopixel.js";
+import { legalAiRoutes } from "./routes/legal-ai.js";
+import { seiRoutes } from "./routes/sei.js";
 import { dispatchGeoPixelExports, syncDueGeoPixelLayers } from "./lib/geopixel.js";
 const app=Fastify({logger:true,trustProxy:true});
 app.addContentTypeParser(/^(?:image|video)\//,{parseAs:"buffer",bodyLimit:125829120},(_request,body,done)=>done(null,body));
@@ -74,10 +76,10 @@ app.get("/api/v1/ready",async(_request,reply)=>{
   return reply.code(503).send({status:"unavailable",service:"sigdec-api",version:release});
  }
 });
-await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(experienceRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);await app.register(riskManagementRoutes);await app.register(geoPixelRoutes);
+await app.register(authRoutes);await app.register(incidentRoutes);await app.register(responseRoutes);await app.register(fieldRoutes);await app.register(commandRoutes);await app.register(planningRoutes);await app.register(contingencyRoutes);await app.register(resilienceRoutes);await app.register(documentRoutes);await app.register(adminRoutes);await app.register(adminUserRoutes);await app.register(adminDataRoutes);await app.register(experienceRoutes);await app.register(sidecRoutes);await app.register(continuityRoutes);await app.register(riskManagementRoutes);await app.register(geoPixelRoutes);await app.register(legalAiRoutes);await app.register(seiRoutes);
 app.get("/api/v1",async()=>({
  name:"SIGDEC API",product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",version:"v1",release,
- modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","gestao-integrada-riscos","danos-fide-dmate","infraestruturas-criticas","animais-em-desastres","geopixel-integracao-territorial","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
+ modules:["auth","ocorrencias-monitoramento","assistencia-humanitaria","planejamento-contingencia","operacoes-sco","resiliencia","gestao-integrada-riscos","danos-fide-dmate","infraestruturas-criticas","animais-em-desastres","geopixel-integracao-territorial","inteligencia-juridica-ia","sei-cidades","documentos","administracao","integracoes","auditoria","sidec-interoperabilidade","continuidade"]
 }));
 app.get("/api/v1/capabilities",async()=>({
  product:"SIGDEC — Sistema Integrado de Gestão de Defesa Civil",release,format:"application/json",
@@ -90,11 +92,13 @@ app.get("/api/v1/capabilities",async()=>({
   {code:"resilience",label:"Resiliência",pages:["/resiliencia","/apoios","/capacitacao","/ajuda-mutua","/operacoes-sazonais","/simulados","/voluntarios"]},
   {code:"risk-management",label:"Gestão Integrada do Risco",pages:["/gestao-riscos","/danos","/infraestruturas","/assistencia/animais","/sco/plano-acao"]},
   {code:"geopixel",label:"GeoPixel / Inteligência Territorial",pages:["/administracao/geopixel","/campo"]},
+  {code:"intelligence",label:"Inteligência Jurídica e IA",pages:["/inteligencia","/administracao/base-legal"]},
+  {code:"sei",label:"SEI Cidades",pages:["/administracao/sei"]},
   {code:"documents",label:"Documentos e Continuidade",pages:["/documentos","/continuidade","/verificar-integridade"]},
   {code:"administration",label:"Administração",pages:["/administracao","/administracao/usuarios","/administracao/cadastros","/administracao/auditoria","/administracao/saude","/administracao/apresentacao"]},
   {code:"institutional",label:"Experiência Institucional",pages:["/apresentacao"]}
  ],
- interoperability:["SIDEC","S2ID","GeoPixel","WFS","WMS","GeoJSON","webhooks","JSON","CSV","PDF","KML"],
+ interoperability:["SIDEC","S2ID","SEI Cidades","GeoPixel","WFS","WMS","GeoJSON","CAP","webhooks","JSON","CSV","PDF","KML"],
  generatedAt:new Date().toISOString()
 }));
 await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"0.0.0.0"});
