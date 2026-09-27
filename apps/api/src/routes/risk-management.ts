@@ -165,9 +165,7 @@ export async function riskManagementRoutes(app:FastifyInstance){
  app.get("/api/v1/incidents/:id/risk-context",{preHandler:requirePermission("incidents.read")},async(request,reply)=>{
   const o=org(request),{id}=request.params as {id:string};
   if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
-  const incident=await db.query(`SELECT id,protocol,summary,latitude,longitude,
-    CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL
-      THEN ST_SetSRID(ST_MakePoint(longitude,latitude),4326)::geography ELSE NULL END AS point
+  const incident=await db.query(`SELECT id,protocol,summary,latitude,longitude
     FROM incidents WHERE id=$1 AND organization_id=$2`,[id,o]);
   const current=incident.rows[0];
   if(!current)return reply.code(404).send({error:"NOT_FOUND"});
@@ -175,31 +173,31 @@ export async function riskManagementRoutes(app:FastifyInstance){
   const [riskAreas,warningAssets,infrastructure,shelters]=await Promise.all([
    db.query(`SELECT id,code,name,risk_level AS "riskLevel",hazard_type AS "hazardType",status,
       exposed_people AS "exposedPeople",exposed_buildings AS "exposedBuildings",
-      round(ST_Distance(location,$3::geography))::int AS "distanceMeters"
+      round(ST_Distance(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography))::int AS "distanceMeters"
      FROM territorial_risk_areas
      WHERE organization_id=$1 AND status<>'INACTIVE' AND location IS NOT NULL
-       AND ST_DWithin(location,$3::geography,5000)
+       AND ST_DWithin(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography,5000)
      ORDER BY "distanceMeters",CASE risk_level WHEN 'R4' THEN 1 WHEN 'R3' THEN 2 ELSE 3 END LIMIT 20`,
-     [o,id,current.point]),
+     [o,current.longitude,current.latitude]),
    db.query(`SELECT id,code,name,asset_type AS "assetType",status,battery_percent::float8 AS "batteryPercent",
-      round(ST_Distance(location,$2::geography))::int AS "distanceMeters"
+      round(ST_Distance(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography))::int AS "distanceMeters"
      FROM warning_assets
-     WHERE organization_id=$1 AND location IS NOT NULL AND ST_DWithin(location,$2::geography,8000)
-     ORDER BY "distanceMeters" LIMIT 20`,[o,current.point]),
+     WHERE organization_id=$1 AND location IS NOT NULL AND ST_DWithin(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography,8000)
+     ORDER BY "distanceMeters" LIMIT 20`,[o,current.longitude,current.latitude]),
    db.query(`SELECT id,code,name,category,operational_status AS "operationalStatus",criticality,
       backup_power AS "backupPower",autonomy_hours::float8 AS "autonomyHours",
-      round(ST_Distance(location,$2::geography))::int AS "distanceMeters"
+      round(ST_Distance(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography))::int AS "distanceMeters"
      FROM critical_infrastructures
-     WHERE organization_id=$1 AND location IS NOT NULL AND ST_DWithin(location,$2::geography,10000)
-     ORDER BY CASE criticality WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 ELSE 3 END,"distanceMeters" LIMIT 30`,[o,current.point]),
+     WHERE organization_id=$1 AND location IS NOT NULL AND ST_DWithin(location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography,10000)
+     ORDER BY CASE criticality WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 ELSE 3 END,"distanceMeters" LIMIT 30`,[o,current.longitude,current.latitude]),
    db.query(`SELECT s.id,s.name,s.status,s.capacity_people AS "capacityPeople",s.accessible,
       s.generator_available AS "generatorAvailable",s.pet_area_available AS "petAreaAvailable",
       COALESCE((SELECT sum(adults+children+elderly+persons_with_disability)
         FROM assisted_households h WHERE h.shelter_id=s.id AND h.departed_at IS NULL),0)::int AS "currentPeople",
-      round(ST_Distance(s.location,$2::geography))::int AS "distanceMeters"
+      round(ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography))::int AS "distanceMeters"
      FROM shelters s
-     WHERE s.organization_id=$1 AND s.location IS NOT NULL AND ST_DWithin(s.location,$2::geography,15000)
-     ORDER BY CASE s.status WHEN 'OPEN' THEN 1 WHEN 'STANDBY' THEN 2 ELSE 3 END,"distanceMeters" LIMIT 20`,[o,current.point])
+     WHERE s.organization_id=$1 AND s.location IS NOT NULL AND ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($2::double precision,$3::double precision),4326)::geography,15000)
+     ORDER BY CASE s.status WHEN 'OPEN' THEN 1 WHEN 'STANDBY' THEN 2 ELSE 3 END,"distanceMeters" LIMIT 20`,[o,current.longitude,current.latitude])
   ]);
   return {georeferenced:true,incident:{id:current.id,protocol:current.protocol,latitude:current.latitude,longitude:current.longitude},
    riskAreas:riskAreas.rows,warningAssets:warningAssets.rows,criticalInfrastructures:infrastructure.rows,shelters:shelters.rows};
