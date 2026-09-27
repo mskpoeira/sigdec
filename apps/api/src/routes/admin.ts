@@ -4,6 +4,7 @@ import {z} from "zod";
 import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
 import {assertSafeWebhookUrl,encryptWebhookSecret,newWebhookSecret,queueWebhookTest} from "../lib/webhooks.js";
+import {realtimeBridgeStatus} from "../lib/realtime.js";
 
 const FEATURES=[
  ["incidents","Ocorrências"],["dispatch","Despacho"],["field","Operação de campo"],["inspections","Vistorias"],
@@ -96,7 +97,8 @@ export async function adminRoutes(app:FastifyInstance){
    integrations:integrations.rows[0],
    audit24h:audit24h.rows[0],
    auditIntegrity:{...auditIntegrity.rows[0],appendOnly:true,algorithm:"SHA-256"},
-   auditCheckpoints:auditCheckpoints.rows[0]
+   auditCheckpoints:auditCheckpoints.rows[0],
+   realtime:realtimeBridgeStatus()
   };
  });
 
