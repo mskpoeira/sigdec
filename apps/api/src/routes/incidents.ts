@@ -648,6 +648,14 @@ export async function incidentRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: "NOT_FOUND" });
       }
 
+      if (!(transitions[current.status] ?? []).includes(parsed.data.status)) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          error: "INVALID_TRANSITION",
+          message: `Transição ${current.status} → ${parsed.data.status} não permitida.`
+        });
+      }
+
       await client.query(
         `UPDATE incidents
             SET status = $3::varchar,
