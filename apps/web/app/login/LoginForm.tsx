@@ -38,7 +38,7 @@ export default function LoginForm() {
       setMessage("Cadastre o SIGDEC no seu aplicativo autenticador e informe o código de 6 dígitos.");
     }else{
       setMfa({challengeToken,setupRequired:false});
-      setMessage("Informe o código do aplicativo autenticador ou um código de recuperação.");
+      setMessage("Novo navegador ou dispositivo detectado. Confirme o segundo fator; depois deste acesso, este navegador ficará confiável pelo período de segurança configurado.");
     }
     setPassword("");
     setShowPassword(false);
@@ -121,7 +121,8 @@ export default function LoginForm() {
 
   if(mfa){
     return <form className="loginCard" onSubmit={submitMfa}>
-      <div><span className="eyebrow">{mfa.setupRequired?"ATIVAR MFA":"SEGUNDO FATOR"}</span><h2>{mfa.setupRequired?"Proteja sua conta":"Confirmar acesso"}</h2></div>
+      <div><span className="eyebrow">{mfa.setupRequired?"ATIVAR MFA":"NOVO DISPOSITIVO"}</span><h2>{mfa.setupRequired?"Proteja sua conta":"Confirmar este navegador"}</h2></div>
+      {!mfa.setupRequired&&<p>O SIGDEC solicita 2FA somente quando este navegador/dispositivo ainda não é confiável. Após a validação TOTP, os próximos logins neste navegador usarão apenas matrícula e senha até a confiança expirar ou ser revogada.</p>}
       {mfa.setupRequired&&<>
         <p>Leia o QR Code com Microsoft Authenticator, Google Authenticator, 1Password ou outro aplicativo compatível com TOTP.</p>
         {mfa.qrDataUrl?<img src={mfa.qrDataUrl} alt="QR Code para configurar MFA" width={240} height={240} style={{alignSelf:"center",maxWidth:"100%"}}/>:null}
@@ -165,7 +166,7 @@ export default function LoginForm() {
       {message && <p className="errorMessage" role="alert">{message}</p>}
       <button type="submit" disabled={loading}>{loading ? "Autenticando..." : "Entrar"}</button>
       <a className="loginLink" href="/esqueci-senha">Esqueci minha senha</a>
-      <small>O acesso e as ações realizadas no sistema são registrados para fins de segurança e auditoria.</small>
+      <small>O acesso e as ações realizadas no sistema são registrados para fins de segurança e auditoria. O 2FA é solicitado em navegador/dispositivo novo ou quando a confiança anterior expira ou é revogada.</small>
     </form>
   );
 }
