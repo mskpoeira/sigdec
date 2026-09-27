@@ -71,9 +71,24 @@ export default function PainelPage(){
  const builtInNavPaths=new Set(nav.map(([, ,href])=>String(href)));
  const locatedMapIncidents=mapIncidents.filter(x=>x.latitude!==null&&x.longitude!==null);
  const unlocatedMapIncidents=mapIncidents.length-locatedMapIncidents.length;
- const situationMapUrl="https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
- const pinPosition=(x:MapIncident)=>{const lat=Number(x.latitude),lon=Number(x.longitude);const left=Math.max(2,Math.min(98,((lon-mapBounds.west)/(mapBounds.east-mapBounds.west))*100));const top=Math.max(2,Math.min(98,((mapBounds.north-lat)/(mapBounds.north-mapBounds.south))*100));return {left:`${left}%`,top:`${top}%`}};
+ const mapZoom=11,mapTileSize=256,mapWorldSize=mapTileSize*(2**mapZoom);
+ const worldPoint=(latitude:number,longitude:number)=>{
+  const lat=Math.max(-85.05112878,Math.min(85.05112878,latitude))*Math.PI/180;
+  return {x:((longitude+180)/360)*mapWorldSize,y:(1-Math.asinh(Math.tan(lat))/Math.PI)/2*mapWorldSize};
+ };
+ const mapNorthWest=worldPoint(mapBounds.north,mapBounds.west),mapSouthEast=worldPoint(mapBounds.south,mapBounds.east);
+ const mapPixelWidth=mapSouthEast.x-mapNorthWest.x,mapPixelHeight=mapSouthEast.y-mapNorthWest.y;
+ const osmTiles:Array<{key:string;src:string;style:{left:string;top:string;width:string;height:string}}>= [];
+ for(let tileX=Math.floor(mapNorthWest.x/mapTileSize);tileX<=Math.floor(mapSouthEast.x/mapTileSize);tileX++){
+  for(let tileY=Math.floor(mapNorthWest.y/mapTileSize);tileY<=Math.floor(mapSouthEast.y/mapTileSize);tileY++){
+   osmTiles.push({key:`${tileX}-${tileY}`,src:`https://tile.openstreetmap.org/${mapZoom}/${tileX}/${tileY}.png`,style:{
+    left:`${((tileX*mapTileSize-mapNorthWest.x)/mapPixelWidth)*100}%`,top:`${((tileY*mapTileSize-mapNorthWest.y)/mapPixelHeight)*100}%`,
+    width:`${(mapTileSize/mapPixelWidth)*100}%`,height:`${(mapTileSize/mapPixelHeight)*100}%`
+   }});
+  }
+ }
+ const pinPosition=(incident:MapIncident)=>{const p=worldPoint(Number(incident.latitude),Number(incident.longitude));const left=Math.max(1.5,Math.min(98.5,((p.x-mapNorthWest.x)/mapPixelWidth)*100));const top=Math.max(1.5,Math.min(98.5,((p.y-mapNorthWest.y)/mapPixelHeight)*100));return {left:`${left}%`,top:`${top}%`}};
  const handleSideInteraction=(event:MouseEvent<HTMLElement>)=>{if(typeof window==="undefined"||!window.matchMedia("(max-width: 800px)").matches||mobileMenuOpen)return;const target=event.target as HTMLElement;if(!target.closest("a,button"))return;event.preventDefault();event.stopPropagation();setMobileMenuOpen(true)};
  return <main className="opsDashboard">
   <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
@@ -95,7 +110,7 @@ export default function PainelPage(){
     <div className="opsQuick">{quick.filter(([, , , ,feature])=>featureOn(feature)).map(([i,n,h,c])=><Link href={h} className={"quick "+c} key={n}><b>{i}</b><span>{n}</span></Link>)}</div>
     <div className="opsBottom">
      <section className="opsCard"><header><h2>Ocorrências Recentes</h2><Link href="/ocorrencias">Ver todas</Link></header>{incidents.length===0?<p className="emptyMini">Nenhuma ocorrência recente.</p>:incidents.map((x,i)=><Link href={`/ocorrencias/${x.id}`} className="incidentMini" key={x.id}><i className={"dot d"+i}/><div><b>{x.summary}</b><small>⌖ {x.neighborhood??"Local não informado"} · {ptBR(x.priority)}</small></div><span>{ptBR(x.status)}</span></Link>)}</section>
-     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap"><iframe src={situationMapUrl} title="Mapa de Situação — Ubatuba" loading="lazy"/><a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<div className="mapSource">© OpenStreetMap · atualização em tempo real</div><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto no mapa{unlocatedMapIncidents>0&&<><br/><span className="mapPendingLocation">⚠ {unlocatedMapIncidents} sem coordenadas — localização pendente</span></>}<br/>🔴 Ocorrência em aberto</div></div></section>
+     <section className="opsCard"><header><h2>Mapa de Situação <small className="liveBadge">● TEMPO REAL</small></h2><Link href="/campo?monitor=1" target="_blank">Abrir monitor em nova aba ↗</Link></header><div className="situationMap googleSituationMap">{osmTiles.map(tile=><img key={tile.key} className="osmSituationTile" src={tile.src} style={tile.style} alt="" loading="lazy" referrerPolicy="strict-origin-when-cross-origin"/>)}<a className="mapOpenRealtime" href="/campo?monitor=1" target="_blank" rel="noreferrer" aria-label="Abrir mapa de ocorrências em tempo real em nova aba"/>{locatedMapIncidents.map(x=><Link href={`/ocorrencias/${x.id}`} key={"map-"+x.id} className={`mapIncidentPin priorityMap-${x.priority}`} style={pinPosition(x)} title={`${x.protocol} · ${x.summary} · ${x.neighborhood??"localização georreferenciada"}`}><span>!</span></Link>)}<a className="mapSource" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap · atualização em tempo real</a><div className="legend"><strong>{locatedMapIncidents.length}</strong> ocorrência(s) em aberto no mapa{unlocatedMapIncidents>0&&<><br/><span className="mapPendingLocation">⚠ {unlocatedMapIncidents} sem coordenadas — localização pendente</span></>}<br/>🔴 Ocorrência em aberto</div></div></section>
     </div>
    </div>
    <nav className="opsMobileNav" aria-label="Navegação principal no celular">
