@@ -9,7 +9,10 @@ export const metadata = {
   description: "Sistema Integrado de Gestão da Defesa Civil de Ubatuba",
   manifest: "/manifest.webmanifest",
   applicationName: "SIGDEC Ubatuba",
-  appleWebApp: { capable: true, title: "SIGDEC Ubatuba", statusBarStyle: "default" as const },
+  appleWebApp: { capable: true, title: "SIGDEC Ubatuba", statusBarStyle: "default" as const }
+};
+
+export const viewport = {
   themeColor: "#082f55"
 };
 
