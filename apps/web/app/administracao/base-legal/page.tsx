@@ -3,6 +3,7 @@ import Link from "next/link";
 import {FormEvent,useCallback,useEffect,useMemo,useState} from "react";
 import {SIGDEC_VERSION_LABEL} from "../../lib/release";
 import {formatDateTimeBR} from "../../lib/datetime";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 type Row=Record<string,any>;
 export default function Page(){
@@ -10,6 +11,7 @@ export default function Page(){
  const request=useCallback(async(path:string,init?:RequestInit)=>{const r=await fetch(API+path,{credentials:"include",cache:"no-store",...init,headers:{"content-type":"application/json",...(init?.headers??{})}});if(r.status===401){location.href="/login";throw new Error("Sessão expirada.")}const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??b.error??"Falha na operação.");return b},[]);
  const load=useCallback(async()=>{try{const params=new URLSearchParams();if(q.trim())params.set("q",q.trim());if(jurisdiction)params.set("jurisdiction",jurisdiction);params.set("limit","500");const r=await request("/api/v1/legal/norms?"+params);setItems(r.items??[]);setMsg("")}catch(e){setMsg(e instanceof Error?e.message:"Falha ao carregar base legal.")}},[request,q,jurisdiction]);
  useEffect(()=>{void load()},[load]);
+ useRealtimeRefresh(()=>{if(!busy)return load()},true,1000);
  async function add(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=e.currentTarget,d=new FormData(f),topics=String(d.get("topics")||"").split(",").map(x=>x.trim()).filter(Boolean);setBusy(true);try{await request("/api/v1/legal/norms",{method:"POST",body:JSON.stringify({jurisdiction:String(d.get("jurisdiction")),stateCode:String(d.get("stateCode")||""),municipality:String(d.get("municipality")||""),normType:String(d.get("normType")),normNumber:String(d.get("normNumber")),normYear:String(d.get("normYear")||"").trim()?Number(d.get("normYear")):undefined,title:String(d.get("title")),summary:String(d.get("summary")||""),status:"ACTIVE",sourceUrl:String(d.get("sourceUrl")),officialSource:String(d.get("officialSource")),topics,verificationNotes:String(d.get("verificationNotes")||"")})});f.reset();setMsg("Norma cadastrada/verificada.");await load()}catch(e){setMsg(e instanceof Error?e.message:"Falha ao cadastrar norma.")}finally{setBusy(false)}}
  const grouped=useMemo(()=>({municipal:items.filter(x=>x.jurisdiction==="MUNICIPAL"),state:items.filter(x=>x.jurisdiction==="STATE"),federal:items.filter(x=>x.jurisdiction==="FEDERAL")}),[items]);
  return <main className="shell moduleShell">
