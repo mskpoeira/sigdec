@@ -101,7 +101,9 @@ export async function adminUserRoutes(app:FastifyInstance){
   const org=organization(authFrom(request).organizationId),parsed=userInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,matricula=normalizeMatricula(v.matricula);
-  if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});\n  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");\n  const password=temporaryPassword(),hash=await argon2.hash(password,{type:argon2.argon2id});
+  if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});
+  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
+  const password=temporaryPassword(),hash=await argon2.hash(password,{type:argon2.argon2id});
   const client=await db.connect();try{await client.query("BEGIN");
    const roles=await validateRoles(client,v.roleIds);
    if(!roles){await client.query("ROLLBACK");return reply.code(400).send({error:"INVALID_ROLES"});}
@@ -122,7 +124,9 @@ export async function adminUserRoutes(app:FastifyInstance){
   const org=organization(authFrom(request).organizationId),parsed=userInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,matricula=normalizeMatricula(v.matricula);
-  if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});\n  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");\n  const client=await db.connect();try{await client.query("BEGIN");
+  if(!matricula)return reply.code(400).send({error:"INVALID_MATRICULA"});
+  const primaryPhone=v.contacts.find(x=>x.kind==="PHONE"&&x.isPrimary)??v.contacts.find(x=>x.kind==="PHONE"),primaryEmail=v.contacts.find(x=>x.kind==="EMAIL"&&x.isPrimary)??v.contacts.find(x=>x.kind==="EMAIL");
+  const client=await db.connect();try{await client.query("BEGIN");
    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[org]);
    const before=await client.query("SELECT id,matricula,display_name,active FROM users WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
    if(!before.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
