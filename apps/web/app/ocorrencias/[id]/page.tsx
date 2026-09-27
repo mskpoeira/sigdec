@@ -2,6 +2,7 @@
 import { formatDateTimeBR } from "../../lib/datetime";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
@@ -177,10 +178,6 @@ export default function OcorrenciaDetalhePage() {
   const [actionTitle, setActionTitle] = useState("");
   const [actionDescription, setActionDescription] = useState("");
   const [actionParticipants, setActionParticipants] = useState("0");
-  const [supportType, setSupportType] = useState("HUMANITARIAN_AID");
-  const [supportDestination, setSupportDestination] = useState("");
-  const [supportJustification, setSupportJustification] = useState("");
-  const [supportItems, setSupportItems] = useState("");
   const [uploadingMedia,setUploadingMedia]=useState(false);
   const photoInputRef=useRef<HTMLInputElement|null>(null);
   const videoInputRef=useRef<HTMLInputElement|null>(null);
@@ -397,31 +394,6 @@ export default function OcorrenciaDetalhePage() {
       setMessage("Ação da Defesa Civil registrada e vinculada à ocorrência.");
       await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao registrar ação."); }
-    finally { setBusy(false); }
-  }
-
-  async function createSupportRequest(event: FormEvent) {
-    event.preventDefault();
-    if (!supportJustification.trim()) return;
-    setBusy(true); setMessage("");
-    try {
-      const requestedItems = supportItems.split("\n").map((name) => name.trim()).filter(Boolean).map((name) => ({ name }));
-      const response = await fetch(`${API_URL}/api/v1/support-requests`, {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          incidentId: id,
-          requestType: supportType,
-          destination: supportDestination || undefined,
-          justification: supportJustification,
-          requestedItems
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.message ?? body.error ?? "Não foi possível criar a solicitação.");
-      setSupportDestination(""); setSupportJustification(""); setSupportItems("");
-      setMessage("Solicitação operacional criada como rascunho e vinculada à ocorrência.");
-      await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao criar solicitação."); }
     finally { setBusy(false); }
   }
 
@@ -645,23 +617,11 @@ export default function OcorrenciaDetalhePage() {
           <button disabled={busy} type="submit">Registrar ação</button>
         </form>
 
-        <form className="incidentForm compactForm" onSubmit={createSupportRequest}>
-          <div><span className="eyebrow">SOLICITAÇÕES</span><h2>Nova solicitação operacional</h2></div>
-          <label>Tipo
-            <select value={supportType} onChange={(event)=>setSupportType(event.target.value)}>
-              <option value="HUMANITARIAN_AID">Ajuda humanitária</option>
-              <option value="EMERGENCY_INSPECTION">Vistoria emergencial</option>
-              <option value="STATE_SUPPORT">Apoio estadual</option>
-              <option value="LOGISTICS">Logística</option>
-              <option value="EQUIPMENT">Equipamentos</option>
-              <option value="OTHER">Outra</option>
-            </select>
-          </label>
-          <label>Destino/órgão<input value={supportDestination} onChange={(event)=>setSupportDestination(event.target.value)} placeholder="Ex.: Defesa Civil Estadual" /></label>
-          <label>Justificativa<textarea required value={supportJustification} onChange={(event)=>setSupportJustification(event.target.value)} /></label>
-          <label>Itens/necessidades — um por linha<textarea value={supportItems} onChange={(event)=>setSupportItems(event.target.value)} /></label>
-          <button disabled={busy} type="submit">Criar solicitação</button>
-        </form>
+        <article className="card detailCard">
+          <div><span className="eyebrow">APOIOS E RECURSOS</span><h2>Solicitações externas</h2></div>
+          <p>Solicitações estaduais, federais e de ajuda mútua são registradas em um único módulo para evitar informações duplicadas.</p>
+          <Link className="primaryButton" href={("/apoios?incidentProtocol="+encodeURIComponent(incident.protocol)) as Route}>Abrir módulo de Apoios</Link>
+        </article>
       </section>
 
       <section className="detailSection">
