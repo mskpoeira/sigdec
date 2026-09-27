@@ -485,34 +485,69 @@ export default function CampoPage() {
       <section className="situationRoomBody">
         <div className="situationRoomMap">
           <iframe className="mapFrame" src={mapUrl} title="Mapa operacional de Ubatuba em tempo real"/>
-          <svg className="monitorTrailLayer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {trailGroups.map(group=><polyline key={group.key} points={group.points.map(point=>{const p=mapPercent(point.latitude,point.longitude);return p.x+","+p.y}).join(" ")} />)}
+          <svg className="monitorTrailLayer territorialOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {mapLayers.teams&&trailGroups.map(group=><polyline className="vehicleTrail" key={"trail-"+group.key} points={group.points.map(point=>{const p=mapPercent(point.latitude,point.longitude);return p.x+","+p.y}).join(" ")} />)}
+            {mapLayers.risks&&riskAreas.map(area=>{const pts=geoJsonSvgPoints(area.boundaryGeojson);return pts?<polyline className={"riskBoundary risk-"+area.riskLevel.toLowerCase()} key={"risk-boundary-"+area.id} points={pts}/>:null})}
+            {mapLayers.routes&&evacuationRoutes.map(route=>{const pts=geoJsonSvgPoints(route.routeGeojson);return pts?<polyline className="evacuationRouteLine" key={"evac-"+route.id} points={pts}/>:null})}
+            {mapLayers.geopixel&&geopixelFeatures.map(feature=>{const pts=geoJsonSvgPoints(feature.geometry);return pts?<polyline className={"geopixelGeometry geopixel-"+feature.category.toLowerCase()} key={"geopixel-shape-"+feature.id} points={pts}/>:null})}
           </svg>
-          {stalePositions.length>0&&<div className="stalePositionWarning">⚠ {stalePositions.length} posição(ões) sem atualização há mais de 5 min</div>}
-          {locatedIncidents.map(item=><Link
+          <div className="mapLayerControls" aria-label="Camadas do mapa">
+            {([
+              ["incidents","Ocorrências"],["teams","Equipes"],["monitoring","Sensores"],["risks","PMRR/Riscos"],["warnings","Alertas/Sirenes"],
+              ["infrastructure","Infraestrutura"],["shelters","Abrigos"],["routes","Evacuação"],["geopixel","GeoPixel"]
+            ] as Array<[keyof typeof mapLayers,string]>).map(([key,label])=><button type="button" key={key} className={mapLayers[key]?"active":""} onClick={()=>toggleLayer(key)}>{label}</button>)}
+          </div>
+          {mapLayers.teams&&stalePositions.length>0&&<div className="stalePositionWarning">⚠ {stalePositions.length} posição(ões) sem atualização há mais de 5 min</div>}
+          {mapLayers.incidents&&locatedIncidents.map(item=><Link
             href={"/ocorrencias/"+item.id} target="_blank" rel="noreferrer"
             className={"monitorIncidentPin priorityMap-"+item.priority+(item.priority==="P1"?" criticalPulse":"")}
             style={mapPosition(item.latitude,item.longitude)} key={"monitor-inc-"+item.id}
             title={item.protocol+" · "+item.summary+" · "+(item.neighborhood??"localização georreferenciada")}>
             <span>{item.priority}</span>
           </Link>)}
-          {recentPositions.map(position=><a
+          {mapLayers.teams&&recentPositions.map(position=><a
             href={"https://www.openstreetmap.org/?mlat="+position.latitude+"&mlon="+position.longitude+"#map=17/"+position.latitude+"/"+position.longitude}
             target="_blank" rel="noreferrer" className={(position.vehicleCode?"monitorTeamPin vehicle":"monitorTeamPin")+(positionAgeMinutes(position)>=5?" stale":"")} style={mapPosition(position.latitude,position.longitude)}
             key={"monitor-team-"+position.userId} title={(position.vehicleCode?position.vehicleCode+" · ":"")+(position.teamCode??position.displayName)+" · "+position.displayName+" · atualização há "+positionAgeMinutes(position)+" min"}>
             <span>{position.vehicleCode?"🚙":"◆"}</span>
           </a>)}
-          {monitoringEvents.filter(signal=>Number.isFinite(Number(signal.latitude))&&Number.isFinite(Number(signal.longitude))).map(signal=><a
+          {mapLayers.monitoring&&monitoringEvents.filter(signal=>Number.isFinite(Number(signal.latitude))&&Number.isFinite(Number(signal.longitude))).map(signal=><a
             href={"https://www.openstreetmap.org/?mlat="+signal.latitude+"&mlon="+signal.longitude+"#map=17/"+signal.latitude+"/"+signal.longitude}
             target="_blank" rel="noreferrer"
             className={"monitorSignalPin "+(signal.severity==="EMERGENCY"?"emergency":signal.severity==="WARNING"?"warning":"")}
             style={mapPosition(signal.latitude,signal.longitude)} key={"monitor-signal-"+signal.id}
             title={signal.stationCode+" · "+signal.title}><span>▲</span></a>)}
+          {mapLayers.risks&&riskAreas.filter(area=>area.latitude!==null&&area.longitude!==null).map(area=><a
+            href={"https://www.openstreetmap.org/?mlat="+area.latitude+"&mlon="+area.longitude+"#map=17/"+area.latitude+"/"+area.longitude}
+            target="_blank" rel="noreferrer" className={"territorialPin riskPin risk-"+area.riskLevel.toLowerCase()} style={mapPosition(area.latitude,area.longitude)}
+            key={"risk-"+area.id} title={area.code+" · "+area.name+" · "+area.hazardType}><span>{area.riskLevel}</span></a>)}
+          {mapLayers.warnings&&warningAssets.map(asset=><a
+            href={"https://www.openstreetmap.org/?mlat="+asset.latitude+"&mlon="+asset.longitude+"#map=17/"+asset.latitude+"/"+asset.longitude}
+            target="_blank" rel="noreferrer" className={"territorialPin warningAssetPin "+(asset.status==="OPERATIONAL"?"":"degraded")} style={mapPosition(asset.latitude,asset.longitude)}
+            key={"warning-asset-"+asset.id} title={asset.code+" · "+asset.name+" · "+asset.status}><span>📢</span></a>)}
+          {mapLayers.warnings&&activeWarnings.filter(item=>item.latitude!==null&&item.longitude!==null).map(item=><a
+            href={"https://www.openstreetmap.org/?mlat="+item.latitude+"&mlon="+item.longitude+"#map=17/"+item.latitude+"/"+item.longitude}
+            target="_blank" rel="noreferrer" className={"territorialPin activeWarningPin severity-"+item.severity.toLowerCase()} style={mapPosition(item.latitude,item.longitude)}
+            key={"active-warning-"+item.id} title={item.title+" · "+item.severity}><span>⚠</span></a>)}
+          {mapLayers.infrastructure&&criticalInfrastructures.map(item=><a
+            href={"https://www.openstreetmap.org/?mlat="+item.latitude+"&mlon="+item.longitude+"#map=17/"+item.latitude+"/"+item.longitude}
+            target="_blank" rel="noreferrer" className={"territorialPin infrastructurePin "+(item.operationalStatus==="OPERATIONAL"?"":"degraded")} style={mapPosition(item.latitude,item.longitude)}
+            key={"infra-"+item.id} title={item.code+" · "+item.name+" · "+item.operationalStatus}><span>◆</span></a>)}
+          {mapLayers.shelters&&shelterLayers.map(item=><a
+            href={"https://www.openstreetmap.org/?mlat="+item.latitude+"&mlon="+item.longitude+"#map=17/"+item.latitude+"/"+item.longitude}
+            target="_blank" rel="noreferrer" className={"territorialPin shelterPin status-"+item.status.toLowerCase()} style={mapPosition(item.latitude,item.longitude)}
+            key={"shelter-"+item.id} title={item.name+" · "+item.currentPeople+"/"+item.capacityPeople+" pessoa(s)"}><span>⌂</span></a>)}
+          {mapLayers.geopixel&&geopixelFeatures.map(feature=>{const point=geoJsonPoint(feature.geometry);if(!point)return null;const [lon,lat]=point;return <a
+            href={"https://www.openstreetmap.org/?mlat="+lat+"&mlon="+lon+"#map=17/"+lat+"/"+lon}
+            target="_blank" rel="noreferrer" className={"territorialPin geopixelPin category-"+feature.category.toLowerCase()} style={mapPosition(lat,lon)}
+            key={"geopixel-point-"+feature.id} title={"GeoPixel · "+feature.layerTitle+" · "+feature.remoteId}><span>G</span></a>})}
           <div className="situationRoomLegend">
             <span><i className="legendIncident"/> Ocorrência</span>
-            <span><i className="legendTeam"/> Equipe/agente/viatura</span>
+            <span><i className="legendTeam"/> Equipe/viatura</span>
             <span><i className="legendSignal"/> Monitoramento</span>
-            <strong>Atualização contínua</strong>
+            <span><i className="legendRisk"/> Risco</span>
+            <span><i className="legendGeoPixel"/> GeoPixel</span>
+            <strong>{geopixelFeatures.length} feição(ões) GeoPixel · atualização contínua</strong>
           </div>
         </div>
 
