@@ -105,8 +105,9 @@ jobs:
               set -a
               source .env
               set +a
-              cat reset-occurrences.once.sql | docker compose --env-file .env exec -T postgres \
-                psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+              docker compose --env-file .env exec -T postgres \
+                psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                < reset-occurrences.once.sql
           REMOTE
 
       - name: Verificar aplicacao
