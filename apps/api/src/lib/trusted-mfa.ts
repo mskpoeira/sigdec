@@ -122,10 +122,12 @@ export async function revokeTrustedMfaDevices(userId:string){
  return result.rowCount??0;
 }
 
-export async function listTrustedMfaDevices(userId:string){
+export async function listTrustedMfaDevices(userId:string,currentToken?:string){
+ const currentHash=currentToken?hash(currentToken):null;
  const result=await db.query(
   `SELECT id,device_label AS "deviceLabel",first_ip::text AS "firstIp",last_ip::text AS "lastIp",
-          created_at AS "createdAt",last_used_at AS "lastUsedAt",expires_at AS "expiresAt"
+          created_at AS "createdAt",last_used_at AS "lastUsedAt",expires_at AS "expiresAt",
+          token_hash AS "tokenHash"
      FROM trusted_mfa_devices
     WHERE user_id=$1
       AND revoked_at IS NULL
@@ -133,17 +135,24 @@ export async function listTrustedMfaDevices(userId:string){
     ORDER BY COALESCE(last_used_at,created_at) DESC`,
   [userId]
  );
- return result.rows;
+ return result.rows.map((row:any)=>({
+  id:row.id,deviceLabel:row.deviceLabel,firstIp:row.firstIp,lastIp:row.lastIp,
+  createdAt:row.createdAt,lastUsedAt:row.lastUsedAt,expiresAt:row.expiresAt,
+  current:Boolean(currentHash&&row.tokenHash===currentHash)
+ }));
 }
 
-export async function revokeTrustedMfaDevice(userId:string,id:string){
- const result=await db.query(
+export async function revokeTrustedMfaDevice(userId:string,id:string,currentToken?:string){
+ const currentHash=currentToken?hash(currentToken):null;
+ const result=await db.query<{token_hash:string}>(
   `UPDATE trusted_mfa_devices
       SET revoked_at=now()
     WHERE id=$1
       AND user_id=$2
-      AND revoked_at IS NULL`,
+      AND revoked_at IS NULL
+    RETURNING token_hash`,
   [id,userId]
  );
- return (result.rowCount??0)===1;
+ const row=result.rows[0];
+ return row?{revoked:true,current:Boolean(currentHash&&row.token_hash===currentHash)}:{revoked:false,current:false};
 }
