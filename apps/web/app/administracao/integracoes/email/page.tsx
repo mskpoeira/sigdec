@@ -13,6 +13,12 @@ export default function InstitutionalMailAdminPage(){
  async function test(){setBusy(true);setMessage("");try{const r=await fetch(API+"/api/v1/institutional-mail/test",{method:"POST",credentials:"include"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message??"Teste falhou.");setMessage("SMTP e IMAP validados com sucesso.")}catch(e){setMessage(e instanceof Error?e.message:"Falha no teste.")}finally{setBusy(false)}}
  return <main className="shell moduleShell">
   <header className="listHeader"><div><span className="eyebrow">ADMINISTRAÇÃO · INTEGRAÇÕES · E-MAIL · {SIGDEC_VERSION_LABEL}</span><h1>E-mail institucional</h1><p>Integração segura do SIGDEC com o Webmail da Prefeitura por SMTP e IMAP TLS.</p></div><div className="headerActions"><Link className="secondaryLink" href="/administracao/integracoes">Integrações</Link><Link className="secondaryLink" href="/comunicacoes/email">Abrir caixa no SIGDEC</Link></div></header>
+  <nav className="sectionTabs" aria-label="Integrações específicas">
+   <Link href="/administracao/integracoes">⇄ Visão geral</Link>
+   <Link className="active" href="/administracao/integracoes/email">✉ E-mail institucional</Link>
+   <Link href="/administracao/geopixel">⌖ GeoPixel</Link>
+   <Link href="/administracao/sei">▤ SEI Cidades</Link>
+  </nav>
   {message&&<section className="infoCard">{message}</section>}
   <section className={status?.configured?"infoCard":"warningCard"}><strong>{status?.configured?"Credenciais configuradas no servidor":"Credenciais ainda não configuradas"}</strong><p>Nunca são exibidas nesta tela. O SIGDEC apenas informa se estão presentes.</p></section>
   <section className="dataGrid">
