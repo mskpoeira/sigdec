@@ -34,7 +34,7 @@ export default function GlobalSidebar(){
   {open&&<button className="globalNavBackdrop" type="button" aria-label="Fechar menu" onClick={()=>setOpen(false)}/>}
   <aside className={"sigdecGlobalSidebar "+(open?"mobileOpen":"")} aria-label="Navegação principal do SIGDEC">
    <header className="globalNavBrand" onClick={()=>setOpen(v=>!v)}>
-    <img src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão de Ubatuba"/>
+    <span className="globalBrandMark"><img src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão de Ubatuba"/></span>
     <div className="globalNavBrandText"><strong>SIGDEC</strong><small>Defesa Civil · Ubatuba</small></div>
     <button type="button" onClick={e=>{e.stopPropagation();setOpen(false)}} aria-label="Recolher menu">×</button>
    </header>
