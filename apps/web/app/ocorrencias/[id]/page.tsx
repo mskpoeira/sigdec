@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import {useRealtimeRefresh} from "../../lib/use-realtime-refresh";
 
 const API_URL = process.env.NEXT_PUBLIC_SIGDEC_API_URL ?? "http://localhost:4000";
 
@@ -254,13 +255,8 @@ export default function OcorrenciaDetalhePage() {
     }
   }, [handleAuth, id]);
 
-  useEffect(() => {
-    void load();
-    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&!editing&&!busy)void load()},5000);
-    const onRealtime=()=>{if(!editing&&!busy)void load()};
-    window.addEventListener("sigdec:data-change",onRealtime);
-    return()=>{window.clearInterval(timer);window.removeEventListener("sigdec:data-change",onRealtime)};
-  }, [load,editing,busy]);
+  useEffect(() => { void load(); }, [load]);
+  useRealtimeRefresh(()=>{if(!editing&&!busy)return load()},true,250);
 
   function beginEdit(){
     if(!detail)return;
