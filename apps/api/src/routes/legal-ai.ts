@@ -3,7 +3,7 @@ import {createHash} from "node:crypto";
 import {z} from "zod";
 import {authFrom,requireAuth,requirePermission} from "../auth.js";
 import {db} from "../db.js";
-import {generateContextualAnswer,generateTechnicalDraft} from "../lib/ai-assist.js";
+import {generateContextualAnswer,generateTechnicalDraft,getAiProviderStatus} from "../lib/ai-assist.js";
 
 const uuid=z.string().uuid();
 const normInput=z.object({
@@ -32,6 +32,24 @@ function contextualModule(route:string){
  if(route.startsWith("/administracao"))return "Administração";
  if(route.startsWith("/resiliencia")||route.startsWith("/voluntarios")||route.startsWith("/capacitacao"))return "Resiliência e Preparação";
  return "SIGDEC";
+}
+
+function safeIncidentContext(incident:any){
+ return {
+  protocol:incident.protocol??null,
+  status:incident.status??null,
+  priority:incident.priority??null,
+  riskToLife:incident.riskToLife??null,
+  typeCode:incident.typeCode??null,
+  typeName:incident.typeName??null,
+  groupName:incident.groupName??null,
+  summary:incident.summary??null,
+  neighborhood:incident.neighborhood??null,
+  latitude:incident.latitude??null,
+  longitude:incident.longitude??null,
+  createdAt:incident.createdAt??null,
+  updatedAt:incident.updatedAt??null
+ };
 }
 
 function organizationId(request:FastifyRequest){
@@ -81,6 +99,17 @@ async function geoPixelContext(org:string,incident:any){
 }
 
 export async function legalAiRoutes(app:FastifyInstance){
+ app.get("/api/v1/ai/providers",{preHandler:requireAuth},async()=>({
+  enabled:String(process.env.SIGDEC_AI_ENABLED??"true").toLowerCase()!=="false",
+  providers:getAiProviderStatus().map(x=>({...x,configured:x.configured})),
+  policy:{
+   mode:"READ_ONLY",
+   humanDecisionRequired:true,
+   systemMutationAllowed:false,
+   credentialDiscoveryAllowed:false,
+   thirdPartyAccessAllowed:false
+  }
+ }));
  app.post("/api/v1/ai/contextual-assist",{preHandler:requireAuth},async(request,reply)=>{
   const auth=authFrom(request),org=organizationId(request),parsed=contextualAssistInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",message:"Pergunta ou rota inválida."});
@@ -100,7 +129,7 @@ export async function legalAiRoutes(app:FastifyInstance){
   await Promise.all(tasks);
   const incidentMatch=route.match(/^\/ocorrencias\/([0-9a-f-]{36})(?:\/|$)/i),incidentId=incidentMatch?.[1];
   if(incidentId&&can("incidents.read","incidents.manage")&&uuid.safeParse(incidentId).success){
-   const incident=await loadIncident(org,incidentId);if(incident)context.ocorrenciaAtual=incident;
+   const incident=await loadIncident(org,incidentId);if(incident)context.ocorrenciaAtual=safeIncidentContext(incident);
   }
   if(route.startsWith("/administracao")&&can("system.master","admin.features","integrations.manage")){
    const [features,integrations]=await Promise.all([
