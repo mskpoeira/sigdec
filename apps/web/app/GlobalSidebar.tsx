@@ -38,7 +38,7 @@ export default function GlobalSidebar(){
     <div className="globalNavBrandText"><strong>SIGDEC</strong><small>Defesa Civil · Ubatuba</small></div>
     <button type="button" onClick={e=>{e.stopPropagation();setOpen(false)}} aria-label="Recolher menu">×</button>
    </header>
-   <nav className="globalNavScroll" onClick={()=>{if(window.matchMedia("(max-width: 1024px)").matches&&!open)setOpen(true)}}>
+   <nav className="globalNavScroll" onClickCapture={e=>{if(window.matchMedia("(max-width: 1024px)").matches&&!open){e.preventDefault();e.stopPropagation();setOpen(true)}}}>
     {sigdecDirectNav.filter(visible).map(directItem)}
     {sigdecNavGroups.map(group=>{
      const items=group.items.filter(visible);if(!items.length)return null;
@@ -48,7 +48,7 @@ export default function GlobalSidebar(){
      </Link>
     })}
    </nav>
-   {user&&<footer className="globalNavUser" onClick={()=>{if(window.matchMedia("(max-width: 1024px)").matches&&!open)setOpen(true)}}>
+   {user&&<footer className="globalNavUser" onClickCapture={e=>{if(window.matchMedia("(max-width: 1024px)").matches&&!open){e.preventDefault();e.stopPropagation();setOpen(true)}}}>
     <div className="globalNavAvatar" aria-hidden="true">●</div>
     <div className="globalNavUserText"><strong>{user.matricula}</strong><span>{user.warName?.trim()||user.displayName.split(" ")[0]}</span></div>
     <button type="button" onClick={e=>{e.stopPropagation();void logout()}} title="Sair" aria-label="Sair">↪</button>
