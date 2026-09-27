@@ -138,7 +138,7 @@ export default function NovaOcorrenciaPage() {
         setSaving(false);
         return;
       }
-      setMessage(`Ocorrência ${body.incident.protocol} registrada${attachments.length?` com ${attachments.length} anexo(s)`:""} com sucesso.`);
+      setMessage(`Ocorrência ${body.incident.protocol} registrada${attachments.length?` com ${attachments.length} anexo(s)`:""} com sucesso. ${body.incident.georeferenced?"Localização georreferenciada e disponível no mapa.":"Endereço salvo; localização no mapa ficou pendente de coordenadas."}`);
       setAttachments([]);
       window.setTimeout(()=>{window.location.href=`/ocorrencias/${body.incident.id}`},450);
     } catch {
