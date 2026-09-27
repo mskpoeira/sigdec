@@ -6,6 +6,11 @@ import {authFrom,normalizeMatricula,requireAuth,requirePermission} from "../auth
 import {db} from "../db.js";
 
 const uuid=z.string().uuid();
+const personContactInput=z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("PHONE"),value:z.string().regex(/^\d{10,11}$/),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)}),
+ z.object({kind:z.literal("EMAIL"),value:z.string().trim().email().max(254),label:z.string().trim().max(80).optional(),isWhatsapp:z.literal(false).default(false),isPrimary:z.boolean().default(false)})
+]);
+
 const userInput=z.object({
  matricula:z.string().trim().min(1).max(32),displayName:z.string().trim().min(3).max(160),
  warName:z.string().trim().max(80).default(""),
@@ -13,7 +18,7 @@ const userInput=z.object({
  phone:z.string().trim().max(40).default(""),jobTitle:z.string().trim().max(120).default(""),
  department:z.string().trim().max(120).default(""),roleIds:z.array(uuid).min(1).max(8),
  active:z.boolean().default(true),
- contacts:z.array(z.object({kind:z.enum(["PHONE","EMAIL"]),value:z.string().trim().min(3).max(254),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]).optional(),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)})).max(20).default([])
+ contacts:z.array(personContactInput).max(20).default([])
 });
 const roleInput=z.object({code:z.string().trim().regex(/^[A-Z][A-Z0-9_]{2,59}$/),
  name:z.string().trim().min(3).max(120),permissionCodes:z.array(z.string()).max(100)});
