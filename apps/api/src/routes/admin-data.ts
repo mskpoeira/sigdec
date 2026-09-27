@@ -163,7 +163,7 @@ async function computeAuditRoot(organizationId:string,maxAuditId?:string|null){
 }
 
 export async function adminDataRoutes(app:FastifyInstance){
- app.post("/api/v1/admin/items",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/items",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const parsed=itemInput.safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data;
@@ -175,7 +175,7 @@ export async function adminDataRoutes(app:FastifyInstance){
    return reply.code(201).send(result.rows[0]);
   }catch(error:any){if(error.code==="23505")return reply.code(409).send({error:"ITEM_CODE_EXISTS"});throw error}
  });
- app.get("/api/v1/admin/items",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/items",{preHandler:requirePermission("settings.manage")},async request=>{
   const result=await db.query(`SELECT i.id,i.code,i.name,i.unit,i.category,i.active,i.created_at AS "createdAt",
    COALESCE(sum(CASE WHEN m.movement_type IN ('IN','ADJUST_IN') THEN m.quantity ELSE -m.quantity END),0)::float8 AS balance,
    count(m.id)::int AS "movementCount"
@@ -183,7 +183,7 @@ export async function adminDataRoutes(app:FastifyInstance){
    WHERE i.organization_id=$1 GROUP BY i.id ORDER BY i.name LIMIT 500`,[org(request)]);
   return {items:result.rows};
  });
- app.put("/api/v1/admin/items/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/items/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=itemInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const v=parsed.data,organizationId=org(request);
@@ -198,21 +198,21 @@ export async function adminDataRoutes(app:FastifyInstance){
    await audit(request,"ADMIN_ITEM_UPDATED",id,before.rows[0],result.rows[0]);return result.rows[0];
   }catch(error:any){if(error.code==="23505")return reply.code(409).send({error:"ITEM_CODE_EXISTS"});throw error}
  });
- app.delete("/api/v1/admin/items/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/items/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const result=await db.query("UPDATE humanitarian_items SET active=false WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,org(request)]);
   if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   await audit(request,"ADMIN_ITEM_DEACTIVATED",id,{active:true},result.rows[0]);return {ok:true};
  });
 
- app.get("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("settings.manage")},async request=>{
   const result=await db.query(`SELECT id,code,name,employment_type AS "employmentType",
     source_reference AS "sourceReference",active,created_at AS "createdAt",updated_at AS "updatedAt"
     FROM operational_job_titles WHERE organization_id=$1 ORDER BY active DESC,name`,[org(request)]);
   return {items:result.rows};
  });
 
- app.post("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/resources/job-titles",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const parsed=jobTitleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,o=org(request);
   try{
@@ -226,7 +226,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"JOB_TITLE_CODE_EXISTS"});throw error}
  });
 
- app.put("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=jobTitleInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const o=org(request),before=await db.query("SELECT * FROM operational_job_titles WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -242,14 +242,14 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"JOB_TITLE_CODE_EXISTS"});throw error}
  });
 
- app.delete("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/resources/job-titles/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const result=await db.query("UPDATE operational_job_titles SET active=false,updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING id,code,name",[id,org(request)]);
   if(!result.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   await auditEntity(request,"ADMIN_JOB_TITLE_DEACTIVATED","operational_job_title",id,{active:true},result.rows[0]);return {ok:true};
  });
 
- app.get("/api/v1/admin/resources/teams",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/resources/teams",{preHandler:requirePermission("settings.manage")},async request=>{
   const result=await db.query(`SELECT t.id,t.code,t.name,t.status,t.active,t.created_at AS "createdAt",
     count(tm.user_id)::int AS "memberCount"
     FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id
@@ -257,7 +257,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return {items:result.rows};
  });
 
- app.post("/api/v1/admin/resources/teams",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/resources/teams",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const parsed=teamInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,o=org(request);
   try{
@@ -268,7 +268,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"TEAM_CODE_EXISTS"});throw error}
  });
 
- app.put("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=teamInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const o=org(request),before=await db.query("SELECT id,code,name,status,active FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -281,7 +281,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"TEAM_CODE_EXISTS"});throw error}
  });
 
- app.delete("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/resources/teams/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const o=org(request);
   const inUse=await db.query(`SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND current_team_id=$1 AND status NOT IN ('COMPLETED','CLOSED','CANCELLED')) AS used`,[id,o]);
@@ -291,7 +291,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   await auditEntity(request,"ADMIN_TEAM_DEACTIVATED","team",id,{active:true},result.rows[0]);return {ok:true};
  });
 
- app.get("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.get("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const o=org(request);
   const team=await db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);if(!team.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
@@ -302,7 +302,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return {items:result.rows};
  });
 
- app.post("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/resources/teams/:id/members",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=teamMemberInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const o=org(request),v=parsed.data;
@@ -317,7 +317,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return reply.code(201).send({ok:true});
  });
 
- app.delete("/api/v1/admin/resources/teams/:id/members/:userId",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/resources/teams/:id/members/:userId",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id,userId}=request.params as {id:string;userId:string};
   if(!uuid.safeParse(id).success||!uuid.safeParse(userId).success)return reply.code(400).send({error:"INVALID_ID"});
   const o=org(request),team=await db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -327,7 +327,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   await auditEntity(request,"ADMIN_TEAM_MEMBER_REMOVED","team_member",id+":"+userId,result.rows[0],null);return {ok:true};
  });
 
- app.get("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("settings.manage")},async request=>{
   const result=await db.query(`SELECT id,code,plate,description,vehicle_type AS "vehicleType",
     passenger_capacity AS "passengerCapacity",
     CASE WHEN passenger_capacity IS NULL THEN NULL ELSE passenger_capacity+1 END AS "totalOccupants",
@@ -336,7 +336,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return {items:result.rows};
  });
 
- app.post("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/resources/vehicles",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const parsed=vehicleInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,o=org(request);
   try{
@@ -351,7 +351,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
  });
 
- app.put("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=vehicleInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const o=org(request),before=await db.query("SELECT id,code,plate,description,vehicle_type,passenger_capacity,status,active,odometer_km FROM vehicles WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -369,7 +369,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"VEHICLE_CODE_EXISTS"});throw error}
  });
 
- app.delete("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/resources/vehicles/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const o=org(request);
   const inUse=await db.query(`SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND current_vehicle_id=$1 AND status NOT IN ('COMPLETED','CLOSED','CANCELLED')) AS used`,[id,o]);
@@ -379,7 +379,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   await auditEntity(request,"ADMIN_VEHICLE_DEACTIVATED","vehicle",id,{active:true},result.rows[0]);return {ok:true};
  });
 
- app.get("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("settings.manage")},async request=>{
   const o=org(request);
   const result=await db.query(`SELECT id,code,name,group_name AS "groupName",cobrade_code AS "cobradeCode",
     default_priority AS "defaultPriority",active,organization_id IS NULL AS "systemType"
@@ -388,7 +388,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   return {items:result.rows};
  });
 
- app.post("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.post("/api/v1/admin/resources/incident-types",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const parsed=incidentTypeInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:"INVALID_INPUT",details:parsed.error.flatten()});
   const v=parsed.data,o=org(request);
   try{
@@ -399,7 +399,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"INCIDENT_TYPE_CODE_EXISTS"});throw error}
  });
 
- app.put("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.put("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string},parsed=incidentTypeInput.safeParse(request.body);
   if(!uuid.safeParse(id).success||!parsed.success)return reply.code(400).send({error:"INVALID_INPUT"});
   const o=org(request),before=await db.query("SELECT id,code,name,group_name,cobrade_code,default_priority,active FROM incident_types WHERE id=$1 AND organization_id=$2",[id,o]);
@@ -413,7 +413,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   }catch(error:any){if(error?.code==="23505")return reply.code(409).send({error:"INCIDENT_TYPE_CODE_EXISTS"});throw error}
  });
 
- app.delete("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.delete("/api/v1/admin/resources/incident-types/:id",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const {id}=request.params as {id:string};if(!uuid.safeParse(id).success)return reply.code(400).send({error:"INVALID_ID"});
   const o=org(request);
   const inUse=await db.query("SELECT EXISTS(SELECT 1 FROM incidents WHERE organization_id=$2 AND incident_type_id=$1) AS used",[id,o]);
@@ -423,7 +423,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   await auditEntity(request,"ADMIN_INCIDENT_TYPE_DEACTIVATED","incident_type",id,{active:true},result.rows[0]);return {ok:true};
  });
 
- app.get("/api/v1/admin/presentation-readiness",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/presentation-readiness",{preHandler:requirePermission("settings.manage")},async request=>{
   const o=org(request);
   const [counts,migration,auditIntegrity]=await Promise.all([
    db.query(`SELECT
@@ -865,7 +865,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   };
  });
 
- app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("system.master")},async request=>{
+ app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("settings.manage")},async request=>{
   const o=org(request);
   const [overview,roles]=await Promise.all([
    db.query(`SELECT count(*)::int AS total,count(*) FILTER(WHERE active)::int AS active,
@@ -880,7 +880,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   ]);
   return {overview:overview.rows[0],roles:roles.rows};
  });
- app.get("/api/v1/admin/reports/users.csv",{preHandler:requirePermission("system.master")},async(request,reply)=>{
+ app.get("/api/v1/admin/reports/users.csv",{preHandler:requirePermission("settings.manage")},async(request,reply)=>{
   const result=await db.query(`SELECT u.matricula,u.display_name,u.email,u.department,u.active,
    u.must_change_password,u.last_login_at,COALESCE(string_agg(r.code,', ' ORDER BY r.code),'') AS roles
    FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id
