@@ -13,6 +13,10 @@ const certificationSchema=z.object({
  workloadHours:z.number().nonnegative().max(100000).optional(),validUntil:z.string().trim().max(40).optional(),
  certificateRef:z.string().trim().max(500).optional()
 });
+const volunteerContactSchema=z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("PHONE"),value:z.string().regex(/^\d{10,11}$/),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)}),
+ z.object({kind:z.literal("EMAIL"),value:z.string().trim().email().max(254),label:z.string().trim().max(80).optional(),isWhatsapp:z.literal(false).default(false),isPrimary:z.boolean().default(false)})
+]);
 const volunteerSchema=z.object({
  fullName:z.string().trim().min(3).max(200), phone:z.string().trim().max(50).optional(), email:z.string().email().optional(),
  availability:z.string().trim().max(300).optional(), shirtSize:z.string().trim().max(20).optional(),
@@ -28,7 +32,7 @@ const volunteerSchema=z.object({
  certifications:z.array(certificationSchema).max(100).default([]),
  history:z.array(z.record(z.string(),z.unknown())).max(200).default([]),
  notes:z.string().trim().max(3000).optional(),
- contacts:z.array(z.object({kind:z.enum(["PHONE","EMAIL"]),value:z.string().trim().min(3).max(254),label:z.string().trim().max(80).optional(),phoneType:z.enum(["MOBILE","LANDLINE"]).optional(),extension:z.string().regex(/^[0-9]{1,10}$/).optional(),isWhatsapp:z.boolean().default(false),isPrimary:z.boolean().default(false)})).max(20).default([])
+ contacts:z.array(volunteerContactSchema).max(20).default([])
 });
 const stationSchema=z.object({
  code:z.string().trim().min(1).max(80), name:z.string().trim().min(2).max(200),
