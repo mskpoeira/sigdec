@@ -6,18 +6,19 @@ import {useRealtimeRefresh} from "../lib/use-realtime-refresh";
 import {FormEvent,useCallback,useEffect,useRef,useState} from "react";
 import {PhoneListEditor,type ContactPhone} from "../lib/phone-list-editor";
 import {EmailListEditor,type ContactEmail} from "../lib/email-list-editor";
+import {RecordActions} from "../lib/record-actions";
 const API=process.env.NEXT_PUBLIC_SIGDEC_API_URL??"http://localhost:4000";
 
 type Volunteer={id:string;fullName:string;phone?:string|null;email?:string|null;status:string;availability?:string|null;
  shirtSize?:string|null;pantsSize?:string|null;jacketSize?:string|null;raincoatSize?:string|null;vestSize?:string|null;gloveSize?:string|null;shoeSize?:string|null;
  profession?:string|null;education?:string|null;institution?:string|null;cnhCategory?:string|null;languages?:string[];radioamateurCallSign?:string|null;
- operationRegion?:string|null;skills?:string[];validatedSkills?:string[];notes?:string|null;contacts?:(ContactPhone|ContactEmail)[]};
+ operationRegion?:string|null;skills?:string[];validatedSkills?:string[];notes?:string|null;contacts?:(ContactPhone|ContactEmail)[];archivedAt?:string|null};
 
 export default function Page(){
  const [items,setItems]=useState<Volunteer[]>([]),[status,setStatus]=useState("Carregando..."),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
- const [editId,setEditId]=useState<string|null>(null),[phones,setPhones]=useState<ContactPhone[]>([]),[emails,setEmails]=useState<ContactEmail[]>([]);
+ const [editId,setEditId]=useState<string|null>(null),[phones,setPhones]=useState<ContactPhone[]>([]),[emails,setEmails]=useState<ContactEmail[]>([]),[includeArchived,setIncludeArchived]=useState(false);
  const formRef=useRef<HTMLFormElement>(null);
- const load=useCallback(()=>fetch(`${API}/api/v1/volunteers`,{credentials:"include"}).then(async r=>{if(r.status===401){location.href="/login";return null}if(!r.ok)throw new Error();return r.json()}).then(b=>{if(b){setItems(b.items??[]);setStatus("")}}).catch(()=>setStatus("Não foi possível carregar os dados.")),[]);
+ const load=useCallback(()=>fetch(`${API}/api/v1/volunteers?includeArchived=${includeArchived}`,{credentials:"include"}).then(async r=>{if(r.status===401){location.href="/login";return null}if(!r.ok)throw new Error();return r.json()}).then(b=>{if(b){setItems(b.items??[]);setStatus("")}}).catch(()=>setStatus("Não foi possível carregar os dados.")),[includeArchived]);
  useEffect(()=>{void load()},[load]);
  useRealtimeRefresh(()=>{if(!busy)return load()},true);
  async function submit(e:FormEvent<HTMLFormElement>){
@@ -33,6 +34,15 @@ export default function Page(){
   const r=await fetch(`${API}/api/v1/volunteers${editId?`/${editId}`:""}`,{method:editId?"PUT":"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
   setBusy(false);if(!r.ok){const b=await r.json().catch(()=>({}));setMessage(b.message??"Não foi possível cadastrar o voluntário.");return}
   e.currentTarget.reset();setPhones([]);setEmails([]);setEditId(null);setMessage(editId?"Voluntário atualizado.":"Voluntário cadastrado.");await load();
+ }
+ async function lifecycle(id:string,action:"archive"|"restore"|"delete"){
+  setBusy(true);setMessage("");
+  const url=action==="delete"?`${API}/api/v1/volunteers/${id}`:`${API}/api/v1/volunteers/${id}/${action}`;
+  const r=await fetch(url,{method:action==="delete"?"DELETE":"POST",credentials:"include"});
+  setBusy(false);if(!r.ok){setMessage("Não foi possível concluir a ação.");return}
+  if(editId===id){formRef.current?.reset();setEditId(null);setPhones([]);setEmails([])}
+  setMessage(action==="archive"?"Voluntário arquivado.":action==="restore"?"Voluntário restaurado.":"Voluntário excluído.");
+  await load();
  }
  function beginEdit(x:Volunteer){setEditId(x.id);const cs=x.contacts?.length?x.contacts:[...(x.phone?[{kind:"PHONE" as const,value:x.phone,phoneType:(x.phone.replace(/\\D/g,"").length===11?"MOBILE":"LANDLINE") as "MOBILE"|"LANDLINE",isWhatsapp:false,isPrimary:true}]:[]),...(x.email?[{kind:"EMAIL" as const,value:x.email,isWhatsapp:false as const,isPrimary:true}]:[])];setPhones(cs.filter((v):v is ContactPhone=>v.kind==="PHONE"));setEmails(cs.filter((v):v is ContactEmail=>v.kind==="EMAIL"));const form=formRef.current;if(!form)return;const values:Record<string,string>={fullName:x.fullName,profession:x.profession??"",education:x.education??"",institution:x.institution??"",cnhCategory:x.cnhCategory??"",languages:(x.languages??[]).join(", "),radioamateurCallSign:x.radioamateurCallSign??"",operationRegion:x.operationRegion??"",availability:x.availability??"",shirtSize:x.shirtSize??"",pantsSize:x.pantsSize??"",jacketSize:x.jacketSize??"",raincoatSize:x.raincoatSize??"",vestSize:x.vestSize??"",gloveSize:x.gloveSize??"",shoeSize:x.shoeSize??"",skills:(x.skills??[]).join(", "),notes:x.notes??""};for(const[name,value]of Object.entries(values)){const el=form.elements.namedItem(name) as HTMLInputElement|HTMLTextAreaElement|null;if(el)el.value=value}window.scrollTo({top:0,behavior:"smooth"})}
  return <main className="shell moduleShell">
@@ -50,12 +60,12 @@ export default function Page(){
     <label>Observações<textarea name="notes"/></label>
     {message&&<p className="formMessage">{message}</p>}<button className="primaryButton" disabled={busy}>{busy?"Salvando...":editId?"Salvar alterações":"Cadastrar voluntário"}</button>{editId&&<button type="button" className="secondaryButton" onClick={()=>{formRef.current?.reset();setEditId(null);setPhones([]);setEmails([])}}>Cancelar edição</button>}
    </form>
-   <section className="dataGrid">{status&&<div className="infoCard">{status}</div>}{items.length===0&&!status?<div className="infoCard">Nenhum registro cadastrado.</div>:items.map(x=><article className="card" key={x.id}>
+   <section className="dataGrid"><label className="inlineCheck"><input type="checkbox" checked={includeArchived} onChange={e=>setIncludeArchived(e.target.checked)}/> Mostrar arquivados</label>{status&&<div className="infoCard">{status}</div>}{items.length===0&&!status?<div className="infoCard">Nenhum registro cadastrado.</div>:items.map(x=><article className="card" key={x.id}>
     <h2>{x.fullName}</h2><p><strong>{ptBR(x.status)}</strong>{x.profession?` · ${x.profession}`:""}{x.operationRegion?` · ${x.operationRegion}`:""}</p>
     <p>{x.phone??"Sem telefone"}{x.email?` · ${x.email}`:""}</p>
     <p><strong>Vestuário:</strong> camiseta {x.shirtSize??"—"} · calça {x.pantsSize??"—"} · jaqueta {x.jacketSize??"—"} · capa {x.raincoatSize??"—"} · colete {x.vestSize??"—"} · luva {x.gloveSize??"—"} · calçado {x.shoeSize??"—"}</p>
     <p><strong>Competências:</strong> {(x.skills??[]).join(", ")||"não informadas"}{(x.validatedSkills??[]).length?` · validadas: ${x.validatedSkills?.join(", ")}`:""}</p>
-    {x.languages?.length?<p>Idiomas: {x.languages.join(", ")}</p>:null}{x.radioamateurCallSign?<p>Radioamador: {x.radioamateurCallSign}</p>:null}<button type="button" className="secondaryButton" onClick={()=>beginEdit(x)}>Editar</button>
+    {x.languages?.length?<p>Idiomas: {x.languages.join(", ")}</p>:null}{x.radioamateurCallSign?<p>Radioamador: {x.radioamateurCallSign}</p>:null}{x.archivedAt?<p><strong>🗄️ Arquivado</strong></p>:null}<RecordActions archived={Boolean(x.archivedAt)} busy={busy} onEdit={()=>beginEdit(x)} onArchive={()=>lifecycle(x.id,"archive")} onRestore={()=>lifecycle(x.id,"restore")} onDelete={()=>lifecycle(x.id,"delete")}/>
    </article>)}</section>
   </section>
  </main>;
