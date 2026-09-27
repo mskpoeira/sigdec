@@ -15,7 +15,8 @@ const nav: Array<[string,string,Route,string?]> =[
 ["⚠","Ocorrências e Monitoramento","/ocorrencias","incidents"],
 ["♥","Assistência Humanitária","/assistencia","humanitarian"],
 ["▦","Planejamento e Contingência","/planejamento"],
-["▥","Operações / SCO","/gestao"],
+["▥","Centro de Gestão","/gestao"],
+["◎","SCO / Sala de Emergência","/sco"],
 ["◆","Resiliência","/resiliencia"],
 ["▤","Documentos","/documentos","documents"],
 ["⚙","Administração","/administracao"]
@@ -66,6 +67,7 @@ export default function PainelPage(){
   [String(summary?.upcomingTrainings??"—"),"Treinamentos Futuros","Programações ainda não iniciadas","purple"]
  ];
  const featureOn=(code?:string)=>!code||features[code]!==false;
+ const builtInNavPaths=new Set(nav.map(([, ,href])=>String(href)));
  const locatedMapIncidents=mapIncidents.filter(x=>x.latitude!==null&&x.longitude!==null);
  const situationMapUrl="https://www.openstreetmap.org/export/embed.html?bbox=-45.38%2C-23.68%2C-44.68%2C-23.18&layer=mapnik";
  const mapBounds={north:-23.18,south:-23.68,west:-45.38,east:-44.68};
@@ -74,7 +76,7 @@ export default function PainelPage(){
  return <main className="opsDashboard">
   <aside className={`opsSide ${mobileMenuOpen?"mobileOpen":""}`} onClickCapture={handleSideInteraction}>
    <div className="opsSideBrand"><img className="opsMunicipalCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão da Prefeitura Municipal de Ubatuba"/><div className="opsSideBrandText"><b>SIGDEC</b><small>Defesa Civil · Ubatuba</small></div><button type="button" className="opsMenuClose" aria-label="Recolher menu" onClick={()=>setMobileMenuOpen(false)}>×</button></div>
-   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master")||user.permissions.includes("audit.read"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{customNavigation.map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
+   <nav>{nav.filter(([, ,h,feature])=>featureOn(feature)&&(h!=="/administracao"||user.permissions.includes("admin.features")||user.permissions.includes("integrations.manage")||user.permissions.includes("system.master")||user.permissions.includes("audit.read"))).map(([i,n,h],x)=><Link key={n} href={h} className={x===0?"active":""} title={n}><span className="opsMenuIcon">{i}</span><span className="opsMenuLabel">{n}</span></Link>)}{customNavigation.filter(item=>!builtInNavPaths.has(item.path)).map(item=><Link key={item.id} href={item.path as Route} title={item.label}><span className="opsMenuIcon">›</span><span className="opsMenuLabel">{item.label}</span></Link>)}</nav>
    <div className="opsUser"><span className="opsUserIcon" aria-hidden="true">●</span><div className="opsUserText"><b>{user.matricula}</b><small className="opsWarName">{user.warName?.trim()||user.displayName.split(" ")[0]}</small><small className="opsUserRole">{user.roles?.[0]||"Usuário"}</small></div></div>
    <button className="opsLogout" onClick={logout} title="Sair"><span className="opsMenuIcon">↪</span><span className="opsMenuLabel">Sair</span></button>
   </aside>
