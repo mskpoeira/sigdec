@@ -109,7 +109,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    const result=await client.query<{id:string}>(`INSERT INTO users(organization_id,matricula,display_name,war_name,email,phone,job_title,department,
     password_hash,active,must_change_password,mfa_required)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11) RETURNING id`,[
-    org,matricula,v.displayName,v.warName||null,primaryEmail?.value??v.email||null,primaryPhone?.value??v.phone||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
+    org,matricula,v.displayName,v.warName||null,(primaryEmail?.value??v.email)||null,(primaryPhone?.value??v.phone)||null,v.jobTitle||null,v.department||null,hash,v.active,mfa]);
    const id=result.rows[0]!.id;
    await client.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,unnest($2::uuid[])",[id,roles.unique]);
    if(v.contacts.length)await syncContacts(client,org,id,v.contacts);
