@@ -221,7 +221,7 @@ export async function fieldRoutes(app: FastifyInstance) {
       [orgId]
     );
 
-    const [riskAreas,warningAssets,criticalInfrastructures,shelters,evacuationRoutes,activeWarnings] = await Promise.all([
+    const [riskAreas,warningAssets,criticalInfrastructures,shelters,evacuationRoutes,activeWarnings,geopixelFeatures] = await Promise.all([
       db.query(`SELECT id,code,name,neighborhood,hazard_type AS "hazardType",risk_level AS "riskLevel",status,
                        exposed_buildings AS "exposedBuildings",exposed_people AS "exposedPeople",
                        latitude,longitude,boundary_geojson AS "boundaryGeojson"
@@ -262,7 +262,15 @@ export async function fieldRoutes(app: FastifyInstance) {
                   LEFT JOIN territorial_risk_areas a ON a.id=w.risk_area_id
                  WHERE w.organization_id=$1 AND w.status='PUBLISHED'
                  ORDER BY CASE w.severity WHEN 'EMERGENCY' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END,w.published_at DESC
-                 LIMIT 100`,[orgId])
+                 LIMIT 100`,[orgId]),
+      db.query(`SELECT f.id,f.remote_id AS "remoteId",l.code AS "layerCode",l.title AS "layerTitle",l.category,
+                       f.properties,ST_AsGeoJSON(f.geometry)::jsonb AS geometry
+                  FROM geopixel_features f
+                  JOIN geopixel_layers l ON l.id=f.layer_id
+                  JOIN geopixel_connections c ON c.id=l.connection_id
+                 WHERE f.organization_id=$1 AND f.active=true AND f.geometry IS NOT NULL AND l.active=true AND c.active=true
+                 ORDER BY l.category,l.title,f.last_seen_at DESC
+                 LIMIT 1500`,[orgId])
     ]);
 
     return {
@@ -276,7 +284,8 @@ export async function fieldRoutes(app: FastifyInstance) {
       criticalInfrastructures: criticalInfrastructures.rows,
       shelters: shelters.rows,
       evacuationRoutes: evacuationRoutes.rows,
-      activeWarnings: activeWarnings.rows
+      activeWarnings: activeWarnings.rows,
+      geopixelFeatures: geopixelFeatures.rows
     };
   });
 
