@@ -28,6 +28,7 @@ const navigationPaths=["/painel","/apresentacao","/ocorrencias","/ocorrencias/no
 const navigationInput=z.object({label:z.string().trim().min(2).max(80),path:z.enum(navigationPaths),
  permissionCode:z.string().max(120).nullable().default(null),sortOrder:z.number().int().min(0).max(1000).default(100),active:z.boolean().default(true)});
 const organization=(value:string|null)=>{if(!value)throw Object.assign(new Error("Organização ausente."),{statusCode:409});return value};
+const isMasterRequest=(request:FastifyRequest)=>{const auth=authFrom(request);return auth.roles.includes("MASTER")||auth.permissions.includes("system.master")};
 const temporaryPassword=()=>randomBytes(20).toString("base64url")+"!Aa9";
 const audit=async(client:any,request:FastifyRequest,action:string,entityType:string,entityId:string,before:unknown,after:unknown)=>{
  await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,ip,user_agent,before_data,after_data)
@@ -48,8 +49,8 @@ async function syncContacts(client:any,org:string,ownerId:string,contacts:Array<
 
 export async function adminUserRoutes(app:FastifyInstance){
  app.get("/api/v1/admin/users",{preHandler:requirePermission("users.manage")},async request=>{
-  const org=organization(authFrom(request).organizationId);
-  const users=await db.query(`${userSelect} WHERE u.organization_id=$1 GROUP BY u.id ORDER BY u.display_name,u.id LIMIT 500`,[org]);
+  const org=organization(authFrom(request).organizationId),showMaster=isMasterRequest(request);
+  const users=await db.query(`${userSelect} WHERE u.organization_id=$1 AND ($2::boolean OR u.matricula<>$3) GROUP BY u.id ORDER BY u.display_name,u.id LIMIT 500`,[org,showMaster,PROTECTED_MASTER_MATRICULA]);
   const ids=users.rows.map((x:any)=>x.id);const contacts=ids.length?await db.query(`SELECT id,owner_id AS "ownerId",kind,value,label,phone_type AS "phoneType",extension,is_whatsapp AS "isWhatsapp",is_primary AS "isPrimary" FROM contact_points WHERE organization_id=$1 AND owner_type='USER' AND owner_id=ANY($2::uuid[]) AND active ORDER BY is_primary DESC,created_at`,[org,ids]):{rows:[]};
   const by=new Map<string,any[]>();for(const x of contacts.rows){const a=by.get(x.ownerId)??[];a.push(x);by.set(x.ownerId,a)}
   return {items:users.rows.map((x:any)=>({...x,contacts:by.get(x.id)??[]}))};
@@ -138,6 +139,7 @@ export async function adminUserRoutes(app:FastifyInstance){
    const before=await client.query("SELECT id,matricula,display_name,active FROM users WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
    if(!before.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
    const protectedMaster=before.rows[0].matricula===PROTECTED_MASTER_MATRICULA;
+   if(protectedMaster&&authFrom(request).userId!==id){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
    if(protectedMaster&&(matricula!==PROTECTED_MASTER_MATRICULA||!v.active)){await client.query("ROLLBACK");return reply.code(409).send({error:"PROTECTED_MASTER"});}
    const roles=await validateRoles(client,v.roleIds);
    if(!roles){await client.query("ROLLBACK");return reply.code(400).send({error:"INVALID_ROLES"});}
@@ -182,6 +184,9 @@ export async function adminUserRoutes(app:FastifyInstance){
   const org=organization(authFrom(request).organizationId),password=temporaryPassword();
   const hash=await argon2.hash(password,{type:argon2.argon2id});
   const client=await db.connect();try{await client.query("BEGIN");
+   const target=await client.query("SELECT matricula FROM users WHERE id=$1 AND organization_id=$2 FOR UPDATE",[id,org]);
+   if(!target.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
+   if(target.rows[0].matricula===PROTECTED_MASTER_MATRICULA&&authFrom(request).userId!==id){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
    const result=await client.query("UPDATE users SET password_hash=$3,must_change_password=true,failed_login_attempts=0,locked_until=NULL,updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING id",[id,org,hash]);
    if(!result.rows[0]){await client.query("ROLLBACK");return reply.code(404).send({error:"NOT_FOUND"});}
    await client.query("UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",[id]);
