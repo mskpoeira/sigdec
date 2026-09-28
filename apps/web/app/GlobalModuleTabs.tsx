@@ -20,6 +20,12 @@ function tabTone(item:SigdecNavItem):TabTone{
  if(href==="/administracao/base-legal")return "gray";
  if(href==="/administracao/apresentacao")return "navy";
  if(href.startsWith("/administracao"))return "navy";
+ if(href.startsWith("/ocorrencias/nova"))return "red";
+ if(href.startsWith("/ocorrencias"))return "orange";
+ if(href.startsWith("/campo"))return "blue";
+ if(href.startsWith("/vistorias"))return "green";
+ if(href.startsWith("/assistencia/animais"))return "green";
+ if(href.startsWith("/assistencia"))return "purple";
  if(href.startsWith("/planejamento"))return "purple";
  if(href.startsWith("/gestao-riscos"))return "green";
  if(href.startsWith("/monitoramento"))return "blue";

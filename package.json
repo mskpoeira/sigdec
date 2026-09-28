@@ -1,6 +1,6 @@
 {
   "name": "sigdec",
-  "version": "1.79.3",
+  "version": "1.79.4",
   "private": true,
   "description": "Sistema Integrado de Gestão da Defesa Civil",
   "packageManager": "pnpm@10.15.1",

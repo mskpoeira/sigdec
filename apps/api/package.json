@@ -1,6 +1,6 @@
 {
   "name": "@sigdec/api",
-  "version": "1.79.3",
+  "version": "1.79.4",
   "private": true,
   "type": "module",
   "scripts": {
