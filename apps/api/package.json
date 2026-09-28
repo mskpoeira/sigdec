@@ -11,7 +11,8 @@
     "db:migrate": "tsx src/scripts/migrate.ts",
     "bootstrap:master": "tsx src/scripts/bootstrap-master.ts",
     "test": "tsx --test src/lib/*.test.ts",
-    "test:integration": "tsx --test src/integration/*.test.ts"
+    "test:integration": "tsx --test src/integration/*.test.ts",
+    "bootstrap:defesa-civil-users": "tsx src/scripts/bootstrap-defesa-civil-users.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
