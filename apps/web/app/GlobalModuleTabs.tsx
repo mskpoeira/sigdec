@@ -45,8 +45,9 @@ export default function GlobalModuleTabs(){
  if(!group)return null;
  const canAdmin=!!user&&["admin.features","integrations.manage","system.master","audit.read","users.manage"].some(p=>user.permissions.includes(p));
  const visible=(item:SigdecNavItem)=>(!item.feature||features[item.feature]!==false)&&(!item.admin||canAdmin);
- const sidebarHrefs=new Set<string>([...sigdecDirectNav.map(item=>item.href),...sigdecNavGroups.map(item=>item.href)]);
- const items=group.items.filter(item=>visible(item)&&!sidebarHrefs.has(item.href));
+ const directSidebarHrefs=new Set<string>(sigdecDirectNav.map(item=>item.href));
+ // Itens-raiz das chaves mestres também devem aparecer como abas internas.
+ const items=group.items.filter(item=>visible(item)&&!directSidebarHrefs.has(item.href));
  if(!items.length)return null;
  const activeHref=items.filter(item=>navPathMatches(pathname,item.href)).sort((a,b)=>b.href.length-a.href.length)[0]?.href;
  return <nav className="globalModuleTabs" aria-label={"Abas de "+group.label}>
