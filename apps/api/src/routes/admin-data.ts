@@ -8,6 +8,8 @@ import {realtimeBridgeStatus} from "../lib/realtime.js";
 import {currentAuditEd25519KeyId,signAuditCheckpoint,verifyAuditCheckpoint} from "../lib/sidec-asymmetric.js";
 
 const uuid=z.string().uuid();
+const PROTECTED_MASTER_MATRICULA="915789";
+const isMasterRequest=(request:FastifyRequest)=>{const auth=authFrom(request);return auth.roles.includes("MASTER")||auth.permissions.includes("system.master")};
 const itemInput=z.object({code:z.string().trim().min(1).max(60),name:z.string().trim().min(2).max(200),
  unit:z.string().trim().min(1).max(30),category:z.string().trim().min(1).max(50),active:z.boolean()});
 const teamInput=z.object({
@@ -298,7 +300,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   const result=await db.query(`SELECT u.id AS "userId",u.matricula,u.display_name AS "displayName",u.job_title AS "jobTitle",
     tm.role_name AS "roleName",tm.joined_at AS "joinedAt"
     FROM team_members tm JOIN users u ON u.id=tm.user_id
-    WHERE tm.team_id=$1 AND u.organization_id=$2 ORDER BY u.display_name`,[id,o]);
+    WHERE tm.team_id=$1 AND u.organization_id=$2 AND ($3::boolean OR u.matricula<>$4) ORDER BY u.display_name`,[id,o,isMasterRequest(request),PROTECTED_MASTER_MATRICULA]);
   return {items:result.rows};
  });
 
@@ -308,7 +310,7 @@ export async function adminDataRoutes(app:FastifyInstance){
   const o=org(request),v=parsed.data;
   const [team,user]=await Promise.all([
    db.query("SELECT id FROM teams WHERE id=$1 AND organization_id=$2",[id,o]),
-   db.query("SELECT id,matricula,display_name FROM users WHERE id=$1 AND organization_id=$2 AND active=true",[v.userId,o])
+   db.query("SELECT id,matricula,display_name FROM users WHERE id=$1 AND organization_id=$2 AND active=true AND ($3::boolean OR matricula<>$4)",[v.userId,o,isMasterRequest(request),PROTECTED_MASTER_MATRICULA])
   ]);
   if(!team.rows[0]||!user.rows[0])return reply.code(404).send({error:"NOT_FOUND"});
   await db.query(`INSERT INTO team_members(team_id,user_id,role_name) VALUES($1,$2,$3)
@@ -866,17 +868,19 @@ export async function adminDataRoutes(app:FastifyInstance){
  });
 
  app.get("/api/v1/admin/reports/users",{preHandler:requirePermission("settings.manage")},async request=>{
-  const o=org(request);
+  const o=org(request),showMaster=isMasterRequest(request);
   const [overview,roles]=await Promise.all([
    db.query(`SELECT count(*)::int AS total,count(*) FILTER(WHERE active)::int AS active,
     count(*) FILTER(WHERE NOT active)::int AS inactive,
     count(*) FILTER(WHERE must_change_password)::int AS "pendingPasswordChange",
     count(*) FILTER(WHERE mfa_enabled)::int AS "mfaEnabled"
-    FROM users WHERE organization_id=$1`,[o]),
+    FROM users WHERE organization_id=$1 AND ($2::boolean OR matricula<>$3)`,[o,showMaster,PROTECTED_MASTER_MATRICULA]),
    db.query(`SELECT r.code,r.name,count(u.id)::int AS total,
     count(u.id) FILTER(WHERE u.active)::int AS active
     FROM roles r LEFT JOIN user_roles ur ON ur.role_id=r.id
-    LEFT JOIN users u ON u.id=ur.user_id AND u.organization_id=$1 GROUP BY r.id ORDER BY r.name`,[o])
+    LEFT JOIN users u ON u.id=ur.user_id AND u.organization_id=$1 AND ($2::boolean OR u.matricula<>$3)
+    WHERE ($2::boolean OR r.code<>'MASTER')
+    GROUP BY r.id ORDER BY r.name`,[o,showMaster,PROTECTED_MASTER_MATRICULA])
   ]);
   return {overview:overview.rows[0],roles:roles.rows};
  });
@@ -884,7 +888,8 @@ export async function adminDataRoutes(app:FastifyInstance){
   const result=await db.query(`SELECT u.matricula,u.display_name,u.email,u.department,u.active,
    u.must_change_password,u.last_login_at,COALESCE(string_agg(r.code,', ' ORDER BY r.code),'') AS roles
    FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id
-   WHERE u.organization_id=$1 GROUP BY u.id ORDER BY u.display_name LIMIT 5000`,[org(request)]);
+   WHERE u.organization_id=$1 AND ($2::boolean OR u.matricula<>$3)
+   GROUP BY u.id ORDER BY u.display_name LIMIT 5000`,[org(request),isMasterRequest(request),PROTECTED_MASTER_MATRICULA]);
   const header=["Matrícula","Nome","E-mail","Setor","Ativo","Troca de senha","Último acesso","Perfis"];
   const rows=result.rows.map(x=>[x.matricula,x.display_name,x.email,x.department,x.active?"Sim":"Não",
    x.must_change_password?"Sim":"Não",x.last_login_at?new Date(x.last_login_at).toISOString():"",x.roles]);

@@ -19,8 +19,8 @@ export async function experienceRoutes(app:FastifyInstance){
  app.get("/api/v1/search",{preHandler:requireAuth},async(request,reply)=>{
   const parsed=searchQuery.safeParse(request.query);
   if(!parsed.success)return reply.code(400).send({error:"INVALID_QUERY",details:parsed.error.flatten()});
-  const auth=authFrom(request),org=organization(request),access=await loadAccess(auth.userId),permissions=new Set(access.permissions);
-  const can=(...codes:string[])=>permissions.has("system.master")||codes.some(code=>permissions.has(code));
+  const auth=authFrom(request),org=organization(request),access=await loadAccess(auth.userId),permissions=new Set(access.permissions),isMaster=permissions.has("system.master");
+  const can=(...codes:string[])=>isMaster||codes.some(code=>permissions.has(code));
   const q=parsed.data.q,pattern="%"+q+"%",starts=q+"%",perGroup=Math.max(3,Math.min(8,Math.ceil(parsed.data.limit/7)));
   const tasks:Array<Promise<SearchResult[]>>=[];
 
@@ -110,9 +110,9 @@ export async function experienceRoutes(app:FastifyInstance){
 
   if(can("system.master","users.manage")){
    tasks.push(db.query(`SELECT id,matricula,display_name AS "displayName",job_title AS "jobTitle",department,active
-    FROM users WHERE organization_id=$1 AND (
+    FROM users WHERE organization_id=$1 AND ($4::boolean OR matricula<>$5) AND (
       matricula ILIKE $2 OR display_name ILIKE $2 OR COALESCE(job_title,'') ILIKE $2 OR COALESCE(department,'') ILIKE $2
-    ) ORDER BY active DESC,display_name LIMIT $3`,[org,pattern,perGroup])
+    ) ORDER BY active DESC,display_name LIMIT $3`,[org,pattern,perGroup,isMaster,"915789"])
     .then(r=>r.rows.map(x=>({kind:"USER",title:x.matricula+" · "+x.displayName,subtitle:[x.jobTitle,x.department].filter(Boolean).join(" · "),meta:x.active?"ATIVO":"INATIVO",href:"/administracao/usuarios",status:x.active?"ACTIVE":"INACTIVE",icon:"♙"}))));
   }
 
