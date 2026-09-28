@@ -16,9 +16,7 @@ export const sigdecNavGroups:SigdecNavGroup[]=[
  ]},
  {icon:"▥",label:"Centro de Gestão",href:"/gestao",items:[
   {icon:"▥",label:"Centro de Gestão",href:"/gestao"},
-  {icon:"◎",label:"SCO / Sala de Emergência",href:"/sco",feature:"sco"}
- ]},
- {icon:"▦",label:"PLANCON e Gestão do Risco",href:"/planejamento",items:[
+  {icon:"◎",label:"SCO / Sala de Emergência",href:"/sco",feature:"sco"},
   {icon:"▦",label:"Planejamento e Contingência",href:"/planejamento"},
   {icon:"▶",label:"Operação PLANCON",href:"/planejamento/operacao"},
   {icon:"△",label:"Gestão do Risco",href:"/gestao-riscos",feature:"risks"},
