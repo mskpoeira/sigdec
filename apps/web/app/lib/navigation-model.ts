@@ -3,12 +3,20 @@ export type SigdecNavGroup={icon:string;label:string;href:string;items:SigdecNav
 
 export const sigdecDirectNav:SigdecNavItem[]=[
  {icon:"⌂",label:"Início",href:"/painel"},
- {icon:"⚠",label:"Ocorrências",href:"/ocorrencias",feature:"incidents"},
- {icon:"♥",label:"Assistência Humanitária",href:"/assistencia",feature:"humanitarian"},
  {icon:"☂",label:"Voluntariado",href:"/voluntarios",feature:"volunteers"}
 ];
 
 export const sigdecNavGroups:SigdecNavGroup[]=[
+ {icon:"⚠",label:"Ocorrências",href:"/ocorrencias",items:[
+  {icon:"⚠",label:"Ocorrências",href:"/ocorrencias",feature:"incidents"},
+  {icon:"＋",label:"Nova ocorrência",href:"/ocorrencias/nova",feature:"incidents"},
+  {icon:"⌖",label:"Mapa operacional",href:"/campo",feature:"incidents"},
+  {icon:"▤",label:"Vistorias",href:"/vistorias",feature:"incidents"}
+ ]},
+ {icon:"♥",label:"Assistência Humanitária",href:"/assistencia",items:[
+  {icon:"♥",label:"Assistência Humanitária",href:"/assistencia",feature:"humanitarian"},
+  {icon:"🐾",label:"Animais em desastres",href:"/assistencia/animais",feature:"humanitarian"}
+ ]},
  {icon:"✦",label:"Inteligência SIGDEC",href:"/inteligencia",items:[
   {icon:"✦",label:"Inteligência e IA",href:"/inteligencia"},
   {icon:"◇",label:"Central de IA",href:"/inteligencia/provedores"},
