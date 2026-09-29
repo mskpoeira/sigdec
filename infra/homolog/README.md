@@ -1,29 +1,30 @@
 # Homologação no servidor
 
-O servidor já possui um proxy Caddy de borda compartilhado. Para não disputar as portas 80/443, o SIGDEC publica apenas seus containers internos e conecta Web/API à rede Docker externa `sgr_default`.
+O ambiente de homologação do SIGDEC é autocontido.
 
-## Topologia
+## Isolamento
 
-Internet → Caddy existente → `sigdec-web-homolog` / `sigdec-api-homolog` → PostgreSQL/PostGIS, Redis e MinIO.
+O SIGDEC possui:
+- rede Docker própria `sigdec-homolog`;
+- PostgreSQL/PostGIS próprio;
+- Redis próprio;
+- MinIO próprio;
+- API própria;
+- Web própria;
+- Caddy próprio;
+- volumes próprios.
 
-PostgreSQL, Redis e MinIO permanecem exclusivos do SIGDEC e não são expostos à internet.
+Nenhum contêiner, rede, volume, proxy ou workflow de outro projeto é necessário.
 
 ## Primeira instalação
 
-1. Clonar o repositório em `/opt/sigdec`.
-2. Criar `infra/homolog/.env` com permissão 600.
-3. Confirmar a existência da rede Docker `sgr_default`.
+1. Clonar este repositório em diretório exclusivo.
+2. Criar `infra/homolog/.env` a partir de `.env.example`.
+3. Preencher os segredos.
 4. Executar `infra/homolog/deploy.sh`.
-5. Incorporar `infra/homolog/Caddyfile.fragment` ao proxy de borda e recarregar o Caddy.
 
-O deploy executa build, PostgreSQL/PostGIS, migrações idempotentes, bootstrap do Master e sobe Web/API.
-
-## Master
-
-A matrícula `915.789` é normalizada para `915789`. A senha inicial deve existir somente no servidor/entrega segura e nunca no Git.
+Por padrão, o proxy exclusivo do SIGDEC escuta apenas em interfaces locais configuráveis por `SIGDEC_HTTP_BIND` e `SIGDEC_HTTPS_BIND`. A exposição pública deve usar endpoint dedicado ao SIGDEC.
 
 ## Atualizações
 
-`git pull --ff-only` e depois `infra/homolog/deploy.sh`.
-
-As migrações já aplicadas ficam registradas em `schema_migrations`.
+Atualize apenas este repositório e execute novamente `infra/homolog/deploy.sh`.
