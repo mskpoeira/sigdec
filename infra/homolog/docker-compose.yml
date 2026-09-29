@@ -154,7 +154,6 @@ services:
       MIGRATIONS_DIR: /app/db/migrations
     networks:
       - sigdec
-      - edge
 
   web:
     build:
@@ -167,15 +166,32 @@ services:
     depends_on: [api]
     networks:
       - sigdec
-      - edge
+
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    container_name: sigdec-caddy-homolog
+    restart: unless-stopped
+    ports:
+      - "${SIGDEC_HTTP_BIND:-127.0.0.1:28080}:80"
+      - "${SIGDEC_HTTPS_BIND:-127.0.0.1:28443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [sigdec]
+    depends_on:
+      - api
+      - web
 
 networks:
   sigdec:
-  edge:
-    external: true
-    name: sgr_default
+    name: sigdec-homolog
+    driver: bridge
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  caddy_data:
+  caddy_config:
