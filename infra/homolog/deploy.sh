@@ -27,12 +27,6 @@ for key in "${required[@]}"; do
   fi
 done
 
-if ! docker network inspect sgr_default >/dev/null 2>&1; then
-  echo "ERRO: rede Docker externa sgr_default não encontrada."
-  echo "O proxy de borda compartilhado deve estar ativo antes do SIGDEC."
-  exit 1
-fi
-
 echo "[1/7] Build dos containers"
 docker compose --env-file .env build
 
@@ -52,9 +46,11 @@ docker compose --env-file .env run --rm api node apps/api/dist/scripts/bootstrap
 echo "[6/7] Provisionamento idempotente do efetivo da Defesa Civil"
 docker compose --env-file .env run --rm api node apps/api/dist/scripts/bootstrap-defesa-civil-users.js
 
-echo "[7/7] Aplicação"
-docker compose --env-file .env up -d api web
+echo "[7/7] Aplicação e proxy exclusivo"
+docker compose --env-file .env up -d api web caddy
 
 docker compose --env-file .env ps
 echo
-echo "SIGDEC homologação preparado para: https://$SIGDEC_DOMAIN"
+echo "SIGDEC homologação iniciado em runtime isolado."
+echo "HTTP local: ${SIGDEC_HTTP_BIND:-127.0.0.1:28080}"
+echo "HTTPS local: ${SIGDEC_HTTPS_BIND:-127.0.0.1:28443}"
