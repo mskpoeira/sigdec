@@ -64,5 +64,5 @@ docker compose --env-file .env up -d api web caddy
 docker compose --env-file .env ps
 echo
 echo "SIGDEC homologação iniciado em runtime isolado."
-echo "HTTP local: ${SIGDEC_HTTP_BIND:-127.0.0.1:28080}"
-echo "HTTPS local: ${SIGDEC_HTTPS_BIND:-127.0.0.1:28443}"
+echo "HTTP local: 127.0.0.1:${SIGDEC_HTTP_PORT:-28080}"
+echo "HTTPS local: 127.0.0.1:${SIGDEC_HTTPS_PORT:-28443}"
