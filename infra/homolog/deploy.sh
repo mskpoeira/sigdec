@@ -33,7 +33,19 @@ docker compose --env-file .env build
 echo "[2/7] Banco e dependências"
 docker compose --env-file .env up -d postgres redis minio
 
-echo "[3/7] Backup e restauração de teste"
+echo "[3/7] Aguardar PostgreSQL e executar backup/restauração"
+for i in $(seq 1 60); do
+  STATUS="$(docker inspect -f '{{.State.Health.Status}}' sigdec-postgres-homolog 2>/dev/null || true)"
+  if [[ "$STATUS" == "healthy" ]]; then
+    break
+  fi
+  if [[ "$i" -eq 60 ]]; then
+    echo "ERRO: PostgreSQL não ficou saudável."
+    docker logs --tail 120 sigdec-postgres-homolog || true
+    exit 1
+  fi
+  sleep 2
+done
 chmod +x backup-restore-drill.sh
 ./backup-restore-drill.sh
 
