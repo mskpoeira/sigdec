@@ -173,8 +173,8 @@ services:
     container_name: sigdec-caddy-homolog
     restart: unless-stopped
     ports:
-      - "${SIGDEC_HTTP_BIND:-127.0.0.1:28080}:80"
-      - "${SIGDEC_HTTPS_BIND:-127.0.0.1:28443}:443"
+      - "127.0.0.1:${SIGDEC_HTTP_PORT:-28080}:80"
+      - "127.0.0.1:${SIGDEC_HTTPS_PORT:-28443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
