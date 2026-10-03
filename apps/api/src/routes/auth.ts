@@ -53,6 +53,11 @@ const mfaCodeSchema=z.object({
  code:z.string().trim().min(6).max(40)
 });
 
+function currentMfaMode(){
+ const value=String(process.env.MFA_MODE??"TRUSTED_DEVICE").trim().toUpperCase();
+ return value==="DISABLED"?"DISABLED":value==="REQUIRED"?"REQUIRED":"TRUSTED_DEVICE";
+}
+
 async function audit(params: {
   userId?: string | null;
   action: string;
@@ -470,10 +475,12 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     const access = await loadAccess(user.id);
+    const mfaMode=currentMfaMode();
+    const mfaDisabled=mfaMode==="DISABLED";
     const strategicLevel=Math.max(1,Math.min(100,Number(process.env.MFA_STRATEGIC_ROLE_LEVEL??80)));
-    const strategic=await db.query(`SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
-      WHERE ur.user_id=$1 AND r.level>=$2 LIMIT 1`,[user.id,strategicLevel]);
-    const mfaRequired=user.mfa_required||user.mfa_enabled||strategic.rowCount===1;
+    const strategicRequired=mfaDisabled?false:Boolean((await db.query(`SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+      WHERE ur.user_id=$1 AND r.level>=$2 LIMIT 1`,[user.id,strategicLevel])).rowCount);
+    const mfaRequired=!mfaDisabled&&(mfaMode==="REQUIRED"||user.mfa_required||user.mfa_enabled||strategicRequired);
     if(mfaRequired){
       if(!user.mfa_required)await db.query("UPDATE users SET mfa_required=true,updated_at=now() WHERE id=$1",[user.id]);
 
@@ -527,6 +534,8 @@ export async function authRoutes(app: FastifyInstance) {
       });
     }
 
+    if(mfaDisabled)clearTrustedMfaCookie(reply);
+
     const session = await createSession({
       userId: user.id,
       organizationId: user.organization_id,
@@ -544,7 +553,7 @@ export async function authRoutes(app: FastifyInstance) {
       entityId: user.id,
       ip: request.ip,
       userAgent: request.headers["user-agent"],
-      metadata: { sessionId: session.sessionId, mfa:false }
+      metadata: { sessionId: session.sessionId, mfa:false, mfaMode }
     });
 
     return {
@@ -559,8 +568,8 @@ export async function authRoutes(app: FastifyInstance) {
         roles: access.roles,
         permissions: access.permissions,
         mustChangePassword: user.must_change_password,
-        mfaRequired: user.mfa_required,
-        mfaEnabled: user.mfa_enabled
+        mfaRequired: mfaDisabled ? false : user.mfa_required,
+        mfaEnabled: mfaDisabled ? false : user.mfa_enabled
       }
     };
   });
