@@ -31,13 +31,18 @@ for(const [file,content] of texts){
 if(obsolete.length)fail("Referência obsoleta ao logo remoto da Defesa Civil.",obsolete);
 
 const required=[
- ["app/login/page.tsx","data:image/webp;base64,"],
- ["app/painel/page.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/login/page.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/painel/page.tsx","/branding/sigdec-header-ubatuba.webp"],
+ ["app/painel/page.tsx","opsHeroOfficialBanner"],
  ["app/GlobalExperience.tsx","moduleHeaderInstitutionalMarks"],
  ["app/GlobalExperience.tsx","Brasão da Prefeitura Municipal de Ubatuba"],
+ ["app/GlobalExperience.tsx","/branding/defesa-civil-ubatuba.webp"],
  ["app/login/page.tsx","institutionalMark"],
- ["app/painel/page.tsx","opsBrandMark"],
- ["app/GlobalSidebar.tsx","globalBrandMark"]
+ ["app/GlobalSidebar.tsx","globalBrandMark"],
+ ["app/GlobalSidebar.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/apresentacao/page.tsx","presentationMarkOfficial"],
+ ["app/apresentacao/page.tsx","/branding/defesa-civil-ubatuba.webp"],
+ ["app/layout.tsx","/branding/defesa-civil-ubatuba.webp"]
 ];
 for(const [rel,needle] of required){
  const file=path.join(root,rel),content=fs.readFileSync(file,"utf8");
@@ -64,4 +69,4 @@ for(const selector of [".institutionalMark",".opsBrandMark",".globalBrandMark","
  if(!css.includes(selector))fail("Design system incompleto: "+selector);
 }
 
-console.log("Auditoria visual: brasão da PMU e logo da Defesa Civil garantidos nos cabeçalhos; identidade institucional, abas e foco acessível validados.");
+console.log("Auditoria visual: cabeçalho SIGDEC, brasão da PMU e brasão oficial da Defesa Civil validados em painel, módulos, login, menu e apresentação.");
