@@ -166,7 +166,7 @@ export default function LoginForm() {
       {message && <p className="errorMessage" role="alert">{message}</p>}
       <button type="submit" disabled={loading}>{loading ? "Autenticando..." : "Entrar"}</button>
       <a className="loginLink" href="/esqueci-senha">Esqueci minha senha</a>
-      <small>O acesso e as ações realizadas no sistema são registrados para fins de segurança e auditoria. O 2FA é solicitado em navegador/dispositivo novo ou quando a confiança anterior expira ou é revogada.</small>
+      <small>O acesso e as ações realizadas no sistema são registrados para fins de segurança e auditoria.</small>
     </form>
   );
 }
