@@ -9,6 +9,7 @@ export const metadata = {
   description: "Sistema Integrado de Gestão da Defesa Civil de Ubatuba",
   manifest: "/manifest.webmanifest",
   applicationName: "SIGDEC Ubatuba",
+  icons: { icon: "/branding/defesa-civil-ubatuba.webp" },
   appleWebApp: { capable: true, title: "SIGDEC Ubatuba", statusBarStyle: "default" as const }
 };
 

@@ -73,11 +73,8 @@ export default function PainelPage(){
  const pinPosition=(incident:MapIncident)=>{const p=worldPoint(Number(incident.latitude),Number(incident.longitude));const left=Math.max(1.5,Math.min(98.5,((p.x-mapNorthWest.x)/mapPixelWidth)*100));const top=Math.max(1.5,Math.min(98.5,((p.y-mapNorthWest.y)/mapPixelHeight)*100));return {left:`${left}%`,top:`${top}%`}};
  return <main className="opsDashboard">
   <section className="opsMain">
-   <header className="opsHero">
-    <div className="opsMunicipal"><span className="opsBrandMark"><img className="officialCrest" src="https://www.ubatuba.sp.gov.br/wp-content/uploads/sites/2/2015/02/brasao.png" alt="Brasão oficial do Município de Ubatuba"/></span><div><strong>PREFEITURA DE<br/>UBATUBA</strong><small>CAPITAL DO SURF<br/>NATUREZA O ANO TODO</small></div></div>
-    <div className="opsTitle"><b>SIGDEC</b><strong>Sistema Integrado de Gestão<br/>de Defesa Civil</strong><span>UBATUBA - SP</span></div>
-    <div className="opsScenery"><span>Ubatuba</span><small>Nossa gente. Nossa natureza.<br/>Mais segura sempre.</small></div>
-    <div className="dcBadge"><span className="opsBrandMark"><img className="dcOfficialLogo" src="/branding/defesa-civil-ubatuba.webp" alt="Logo da Defesa Civil de Ubatuba"/></span></div>
+   <header className="opsHero opsHeroOfficial" aria-label="Identidade institucional do SIGDEC">
+    <img className="opsHeroOfficialBanner" src="/branding/sigdec-header-ubatuba.webp" alt="SIGDEC — Sistema Integrado de Gestão de Defesa Civil da Prefeitura de Ubatuba"/>
    </header>
    <div className="opsContent">
     <div className="opsWelcome"><div><h1>Bem-vindo ao SIGDEC, {user.warName?.trim()||user.displayName.split(" ")[0]}!</h1><p>Aqui a informação se transforma em proteção para a nossa comunidade.</p></div><div className="opsDate">{formatDateBR(new Date())}<br/><small>Ubatuba - SP</small></div></div>

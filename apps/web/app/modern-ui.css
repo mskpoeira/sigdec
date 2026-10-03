@@ -1621,3 +1621,66 @@ tbody tr:hover{background:#f7fafc!important}
   padding-right:128px!important;
  }
 }
+
+
+/* v1.80.0 — cabeçalho institucional oficial e brasão da Defesa Civil */
+.opsHero.opsHeroOfficial{
+  display:block!important;
+  width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  padding:0!important;
+  margin:0!important;
+  grid-template-columns:none!important;
+  gap:0!important;
+  overflow:hidden!important;
+  background:#082f55!important;
+  border-bottom:4px solid var(--ui-orange)!important;
+}
+.opsHeroOfficialBanner{
+  display:block!important;
+  width:100%!important;
+  height:auto!important;
+  max-width:none!important;
+  object-fit:contain!important;
+  object-position:center!important;
+}
+.presentationMarkOfficial{
+  display:grid!important;
+  place-items:center!important;
+  overflow:hidden!important;
+  padding:4px!important;
+  background:#fff!important;
+}
+.presentationMarkOfficial img{
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:contain!important;
+}
+.globalBrandMark img[src="/branding/defesa-civil-ubatuba.webp"]{
+  object-fit:contain!important;
+  padding:3px!important;
+  background:transparent!important;
+}
+.moduleHeaderMark img[src="/branding/defesa-civil-ubatuba.webp"],
+.loginInstitutionalMarks img[src="/branding/defesa-civil-ubatuba.webp"],
+.dcOfficialLogo{
+  object-fit:contain!important;
+  background:transparent!important;
+}
+@media(max-width:900px){
+  .opsHeroOfficialBanner{
+    min-height:132px!important;
+    object-fit:cover!important;
+    object-position:center!important;
+  }
+}
+@media(max-width:640px){
+  .opsHeroOfficialBanner{
+    min-height:118px!important;
+    object-fit:cover!important;
+    object-position:center!important;
+  }
+}

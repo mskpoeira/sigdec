@@ -58,7 +58,7 @@ export default function InstitutionalPresentationPage(){
 
  return <main className="presentationMode">
   <header className="presentationTopbar">
-   <div className="presentationBrand"><span className="presentationMark">DC</span><div><strong>SIGDEC</strong><small>Sistema Integrado de Gestão de Defesa Civil</small></div></div>
+   <div className="presentationBrand"><span className="presentationMark presentationMarkOfficial"><img src="/branding/defesa-civil-ubatuba.webp" alt="Defesa Civil de Ubatuba"/></span><div><strong>SIGDEC</strong><small>Sistema Integrado de Gestão de Defesa Civil</small></div></div>
    <div className="presentationActions"><button type="button" onClick={()=>void fullscreen()}>⛶ Tela cheia</button><button type="button" onClick={()=>void load()}>↻ Atualizar dados</button><Link href="/painel">Sair da apresentação</Link></div>
   </header>
 
